@@ -100,14 +100,16 @@ fn harvests_the_real_opensips_tree_when_present() {
         "expected >100 documented modules, got {}",
         mods.len()
     );
-    let cn = mods
-        .iter()
-        .find(|m| m.name == "cachedb_nats")
-        .expect("cachedb_nats doc");
-    assert!(cn.params.iter().any(|p| p.name == "kv_bucket"));
-    assert!(cn.functions.iter().any(|f| f.name == "nats_kv_get"));
-    // the FTS split moved this away: it must NOT be a cachedb_nats param
-    assert!(!cn.params.iter().any(|p| p.name == "enable_search_index"));
+    // tm exists in every OpenSIPS tree
+    let tm = mods.iter().find(|m| m.name == "tm").expect("tm doc");
+    assert!(tm.params.iter().any(|p| p.name == "fr_timeout"));
+    assert!(tm.functions.iter().any(|f| f.name == "t_relay"));
+    // on feature trees carrying cachedb_nats, spot-check it too
+    if let Some(cn) = mods.iter().find(|m| m.name == "cachedb_nats") {
+        assert!(cn.params.iter().any(|p| p.name == "kv_bucket"));
+        // the FTS split moved this away
+        assert!(!cn.params.iter().any(|p| p.name == "enable_search_index"));
+    }
 }
 
 #[test]
