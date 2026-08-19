@@ -8,10 +8,14 @@ script language (`opensips.cfg`).
 | Feature | How |
 |---|---|
 | **Diagnostics** | Runs `opensips -C -f <file>` on open/save and maps its parse errors (file:line:col) to LSP diagnostics — full-fidelity, version-exact semantic validation by the real parser. |
-| **Completion** | Context-sensitive: module names after `loadmodule "` / `modparam("`, the module's parameters inside the second `modparam` argument, exported functions of *loaded* modules plus route names and core keywords in route bodies. |
+| **Completion** | Context-sensitive: module names after `loadmodule "` / `modparam("`, the module's parameters inside the second `modparam` argument, exported functions of *loaded* modules plus core functions/parameters, route names and keywords in route bodies, and pseudo-variables after `$`. |
 | **Hover** | Documentation for module functions, parameters, and modules, harvested from the OpenSIPS docs. |
 | **Go to definition** | `route(name)` references resolve to their `route[name]` block. |
 | **Document symbols** | All route blocks (`route`, `failure_route`, `onreply_route`, …). |
+
+Positions are exchanged in UTF-16 units (the LSP default) and are
+correct on multibyte lines; doc harvests are cached per source tree
+(see the admin guide's Caching section).
 
 The documentation catalog is harvested at startup from an OpenSIPS
 source tree. The 4.x markdown docs (`modules/*/README.md`) are the
@@ -36,6 +40,16 @@ Diagnostics fidelity note: `-C` loads the modules the cfg references,
 so it needs a tree/installation where those `.so` files exist (an
 unresolvable module is itself reported as a diagnostic, which is
 usually what you want).
+
+## Install
+
+Prebuilt server binaries (x86_64 and aarch64 Linux) and the VS Code
+`.vsix` ship with every [GitHub release](https://github.com/NormB/opensips-lsp/releases):
+
+```sh
+tar xzf opensips-lsp-<version>-x86_64-linux-gnu.tar.gz
+install -m755 opensips-lsp ~/.local/bin/
+```
 
 ## Build & test
 
