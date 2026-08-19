@@ -1,0 +1,146 @@
+================================================================================
+globals, loadmodule, modparam
+================================================================================
+
+log_level = 2
+loadmodule "tm.so"
+modparam("tm", "fr_timeout", 3)
+modparam("cachedb_nats", "nats_url", "nats://192.0.2.10:4222")
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (global_assignment
+    name: (identifier)
+    value: (number))
+  (loadmodule
+    (string))
+  (modparam
+    (string)
+    (string)
+    (number))
+  (modparam
+    (string)
+    (string)
+    (string)))
+
+================================================================================
+route with control flow and calls
+================================================================================
+
+route {
+    if (is_method("OPTIONS")) {
+        send_reply(200, "OK");
+        exit;
+    } else {
+        route(other);
+    }
+}
+
+route[other] {
+    xlog("hi");
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (route_definition
+    kind: (route_kind)
+    body: (block
+      (if_statement
+        (call_expression
+          function: (identifier)
+          (string))
+        (block
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              (number)
+              (string)))
+          (keyword_statement))
+        (block
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              (identifier)))))))
+  (route_definition
+    kind: (route_kind)
+    name: (identifier)
+    body: (block
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (string))))))
+
+================================================================================
+pseudo-variables, assignment, comments
+================================================================================
+
+# line comment
+/* block
+   comment */
+route {
+    $var(x) = 1;
+    $avp(dst) = $ru;
+    if ($si == "192.0.2.1" && $rp > 5060) {
+        drop;
+    }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (comment)
+  (block_comment)
+  (route_definition
+    kind: (route_kind)
+    body: (block
+      (assignment_statement
+        target: (pseudo_variable)
+        value: (number))
+      (assignment_statement
+        target: (pseudo_variable)
+        value: (pseudo_variable))
+      (if_statement
+        (binary_expression
+          (binary_expression
+            (pseudo_variable)
+            (string))
+          (binary_expression
+            (pseudo_variable)
+            (number)))
+        (block
+          (keyword_statement))))))
+
+================================================================================
+route kinds
+================================================================================
+
+failure_route[nat] { t_reply(500, "e"); }
+onreply_route[r] { exit; }
+startup_route { xlog("boot"); }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (route_definition
+    kind: (route_kind)
+    name: (identifier)
+    body: (block
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (number)
+          (string)))))
+  (route_definition
+    kind: (route_kind)
+    name: (identifier)
+    body: (block
+      (keyword_statement)))
+  (route_definition
+    kind: (route_kind)
+    body: (block
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (string))))))

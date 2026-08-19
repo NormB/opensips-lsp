@@ -44,6 +44,12 @@ cargo build --release        # server binary: target/release/opensips-lsp
 cargo test                   # full suite, includes a stdio LSP e2e test
 ```
 
+## Tree-sitter grammar
+
+`tree-sitter-opensips/` carries an error-tolerant grammar for editors
+that highlight and fold via tree-sitter (Neovim, Helix, Zed): corpus
+tests run in CI; `tree-sitter generate` builds the parser locally.
+
 ## Documentation
 
 - [`docs/ADMIN.md`](docs/ADMIN.md) — admin guide in the OpenSIPS

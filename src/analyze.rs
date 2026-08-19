@@ -195,3 +195,35 @@ pub fn word_at(line: &str, col: usize) -> Option<String> {
     }
     std::str::from_utf8(&b[s..e]).ok().map(|w| w.to_string())
 }
+
+/// Convert an LSP UTF-16 code-unit column to a byte offset in `line`,
+/// clamping past-end positions to the line length and positions
+/// inside a surrogate pair to the character's start.
+pub fn utf16_to_byte(line: &str, utf16_col: u32) -> usize {
+    let mut units = 0u32;
+    for (byte_idx, ch) in line.char_indices() {
+        if units >= utf16_col {
+            return byte_idx;
+        }
+        let w = ch.len_utf16() as u32;
+        if units + w > utf16_col {
+            // inside a surrogate pair: clamp to the char start
+            return byte_idx;
+        }
+        units += w;
+    }
+    line.len()
+}
+
+/// Convert a byte offset in `line` to an LSP UTF-16 code-unit column,
+/// clamping past-end offsets to the line's length in units.
+pub fn byte_to_utf16(line: &str, byte_col: usize) -> u32 {
+    let mut units = 0u32;
+    for (byte_idx, ch) in line.char_indices() {
+        if byte_idx >= byte_col {
+            return units;
+        }
+        units += ch.len_utf16() as u32;
+    }
+    units
+}

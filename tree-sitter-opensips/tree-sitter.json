@@ -1,0 +1,19 @@
+{
+  "grammars": [
+    {
+      "name": "opensips",
+      "camelcase": "Opensips",
+      "scope": "source.opensips",
+      "path": ".",
+      "file-types": ["cfg"],
+      "injection-regex": "opensips"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT OR Apache-2.0",
+    "description": "OpenSIPS routing script grammar",
+    "authors": [{"name": "Norm Brandinger"}],
+    "links": {"repository": "https://github.com/NormB/opensips-lsp"}
+  }
+}

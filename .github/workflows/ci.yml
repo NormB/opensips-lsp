@@ -41,10 +41,24 @@ jobs:
       - run: npm install
       - run: npm run compile
 
+  grammar:
+    name: tree-sitter grammar
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tree-sitter-opensips
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npx --yes tree-sitter-cli@0.26 generate
+      - run: npx --yes tree-sitter-cli@0.26 test
+
   # Aggregate gate for branch protection: one required context.
   ci-success:
     name: CI success
-    needs: [rust, client]
+    needs: [rust, client, grammar]
     runs-on: ubuntu-latest
     steps:
       - run: echo "all CI jobs green"

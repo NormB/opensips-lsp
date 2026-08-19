@@ -215,3 +215,54 @@ fn empty_opensips_bin_disables_checks_entirely() {
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn symbol_columns_are_utf16_on_multibyte_lines() {
+    let dir = std::env::temp_dir().join(format!("oslsp-utf16-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cfg = dir.join("u.cfg");
+    // the comment holds é (2 bytes / 1 unit) and 😀 (4 bytes / 2 units):
+    // byte col of `route` = 12, utf16 col = 9
+    let text = "/* \u{e9}\u{1F600} */ route[x] { exit; }\n";
+    std::fs::write(&cfg, text).unwrap();
+    let uri = format!("file://{}", cfg.display());
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env("OPENSIPS_LSP_BIN", "")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "init");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{
+        "textDocument":{"uri":uri}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "symbols");
+    let col = v["result"][0]["location"]["range"]["start"]["character"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(
+        col, 10,
+        "must be the UTF-16 column, not the byte column (13)"
+    );
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&dir);
+}

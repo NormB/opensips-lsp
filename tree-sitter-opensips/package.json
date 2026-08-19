@@ -1,0 +1,14 @@
+{
+  "name": "tree-sitter-opensips",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the OpenSIPS routing script language",
+  "license": "(MIT OR Apache-2.0)",
+  "main": "bindings/node",
+  "tree-sitter": [
+    {
+      "scope": "source.opensips",
+      "file-types": ["cfg"],
+      "injection-regex": "opensips"
+    }
+  ]
+}

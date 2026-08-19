@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  server:
+    name: Server (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and package
+        run: |
+          cargo build --release
+          tar -C target/release -czf \
+            opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-linux-gnu.tar.gz \
+            opensips-lsp
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.arch }}
+          path: opensips-lsp-*.tar.gz
+
+  vsix:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Package
+        working-directory: client
+        run: |
+          npm install --no-audit --no-fund
+          npm run compile
+          npx --yes @vscode/vsce package --out \
+            opensips-cfg-${GITHUB_REF_NAME}.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: client/*.vsix
+
+  publish:
+    name: GitHub release
+    needs: [server, vsix]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            opensips-lsp-*.tar.gz *.vsix
