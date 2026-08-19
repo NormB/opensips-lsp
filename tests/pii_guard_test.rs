@@ -71,10 +71,13 @@ fn walk(dir: &Path, hits: &mut Vec<String>) {
     for e in std::fs::read_dir(dir).unwrap().flatten() {
         let p = e.path();
         let name = e.file_name().to_string_lossy().into_owned();
+        // `.git` is a FILE in git worktrees (gitdir pointer to the
+        // real repository) — skip it in either form
+        if skip.contains(&name.as_str()) {
+            continue;
+        }
         if p.is_dir() {
-            if !skip.contains(&name.as_str()) {
-                walk(&p, hits);
-            }
+            walk(&p, hits);
         } else if let Ok(text) = std::fs::read_to_string(&p) {
             for h in find_pii(&text) {
                 hits.push(format!("{}: {}", p.display(), h));

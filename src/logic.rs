@@ -56,6 +56,22 @@ const CORE_KEYWORDS: &[&str] = &[
     "launch",
 ];
 
+macro_rules! static_regex {
+    ($name:ident, $pat:expr) => {
+        fn $name() -> &'static regex::Regex {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            RE.get_or_init(|| regex::Regex::new($pat).unwrap())
+        }
+    };
+}
+
+static_regex!(re_modparam_first_arg, r#"modparam\s*\(\s*"[^"]*$"#);
+static_regex!(re_loadmodule_arg, r#"loadmodule\s*"[^"]*$"#);
+static_regex!(
+    re_string_arg_ctx,
+    r#"(modparam\s*\(\s*"|loadmodule\s*")[^"]*$"#
+);
+
 /// Context-sensitive completion candidates for a cursor whose line
 /// starts with `line_prefix`: modparam values/modules, loadmodule
 /// targets, or (in code) loaded modules' functions, routes, keywords.
@@ -75,10 +91,7 @@ pub fn completions(catalog: &[ModuleDoc], doc: &str, line_prefix: &str) -> Vec<C
             .collect();
     }
     // modparam first argument → module names
-    if regex::Regex::new(r#"modparam\s*\(\s*"[^"]*$"#)
-        .unwrap()
-        .is_match(line_prefix)
-    {
+    if re_modparam_first_arg().is_match(line_prefix) {
         return catalog
             .iter()
             .map(|m| Comp {
@@ -90,10 +103,7 @@ pub fn completions(catalog: &[ModuleDoc], doc: &str, line_prefix: &str) -> Vec<C
             .collect();
     }
     // loadmodule argument → module .so names
-    if regex::Regex::new(r#"loadmodule\s*"[^"]*$"#)
-        .unwrap()
-        .is_match(line_prefix)
-    {
+    if re_loadmodule_arg().is_match(line_prefix) {
         return catalog
             .iter()
             .map(|m| Comp {
@@ -221,13 +231,22 @@ pub fn diag_matches_file(diag_file: &str, checked: &std::path::Path) -> bool {
     if diag_file.is_empty() {
         return true;
     }
-    if std::path::Path::new(diag_file) == checked {
+    let diag_path = std::path::Path::new(diag_file);
+    if diag_path == checked {
         return true;
     }
-    match (
-        std::path::Path::new(diag_file).file_name(),
-        checked.file_name(),
+    // when both paths exist, canonical identity DECIDES: symlinked
+    // spellings of one file match, and an included file that merely
+    // shares the basename does not cross-attach
+    if let (Ok(a), Ok(b)) = (
+        std::fs::canonicalize(diag_path),
+        std::fs::canonicalize(checked),
     ) {
+        return a == b;
+    }
+    // otherwise (path gone, e.g. parser echoing a deleted temp file):
+    // basename is the best remaining signal
+    match (diag_path.file_name(), checked.file_name()) {
         (Some(a), Some(b)) => a == b,
         _ => false,
     }
@@ -273,9 +292,7 @@ pub fn completions_with_core(
     // only plain code position gains core items (the string-argument
     // contexts returned early inside `completions`)
     let in_string_ctx = analyze::modparam_context(line_prefix).is_some()
-        || regex::Regex::new(r#"(modparam\s*\(\s*"|loadmodule\s*")[^"]*$"#)
-            .unwrap()
-            .is_match(line_prefix);
+        || re_string_arg_ctx().is_match(line_prefix);
     if !in_string_ctx {
         for f in &core.functions {
             out.push(Comp {
