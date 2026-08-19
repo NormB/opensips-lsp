@@ -221,13 +221,22 @@ pub fn diag_matches_file(diag_file: &str, checked: &std::path::Path) -> bool {
     if diag_file.is_empty() {
         return true;
     }
-    if std::path::Path::new(diag_file) == checked {
+    let diag_path = std::path::Path::new(diag_file);
+    if diag_path == checked {
         return true;
     }
-    match (
-        std::path::Path::new(diag_file).file_name(),
-        checked.file_name(),
+    // when both paths exist, canonical identity DECIDES: symlinked
+    // spellings of one file match, and an included file that merely
+    // shares the basename does not cross-attach
+    if let (Ok(a), Ok(b)) = (
+        std::fs::canonicalize(diag_path),
+        std::fs::canonicalize(checked),
     ) {
+        return a == b;
+    }
+    // otherwise (path gone, e.g. parser echoing a deleted temp file):
+    // basename is the best remaining signal
+    match (diag_path.file_name(), checked.file_name()) {
         (Some(a), Some(b)) => a == b,
         _ => false,
     }
