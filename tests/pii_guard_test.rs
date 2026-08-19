@@ -67,7 +67,7 @@ fn detector_allows_documentation_placeholders() {
 }
 
 fn walk(dir: &Path, hits: &mut Vec<String>) {
-    let skip = ["target", ".git", "graphify-out", "node_modules", "out"];
+    let skip = ["target", ".git", "node_modules", "out"];
     for e in std::fs::read_dir(dir).unwrap().flatten() {
         let p = e.path();
         let name = e.file_name().to_string_lossy().into_owned();
