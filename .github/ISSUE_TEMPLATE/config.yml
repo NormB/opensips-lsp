@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question / discussion
+    url: https://github.com/NormB/opensips-lsp/discussions
+    about: Ask questions or discuss ideas that are not yet concrete issues.
+  - name: Security vulnerability
+    url: https://github.com/NormB/opensips-lsp/security/advisories/new
+    about: Report privately via GitHub Security Advisories — never in a public issue.

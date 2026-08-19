@@ -1,0 +1,45 @@
+name: Bug report
+description: Report incorrect diagnostics, completion, hover, or a server crash.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. A minimal `opensips.cfg`
+        snippet that reproduces the problem is the single most helpful
+        thing you can attach (redact real IPs/domains/credentials first).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you observe, and what did you expect instead?
+      placeholder: "hover on t_relay shows nothing although tm is loaded"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal cfg / steps to reproduce
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: editor
+    attributes:
+      label: Editor + LSP client
+      placeholder: "VS Code 1.92 / Neovim 0.10 built-in / Helix 24.07"
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: opensips-lsp and OpenSIPS versions
+      placeholder: "opensips-lsp 0.1.0, opensips 3.6.0"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: LSP log output
+      description: The editor's LSP client log (server stderr / window/logMessage lines), if available.
+      render: text

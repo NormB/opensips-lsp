@@ -40,3 +40,11 @@ jobs:
           node-version: 20
       - run: npm install
       - run: npm run compile
+
+  # Aggregate gate for branch protection: one required context.
+  ci-success:
+    name: CI success
+    needs: [rust, client]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "all CI jobs green"
