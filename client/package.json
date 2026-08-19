@@ -1,6 +1,6 @@
 {
   "name": "opensips-lsp",
-  "displayName": "OpenSIPS Configuration",
+  "displayName": "OpenSIPS Language Support",
   "description": "Language support for opensips.cfg routing scripts (diagnostics via opensips -C, completion, hover, go-to-definition).",
   "version": "0.5.2",
   "publisher": "NormB",
