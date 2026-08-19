@@ -1,0 +1,44 @@
+version: 2
+updates:
+  # Rust dependencies (single crate at the repo root)
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      # Batch low-risk patch/minor bumps into a single PR to cut noise.
+      cargo-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "deps"
+
+  # The VS Code client (npm, client/)
+  - package-ecosystem: "npm"
+    directory: "/client"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    commit-message:
+      prefix: "deps(client)"
+
+  # GitHub Actions used by .github/workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    groups:
+      # One PR for every action bump rather than one per action.
+      github-actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "ci"
