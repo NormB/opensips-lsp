@@ -1,0 +1,102 @@
+{
+  "client/language-configuration.json": {
+    "mtime": 1787144330.384267,
+    "ast_hash": "c7cec0d0d5ff6b1c8c0efdb39401e7f5",
+    "semantic_hash": ""
+  },
+  "client/package.json": {
+    "mtime": 1787144330.3802671,
+    "ast_hash": "73e687ceff23fdbdbf42564df1e2df49",
+    "semantic_hash": ""
+  },
+  "client/src/extension.ts": {
+    "mtime": 1787144330.3802671,
+    "ast_hash": "0520ccfb8df2079f84662c8d02a10775",
+    "semantic_hash": ""
+  },
+  "client/syntaxes/opensips.tmLanguage.json": {
+    "mtime": 1787144330.384267,
+    "ast_hash": "09ef6e2be8bc72b57719cda01565e853",
+    "semantic_hash": ""
+  },
+  "client/tsconfig.json": {
+    "mtime": 1787144330.3802671,
+    "ast_hash": "52b2b6859f5d26c4e2cb82375a332b84",
+    "semantic_hash": ""
+  },
+  "src/analyze.rs": {
+    "mtime": 1787144364.571631,
+    "ast_hash": "69523343d331b0b98694ea917228761e",
+    "semantic_hash": ""
+  },
+  "src/catalog.rs": {
+    "mtime": 1787144675.2178757,
+    "ast_hash": "3221dc59dcd9b7011e29143b18679e07",
+    "semantic_hash": ""
+  },
+  "src/diag.rs": {
+    "mtime": 1787141657.4744546,
+    "ast_hash": "aaf5733e5ab5b0a466511ff5fa8beb57",
+    "semantic_hash": ""
+  },
+  "src/lib.rs": {
+    "mtime": 1787141843.1035852,
+    "ast_hash": "65fe2c14dcfd4e590df6a35925abc509",
+    "semantic_hash": ""
+  },
+  "src/logic.rs": {
+    "mtime": 1787144483.685419,
+    "ast_hash": "034b2a91de0a03ea7177641faa59b7c8",
+    "semantic_hash": ""
+  },
+  "src/main.rs": {
+    "mtime": 1787141843.0995853,
+    "ast_hash": "f2596b17a86e3af4e1ee2b191b6e95ac",
+    "semantic_hash": ""
+  },
+  "src/server.rs": {
+    "mtime": 1787144673.0019166,
+    "ast_hash": "957acca8b0a93daa70720e844c5af8c8",
+    "semantic_hash": ""
+  },
+  "tests/analyze_test.rs": {
+    "mtime": 1787144364.5916305,
+    "ast_hash": "002050b7da312efb334dddc352da6c93",
+    "semantic_hash": ""
+  },
+  "tests/catalog_test.rs": {
+    "mtime": 1787144364.5916305,
+    "ast_hash": "46c975ef8c22a744af1ea95b815b558a",
+    "semantic_hash": ""
+  },
+  "tests/config_test.rs": {
+    "mtime": 1787144675.2298756,
+    "ast_hash": "2c9eeb6af281a22ec36b5b19984a31fd",
+    "semantic_hash": ""
+  },
+  "tests/diag_test.rs": {
+    "mtime": 1787144364.5916305,
+    "ast_hash": "0f23af068902f7c9c82754ad0f2a6e8e",
+    "semantic_hash": ""
+  },
+  "tests/e2e_test.rs": {
+    "mtime": 1787144675.2338755,
+    "ast_hash": "9f44f697e721657e22575cd793d74938",
+    "semantic_hash": ""
+  },
+  "tests/logic_test.rs": {
+    "mtime": 1787144364.6436296,
+    "ast_hash": "3394249f8e66734a7c1d7a58f9a9df1b",
+    "semantic_hash": ""
+  },
+  "tests/readme_test.rs": {
+    "mtime": 1787141389.2675118,
+    "ast_hash": "ced4a3433c7053949eb7b202ca4458de",
+    "semantic_hash": ""
+  },
+  "README.md": {
+    "mtime": 1787144675.2418754,
+    "ast_hash": "c8673c0b4aad1f1b4242a49bb3ca154c",
+    "semantic_hash": ""
+  }
+}

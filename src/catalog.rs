@@ -121,17 +121,17 @@ pub fn harvest_tree(tree_root: &Path) -> Vec<ModuleDoc> {
         let name = e.file_name().to_string_lossy().into_owned();
         // docbook (feature-branch modules) first, 4.x markdown otherwise
         let admin = e.path().join("doc").join(format!("{name}_admin.xml"));
-        if let Ok(xml) = std::fs::read_to_string(&admin) {
-            if let Ok(m) = parse_admin_xml(&name, &xml) {
-                out.push(m);
-                continue;
-            }
+        if let Ok(xml) = std::fs::read_to_string(&admin)
+            && let Ok(m) = parse_admin_xml(&name, &xml)
+        {
+            out.push(m);
+            continue;
         }
         let readme = e.path().join("README.md");
-        if let Ok(md) = std::fs::read_to_string(&readme) {
-            if let Ok(m) = parse_readme_md(&name, &md) {
-                out.push(m);
-            }
+        if let Ok(md) = std::fs::read_to_string(&readme)
+            && let Ok(m) = parse_readme_md(&name, &md)
+        {
+            out.push(m);
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -165,8 +165,8 @@ pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, String> {
     // (is_param, name, detail, doc-lines, doc-finished)
     let mut cur: Option<(bool, String, String, Vec<String>, bool)> = None;
 
-    let mut flush = |cur: &mut Option<(bool, String, String, Vec<String>, bool)>,
-                     out: &mut ModuleDoc| {
+    let flush = |cur: &mut Option<(bool, String, String, Vec<String>, bool)>,
+                 out: &mut ModuleDoc| {
         if let Some((is_param, name, detail, lines, _)) = cur.take() {
             let doc = lines
                 .join(" ")

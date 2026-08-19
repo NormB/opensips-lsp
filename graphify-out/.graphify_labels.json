@@ -1,0 +1,17 @@
+{
+  "0": "Backend",
+  "1": "package.json",
+  "2": "ModuleDoc",
+  "3": "analyze.rs",
+  "4": "logic.rs",
+  "5": "properties",
+  "6": "parse_check_output",
+  "7": "e2e_test.rs",
+  "8": "compilerOptions",
+  "9": "opensips-lsp",
+  "10": "opensips.tmLanguage.json",
+  "11": "config_test.rs",
+  "12": "extension.ts",
+  "13": "main.rs",
+  "14": "lib.rs"
+}
