@@ -57,20 +57,28 @@ case ":$PATH:" in
        say "      echo 'export PATH=\"$PREFIX:\$PATH\"' >> ~/.profile" ;;
 esac
 
-if command -v code >/dev/null 2>&1; then
-    curl -fsSL -o "$TMP/ext.vsix" "$BASE/opensips-lsp-ext-$TAG.vsix" \
-        || fail "download failed: $BASE/opensips-lsp-ext-$TAG.vsix"
-    code --install-extension "$TMP/ext.vsix" --force >/dev/null
-    say "VS Code extension installed."
+INSTALLED_EDITOR=""
+for editor in code code-insiders codium; do
+    command -v "$editor" >/dev/null 2>&1 || continue
+    if [ ! -f "$TMP/ext.vsix" ]; then
+        curl -fsSL -o "$TMP/ext.vsix" "$BASE/opensips-lsp-ext-$TAG.vsix" \
+            || fail "download failed: $BASE/opensips-lsp-ext-$TAG.vsix"
+    fi
+    "$editor" --install-extension "$TMP/ext.vsix" --force >/dev/null
+    say "Extension installed into $editor."
+    INSTALLED_EDITOR=yes
+done
+if [ -n "$INSTALLED_EDITOR" ]; then
     say
-    say "Done. Open any opensips.cfg in VS Code and it just works."
+    say "Done. Open any opensips.cfg and it just works."
     say "Optional settings (File > Preferences > Settings, search 'opensips'):"
     say "  - Opensips Path: your opensips binary (enables live error checking)"
     say "  - Opensips Src:  an OpenSIPS source tree (richer completion docs)"
 else
     say
-    say "VS Code's 'code' command was not found, so the extension was"
-    say "not installed automatically. To add it by hand:"
+    say "No 'code'/'code-insiders'/'codium' command was found, so the"
+    say "extension was not installed automatically."
+    say "To add it by hand:"
     say "  1. Download: $BASE/opensips-lsp-ext-$TAG.vsix"
     say "  2. In VS Code press Ctrl+Shift+X, click the '...' menu"
     say "     (top-right of the Extensions panel), choose"
