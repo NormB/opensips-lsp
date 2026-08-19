@@ -86,6 +86,11 @@
           "default": 100,
           "description": "Maximum diagnostics published per file."
         },
+        "opensipsLsp.diagnostics.analyzer": {
+          "type": "boolean",
+          "default": true,
+          "description": "Fast analyzer warnings between saves (undefined route() targets, duplicate route definitions), independent of 'opensips -C'."
+        },
         "opensipsLsp.completion.snippets": {
           "type": "boolean",
           "default": true,

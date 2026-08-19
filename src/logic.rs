@@ -68,10 +68,6 @@ macro_rules! static_regex {
 static_regex!(re_modparam_first_arg, r#"modparam\s*\(\s*"[^"]*$"#);
 static_regex!(re_loadmodule_arg, r#"loadmodule\s*"[^"]*$"#);
 static_regex!(
-    re_string_arg_ctx,
-    r#"(modparam\s*\(\s*"|loadmodule\s*")[^"]*$"#
-);
-static_regex!(
     re_route_call_arg,
     r#"(?:^|[^A-Za-z0-9_])route\s*\(\s*"?[A-Za-z0-9_.:-]*$"#
 );
@@ -85,6 +81,36 @@ fn route_call_context(line_prefix: &str) -> bool {
 /// starts with `line_prefix`: modparam values/modules, loadmodule
 /// targets, or (in code) loaded modules' functions, routes, keywords.
 pub fn completions(catalog: &[ModuleDoc], doc: &str, line_prefix: &str) -> Vec<Comp> {
+    let files = [(std::path::PathBuf::new(), doc.to_string())];
+    complete_files(
+        catalog,
+        &crate::catalog::CoreDocs::default(),
+        &files,
+        line_prefix,
+    )
+}
+
+/// The completion engine over an include closure (`files`: the
+/// current document first, included files after).
+fn complete_files(
+    catalog: &[ModuleDoc],
+    core: &crate::catalog::CoreDocs,
+    files: &[(std::path::PathBuf, String)],
+    line_prefix: &str,
+) -> Vec<Comp> {
+    // "$" prefix → pseudo-variables, nothing else
+    if pvar_tail(line_prefix).is_some() {
+        return core
+            .pvars
+            .iter()
+            .map(|v| Comp {
+                label: v.name.clone(),
+                detail: v.detail.clone(),
+                doc: v.doc.clone(),
+                kind: CompKind::Keyword,
+            })
+            .collect();
+    }
     // modparam second argument → params of the named module
     if let Some(module) = analyze::modparam_context(line_prefix) {
         return catalog
@@ -124,25 +150,26 @@ pub fn completions(catalog: &[ModuleDoc], doc: &str, line_prefix: &str) -> Vec<C
             .collect();
     }
 
+    let route_comp = |name: String| Comp {
+        label: name,
+        detail: "route".into(),
+        doc: String::new(),
+        kind: CompKind::Route,
+    };
+    let route_names = || {
+        route_defs_multi(files)
+            .into_iter()
+            .filter(|(_, r)| !r.name.is_empty())
+            .map(|(_, r)| r.name)
+    };
     // route(<cursor>) → route names only
     if route_call_context(line_prefix) {
-        return analyze::route_defs(doc)
-            .into_iter()
-            .filter(|r| !r.name.is_empty())
-            .map(|r| Comp {
-                label: r.name,
-                detail: "route".into(),
-                doc: String::new(),
-                kind: CompKind::Route,
-            })
-            .collect();
+        return route_names().map(route_comp).collect();
     }
 
-    // plain code: functions of LOADED modules + route names + keywords
-    let loaded: Vec<String> = analyze::loaded_modules(doc)
-        .into_iter()
-        .map(|m| m.name)
-        .collect();
+    // plain code: functions of LOADED modules (anywhere in the
+    // closure) + route names + keywords + core items
+    let loaded = loaded_modules_multi(files);
     let mut out: Vec<Comp> = catalog
         .iter()
         .filter(|m| loaded.contains(&m.name))
@@ -154,16 +181,7 @@ pub fn completions(catalog: &[ModuleDoc], doc: &str, line_prefix: &str) -> Vec<C
             kind: CompKind::Function,
         })
         .collect();
-    for r in analyze::route_defs(doc) {
-        if !r.name.is_empty() {
-            out.push(Comp {
-                label: r.name,
-                detail: "route".into(),
-                doc: String::new(),
-                kind: CompKind::Route,
-            });
-        }
-    }
+    out.extend(route_names().map(route_comp));
     for k in CORE_KEYWORDS {
         out.push(Comp {
             label: (*k).into(),
@@ -172,7 +190,33 @@ pub fn completions(catalog: &[ModuleDoc], doc: &str, line_prefix: &str) -> Vec<C
             kind: CompKind::Keyword,
         });
     }
-    out
+    for f in &core.functions {
+        out.push(Comp {
+            label: f.name.clone(),
+            detail: f.detail.clone(),
+            doc: f.doc.clone(),
+            kind: CompKind::Function,
+        });
+    }
+    for p in &core.params {
+        out.push(Comp {
+            label: p.name.clone(),
+            detail: p.detail.clone(),
+            doc: p.doc.clone(),
+            kind: CompKind::Param,
+        });
+    }
+    dedup_completions(out)
+}
+
+/// [`completions_with_core`] over an include closure.
+pub fn completions_with_core_files(
+    catalog: &[ModuleDoc],
+    core: &crate::catalog::CoreDocs,
+    files: &[(std::path::PathBuf, String)],
+    line_prefix: &str,
+) -> Vec<Comp> {
+    complete_files(catalog, core, files, line_prefix)
 }
 
 /// Markdown hover for `word`: loaded-module symbols win, then any
@@ -286,6 +330,154 @@ pub fn valid_route_name(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
 }
 
+/// Transitive include limits: a hostile config must stay cheap.
+const INCLUDE_MAX_DEPTH: usize = 8;
+const INCLUDE_MAX_FILES: usize = 64;
+
+/// Resolve an `include_file`/`import_file` path: absolute paths as
+/// written, relative paths against the INCLUDING file's directory.
+fn resolve_include(from: &std::path::Path, inc: &str) -> std::path::PathBuf {
+    let p = std::path::Path::new(inc);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        from.parent()
+            .unwrap_or_else(|| std::path::Path::new(""))
+            .join(p)
+    }
+}
+
+/// The root document plus every transitively included file, loaded via
+/// `loader` (which lets callers prefer open editor buffers over disk).
+/// Cycle-safe, depth- and count-capped; unloadable files are skipped.
+pub fn include_closure(
+    root_path: &std::path::Path,
+    root_text: &str,
+    loader: &dyn Fn(&std::path::Path) -> Option<String>,
+) -> Vec<(std::path::PathBuf, String)> {
+    let mut out: Vec<(std::path::PathBuf, String)> = Vec::new();
+    let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+    let mut queue: Vec<(std::path::PathBuf, String, usize)> =
+        vec![(root_path.to_path_buf(), root_text.to_string(), 0)];
+    seen.insert(root_path.to_path_buf());
+    while let Some((path, text, depth)) = queue.pop() {
+        if depth < INCLUDE_MAX_DEPTH {
+            for inc in analyze::includes(&text) {
+                if out.len() + queue.len() + 1 >= INCLUDE_MAX_FILES {
+                    break;
+                }
+                let target = resolve_include(&path, &inc.name);
+                if !seen.insert(target.clone()) {
+                    continue;
+                }
+                if let Some(t) = loader(&target) {
+                    queue.push((target, t, depth + 1));
+                }
+            }
+        }
+        out.push((path, text));
+    }
+    // root first, includes after, in a stable order
+    out.sort_by(|a, b| {
+        (a.0 != *root_path)
+            .cmp(&(b.0 != *root_path))
+            .then(a.0.cmp(&b.0))
+    });
+    out
+}
+
+/// Module names loaded anywhere in the closure, deduplicated.
+pub fn loaded_modules_multi(files: &[(std::path::PathBuf, String)]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for (_, text) in files {
+        for m in analyze::loaded_modules(text) {
+            if seen.insert(m.name.clone()) {
+                out.push(m.name);
+            }
+        }
+    }
+    out
+}
+
+/// Route definitions across the closure, tagged with their file.
+pub fn route_defs_multi(
+    files: &[(std::path::PathBuf, String)],
+) -> Vec<(std::path::PathBuf, Located)> {
+    files
+        .iter()
+        .flat_map(|(p, text)| {
+            analyze::route_defs(text)
+                .into_iter()
+                .map(move |l| (p.clone(), l))
+        })
+        .collect()
+}
+
+/// A fast analyzer-side diagnostic (no `opensips -C` involved).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnalyzerDiag {
+    /// 0-based line in the CURRENT file.
+    pub line: u32,
+    /// 0-based start byte column.
+    pub col_start: u32,
+    /// 0-based end byte column (exclusive).
+    pub col_end: u32,
+    /// Human-readable message.
+    pub message: String,
+}
+
+/// Analyzer diagnostics for `text` (the file at `path`): `route(x)`
+/// calls whose target is defined nowhere in the include closure, and
+/// duplicate route definitions (every occurrence after the first is
+/// flagged).  Only positions in the current file are reported.
+pub fn analyzer_diagnostics(
+    path: &std::path::Path,
+    text: &str,
+    loader: &dyn Fn(&std::path::Path) -> Option<String>,
+) -> Vec<AnalyzerDiag> {
+    let files = include_closure(path, text, loader);
+    let defs = route_defs_multi(&files);
+    let defined: std::collections::HashSet<&str> = defs
+        .iter()
+        .filter(|(_, l)| !l.name.is_empty())
+        .map(|(_, l)| l.name.as_str())
+        .collect();
+    let mut out = Vec::new();
+    for r in analyze::route_refs(text) {
+        if !r.name.is_empty() && !defined.contains(r.name.as_str()) {
+            out.push(AnalyzerDiag {
+                line: r.line,
+                col_start: r.col,
+                col_end: r.col + r.name.len() as u32,
+                message: format!(
+                    "route '{}' is not defined here or in included files",
+                    r.name
+                ),
+            });
+        }
+    }
+    // duplicate definitions across the closure; flag current-file ones
+    let mut counts: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    for (p, l) in &defs {
+        if l.name.is_empty() {
+            continue;
+        }
+        let n = counts.entry(l.name.as_str()).or_insert(0);
+        *n += 1;
+        if *n > 1 && p == path {
+            out.push(AnalyzerDiag {
+                line: l.line,
+                col_start: l.col,
+                col_end: l.col + 1,
+                message: format!("route '{}' is defined more than once", l.name),
+            });
+        }
+    }
+    out.sort_by_key(|d| (d.line, d.col_start));
+    out
+}
+
 /// Resolve the opensips binary used for `-C` diagnostics.
 ///
 /// Order: explicit initializationOption, then environment, then a
@@ -353,44 +545,8 @@ pub fn completions_with_core(
     doc: &str,
     line_prefix: &str,
 ) -> Vec<Comp> {
-    // "$" prefix → pseudo-variables, nothing else
-    if pvar_tail(line_prefix).is_some() {
-        return core
-            .pvars
-            .iter()
-            .map(|v| Comp {
-                label: v.name.clone(),
-                detail: v.detail.clone(),
-                doc: v.doc.clone(),
-                kind: CompKind::Keyword,
-            })
-            .collect();
-    }
-    let mut out = completions(catalog, doc, line_prefix);
-    // only plain code position gains core items (the string-argument
-    // and route(...) contexts returned early inside `completions`)
-    let in_string_ctx = analyze::modparam_context(line_prefix).is_some()
-        || re_string_arg_ctx().is_match(line_prefix)
-        || route_call_context(line_prefix);
-    if !in_string_ctx {
-        for f in &core.functions {
-            out.push(Comp {
-                label: f.name.clone(),
-                detail: f.detail.clone(),
-                doc: f.doc.clone(),
-                kind: CompKind::Function,
-            });
-        }
-        for p in &core.params {
-            out.push(Comp {
-                label: p.name.clone(),
-                detail: p.detail.clone(),
-                doc: p.doc.clone(),
-                kind: CompKind::Param,
-            });
-        }
-    }
-    dedup_completions(out)
+    let files = [(std::path::PathBuf::new(), doc.to_string())];
+    complete_files(catalog, core, &files, line_prefix)
 }
 
 /// If the cursor sits in a pseudo-variable context (`$` plus an
