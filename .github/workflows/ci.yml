@@ -24,6 +24,8 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: tests (unit + integration + stdio e2e)
         run: cargo test --all-targets
+      - name: rustdoc (missing docs are errors)
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
   client:
     name: VS Code client (tsc)

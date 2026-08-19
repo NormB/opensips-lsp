@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+/// One documented module symbol: a parameter or a function.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Item {
     /// Bare name (`kv_bucket`, `nats_kv_get`).
@@ -13,10 +14,14 @@ pub struct Item {
     pub doc: String,
 }
 
+/// The harvested documentation of one OpenSIPS module.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ModuleDoc {
+    /// Module name (directory name under `modules/`).
     pub name: String,
+    /// Exported parameters (`modparam` targets).
     pub params: Vec<Item>,
+    /// Exported script functions.
     pub functions: Vec<Item>,
 }
 
