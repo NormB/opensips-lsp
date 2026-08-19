@@ -3,20 +3,31 @@
 use crate::analyze::{self, Located};
 use crate::catalog::ModuleDoc;
 
+/// What a completion item is, mapped to an LSP `CompletionItemKind`.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CompKind {
+    /// A loadable module name.
     Module,
+    /// A `modparam` parameter of a module.
     Param,
+    /// An exported script function.
     Function,
+    /// A `route[...]` name.
     Route,
+    /// A core language keyword.
     Keyword,
 }
 
+/// One completion candidate.
 #[derive(Debug, Clone)]
 pub struct Comp {
+    /// The inserted/displayed label.
     pub label: String,
+    /// Short detail (type, signature, or category).
     pub detail: String,
+    /// Markdown documentation, empty if none.
     pub doc: String,
+    /// Item category.
     pub kind: CompKind,
 }
 
@@ -45,6 +56,9 @@ const CORE_KEYWORDS: &[&str] = &[
     "launch",
 ];
 
+/// Context-sensitive completion candidates for a cursor whose line
+/// starts with `line_prefix`: modparam values/modules, loadmodule
+/// targets, or (in code) loaded modules' functions, routes, keywords.
 pub fn completions(catalog: &[ModuleDoc], doc: &str, line_prefix: &str) -> Vec<Comp> {
     // modparam second argument → params of the named module
     if let Some(module) = analyze::modparam_context(line_prefix) {
@@ -217,4 +231,14 @@ pub fn diag_matches_file(diag_file: &str, checked: &std::path::Path) -> bool {
         (Some(a), Some(b)) => a == b,
         _ => false,
     }
+}
+
+/// Resolve the `opensips -C` run timeout: explicit option (ms) wins,
+/// then `OPENSIPS_LSP_CHECK_TIMEOUT_MS`, then 10 seconds.  Clamped to
+/// at least 1ms.
+pub fn resolve_timeout(option_ms: Option<u64>, env: Option<String>) -> std::time::Duration {
+    let ms = option_ms
+        .or_else(|| env.and_then(|v| v.parse::<u64>().ok()))
+        .unwrap_or(10_000);
+    std::time::Duration::from_millis(ms.max(1))
 }

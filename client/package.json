@@ -5,23 +5,39 @@
   "version": "0.1.0",
   "publisher": "NormB",
   "license": "MIT",
-  "engines": { "vscode": "^1.85.0" },
-  "categories": ["Programming Languages", "Linters"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
-    "languages": [{
-      "id": "opensips-cfg",
-      "aliases": ["OpenSIPS config", "opensips"],
-      "filenames": ["opensips.cfg"],
-      "extensions": [".cfg"],
-      "configuration": "./language-configuration.json"
-    }],
-    "grammars": [{
-      "language": "opensips-cfg",
-      "scopeName": "source.opensips",
-      "path": "./syntaxes/opensips.tmLanguage.json"
-    }],
+    "languages": [
+      {
+        "id": "opensips-cfg",
+        "aliases": [
+          "OpenSIPS config",
+          "opensips"
+        ],
+        "filenames": [
+          "opensips.cfg"
+        ],
+        "extensions": [
+          ".cfg"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "opensips-cfg",
+        "scopeName": "source.opensips",
+        "path": "./syntaxes/opensips.tmLanguage.json"
+      }
+    ],
     "configuration": {
       "title": "OpenSIPS LSP",
       "properties": {
@@ -39,6 +55,11 @@
           "type": "string",
           "default": "",
           "description": "OpenSIPS source tree to harvest module documentation from (completion/hover)."
+        },
+        "opensipsLsp.checkTimeoutMs": {
+          "type": "number",
+          "default": 10000,
+          "description": "Upper bound (ms) on one 'opensips -C' diagnostics run."
         }
       }
     }

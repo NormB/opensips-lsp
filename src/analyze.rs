@@ -4,8 +4,10 @@
 //! completion, symbols and go-to-definition.  Full-fidelity semantic
 //! validation is delegated to `opensips -C` (see `diag`).
 
+/// A named item found in a cfg document, with its position.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Located {
+    /// Item name (module base name, route name, ...).
     pub name: String,
     /// 0-based line of the item's name.
     pub line: u32,
@@ -85,6 +87,7 @@ fn is_word(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }
 
+/// Every `loadmodule "x.so"` in code position, as bare module names.
 pub fn loaded_modules(text: &str) -> Vec<Located> {
     let classes = classify(text);
     let re = regex::Regex::new(r#"loadmodule\s*"([^"\n]+)""#).unwrap();
@@ -116,6 +119,8 @@ pub fn loaded_modules(text: &str) -> Vec<Located> {
 
 const ROUTE_KINDS: &str = r"(?:failure_route|onreply_route|branch_route|timer_route|event_route|error_route|local_route|startup_route|route)";
 
+/// Every route-family block definition (`route`, `failure_route[x]`, ...);
+/// the main `route { }` has an empty name.
 pub fn route_defs(text: &str) -> Vec<Located> {
     let classes = classify(text);
     let re = regex::Regex::new(&format!(
@@ -140,6 +145,7 @@ pub fn route_defs(text: &str) -> Vec<Located> {
     out
 }
 
+/// Every `route(name)` call site (excluding `*_route(...)` look-alikes).
 pub fn route_refs(text: &str) -> Vec<Located> {
     let classes = classify(text);
     let re = regex::Regex::new(r#"route\s*\(\s*"?([A-Za-z0-9_.:-]+)"?\s*[,)]"#).unwrap();

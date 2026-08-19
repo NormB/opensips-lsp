@@ -104,3 +104,21 @@ fn harvests_the_real_opensips_tree_when_present() {
     // the FTS split moved this away: it must NOT be a cachedb_nats param
     assert!(!cn.params.iter().any(|p| p.name == "enable_search_index"));
 }
+
+#[test]
+fn the_shipped_admin_doc_follows_the_opensips_readme_standard() {
+    // docs/ADMIN.md is written in the OpenSIPS 4.x module-README
+    // structure; our own harvester must be able to parse it.
+    let md = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/docs/ADMIN.md"))
+        .expect("docs/ADMIN.md must exist");
+    let m = opensips_lsp::catalog::parse_readme_md("opensips-lsp", &md).expect("must parse");
+    let params: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
+    assert!(params.contains(&"opensipsPath"), "params: {params:?}");
+    assert!(params.contains(&"opensipsSrc"));
+    assert!(params.contains(&"checkTimeoutMs"));
+    assert!(
+        m.params
+            .iter()
+            .all(|p| !p.doc.is_empty() && !p.detail.is_empty())
+    );
+}
