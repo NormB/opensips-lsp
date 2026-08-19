@@ -10,7 +10,8 @@ use crate::{analyze, catalog, diag, logic};
 /// LSP backend: document store, doc catalog, and the `-C` runner.
 pub struct Backend {
     client: Client,
-    docs: DashMap<Url, String>,
+    /// Open documents: (version, full text).
+    docs: DashMap<Url, (i32, String)>,
     catalog: std::sync::RwLock<Vec<catalog::ModuleDoc>>,
     core: std::sync::RwLock<catalog::CoreDocs>,
     src: std::sync::RwLock<Option<String>>,
@@ -63,9 +64,24 @@ impl Backend {
             return;
         };
         let path_str = path.display().to_string();
+        // snapshot the buffer BEFORE the subprocess runs: ranges are
+        // mapped through exactly this text, and the publish carries
+        // exactly this version
+        let (snap_version, snap_text) = self
+            .docs
+            .get(uri)
+            .map(|d| d.clone())
+            .unwrap_or((0, String::new()));
         // one -C at a time; a burst of didOpen events must not fork a
         // process per file
         let _gate = self.check_gate.lock().await;
+        // test-only hook: slow the check down to make races observable
+        if let Some(ms) = std::env::var("OPENSIPS_LSP_TEST_CHECK_DELAY_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+        }
         let fut = tokio::process::Command::new(&bin)
             .arg("-C")
             .arg("-f")
@@ -85,6 +101,10 @@ impl Backend {
                         ),
                     )
                     .await;
+                // an incomplete check must not leave stale results pinned
+                self.client
+                    .publish_diagnostics(uri.clone(), Vec::new(), Some(snap_version))
+                    .await;
                 return;
             }
         };
@@ -95,6 +115,9 @@ impl Backend {
                     format!("opensips-lsp: cannot run '{bin} -C' (configure opensipsPath)"),
                 )
                 .await;
+            self.client
+                .publish_diagnostics(uri.clone(), Vec::new(), Some(snap_version))
+                .await;
             return;
         };
         let text = format!(
@@ -103,8 +126,20 @@ impl Backend {
             String::from_utf8_lossy(&out.stderr)
         );
         let rc = out.status.code().unwrap_or(-1);
+        // the buffer moved while the check ran: results belong to a
+        // text that no longer exists — suppress; the next save re-checks
+        let current = self.docs.get(uri).map(|d| d.0);
+        if current.is_some() && current != Some(snap_version) {
+            self.client
+                .log_message(
+                    MessageType::INFO,
+                    format!("opensips-lsp: discarding stale check of {path_str} (buffer changed)"),
+                )
+                .await;
+            return;
+        }
         // opensips reports byte columns; the client expects UTF-16 units
-        let doc_text = self.docs.get(uri).map(|t| t.clone()).unwrap_or_default();
+        let doc_text = snap_text;
         let diags: Vec<Diagnostic> = diag::parse_check_output(&text, rc)
             .into_iter()
             .filter(|d| logic::diag_matches_file(&d.file, &path))
@@ -129,7 +164,7 @@ impl Backend {
             })
             .collect();
         self.client
-            .publish_diagnostics(uri.clone(), diags, None)
+            .publish_diagnostics(uri.clone(), diags, Some(snap_version))
             .await;
     }
 }
@@ -244,13 +279,15 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, p: DidOpenTextDocumentParams) {
         let uri = p.text_document.uri;
-        self.docs.insert(uri.clone(), p.text_document.text);
+        self.docs
+            .insert(uri.clone(), (p.text_document.version, p.text_document.text));
         self.check(&uri).await;
     }
 
     async fn did_change(&self, p: DidChangeTextDocumentParams) {
         if let Some(change) = p.content_changes.into_iter().last() {
-            self.docs.insert(p.text_document.uri, change.text);
+            self.docs
+                .insert(p.text_document.uri, (p.text_document.version, change.text));
         }
     }
 
@@ -264,7 +301,7 @@ impl LanguageServer for Backend {
 
     async fn completion(&self, p: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = p.text_document_position.text_document.uri;
-        let Some(text) = self.docs.get(&uri).map(|d| d.clone()) else {
+        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
         let prefix = Self::line_prefix(&text, p.text_document_position.position);
@@ -297,7 +334,7 @@ impl LanguageServer for Backend {
     async fn hover(&self, p: HoverParams) -> Result<Option<Hover>> {
         let uri = p.text_document_position_params.text_document.uri;
         let pos = p.text_document_position_params.position;
-        let Some(text) = self.docs.get(&uri).map(|d| d.clone()) else {
+        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
         let Some(line) = text.lines().nth(pos.line as usize) else {
@@ -326,7 +363,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<GotoDefinitionResponse>> {
         let uri = p.text_document_position_params.text_document.uri;
         let pos = p.text_document_position_params.position;
-        let Some(text) = self.docs.get(&uri).map(|d| d.clone()) else {
+        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
         let line_text = Self::doc_line(&text, pos.line);
@@ -348,7 +385,7 @@ impl LanguageServer for Backend {
         &self,
         p: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
-        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.clone()) else {
+        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
         #[allow(deprecated)]
