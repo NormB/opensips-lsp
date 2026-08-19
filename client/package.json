@@ -44,7 +44,7 @@
         "opensipsLsp.serverPath": {
           "type": "string",
           "default": "opensips-lsp",
-          "description": "Path to the opensips-lsp server binary."
+          "description": "Path to the opensips-lsp server binary. Leave at the default to use the server bundled with platform builds of this extension (falling back to a PATH lookup)."
         },
         "opensipsLsp.opensipsPath": {
           "type": "string",
