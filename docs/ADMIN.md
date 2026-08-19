@@ -90,6 +90,37 @@ log message says `, cached` on a hit. Override the location with the
 `OPENSIPS_LSP_CACHE_DIR` environment variable (env-only knob); delete
 the directory to force a re-harvest.
 
+#### maxDiagnostics (integer)
+
+Bound on the diagnostics published per file.
+
+*Default value is `100`.*
+
+```json title="Set maxDiagnostics parameter"
+{ "maxDiagnostics": 50 }
+```
+
+#### snippetCompletions (boolean)
+
+Insert function completions as tabstop snippets.
+
+*Default value is `true`.*
+
+```json title="Set snippetCompletions parameter"
+{ "snippetCompletions": false }
+```
+
+#### cacheDir (string)
+
+Documentation-catalog cache directory.
+
+*Default value is the platform cache dir. Environment fallback:
+`OPENSIPS_LSP_CACHE_DIR`.*
+
+```json title="Set cacheDir parameter"
+{ "cacheDir": "/var/cache/opensips-lsp" }
+```
+
 ### Security
 
 `opensips -C` **dlopens the modules the configuration loads**, so

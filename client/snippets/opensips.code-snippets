@@ -1,0 +1,77 @@
+{
+  "Main route": {
+    "prefix": "route",
+    "body": ["route {", "\t$0", "}"],
+    "description": "Main request route"
+  },
+  "Named route": {
+    "prefix": "routen",
+    "body": ["route[${1:name}] {", "\t$0", "}"],
+    "description": "Named route block"
+  },
+  "Failure route": {
+    "prefix": "failure_route",
+    "body": ["failure_route[${1:name}] {", "\t$0", "}"],
+    "description": "Failure route block"
+  },
+  "Reply route": {
+    "prefix": "onreply_route",
+    "body": ["onreply_route[${1:name}] {", "\t$0", "}"],
+    "description": "Reply route block"
+  },
+  "Branch route": {
+    "prefix": "branch_route",
+    "body": ["branch_route[${1:name}] {", "\t$0", "}"],
+    "description": "Branch route block"
+  },
+  "Event route": {
+    "prefix": "event_route",
+    "body": ["event_route[${1:E_EVENT_NAME}] {", "\t$0", "}"],
+    "description": "Event route block"
+  },
+  "Startup route": {
+    "prefix": "startup_route",
+    "body": ["startup_route {", "\t$0", "}"],
+    "description": "Startup route block"
+  },
+  "Load module": {
+    "prefix": "loadmodule",
+    "body": ["loadmodule \"${1:module}.so\""],
+    "description": "Load a module"
+  },
+  "Module parameter": {
+    "prefix": "modparam",
+    "body": ["modparam(\"${1:module}\", \"${2:parameter}\", ${3:value})"],
+    "description": "Set a module parameter"
+  },
+  "If method": {
+    "prefix": "ifmethod",
+    "body": ["if (is_method(\"${1:INVITE}\")) {", "\t$0", "}"],
+    "description": "Branch on the SIP method"
+  },
+  "If/else": {
+    "prefix": "ifelse",
+    "body": ["if (${1:condition}) {", "\t$2", "} else {", "\t$0", "}"],
+    "description": "If/else block"
+  },
+  "While loop": {
+    "prefix": "while",
+    "body": ["while (${1:condition}) {", "\t$0", "}"],
+    "description": "While loop"
+  },
+  "Switch": {
+    "prefix": "switch",
+    "body": ["switch (${1:\\$rU}) {", "\tcase \"${2:value}\":", "\t\t$0", "\t\tbreak;", "\tdefault:", "\t\tbreak;", "}"],
+    "description": "Switch on a value"
+  },
+  "Log line": {
+    "prefix": "xlog",
+    "body": ["xlog(\"L_${1|INFO,NOTICE,WARN,ERR,DBG|}\", \"${2:message}\\n\");"],
+    "description": "Log a message"
+  },
+  "Send reply": {
+    "prefix": "send_reply",
+    "body": ["send_reply(${1:200}, \"${2:OK}\");"],
+    "description": "Send a stateless reply"
+  }
+}
