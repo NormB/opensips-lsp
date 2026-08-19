@@ -58,8 +58,8 @@ case ":$PATH:" in
 esac
 
 if command -v code >/dev/null 2>&1; then
-    curl -fsSL -o "$TMP/ext.vsix" "$BASE/opensips-cfg-$TAG.vsix" \
-        || fail "download failed: $BASE/opensips-cfg-$TAG.vsix"
+    curl -fsSL -o "$TMP/ext.vsix" "$BASE/opensips-lsp-ext-$TAG.vsix" \
+        || fail "download failed: $BASE/opensips-lsp-ext-$TAG.vsix"
     code --install-extension "$TMP/ext.vsix" --force >/dev/null
     say "VS Code extension installed."
     say
@@ -71,7 +71,7 @@ else
     say
     say "VS Code's 'code' command was not found, so the extension was"
     say "not installed automatically. To add it by hand:"
-    say "  1. Download: $BASE/opensips-cfg-$TAG.vsix"
+    say "  1. Download: $BASE/opensips-lsp-ext-$TAG.vsix"
     say "  2. In VS Code press Ctrl+Shift+X, click the '...' menu"
     say "     (top-right of the Extensions panel), choose"
     say "     'Install from VSIX...' and pick the downloaded file."
