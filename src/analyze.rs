@@ -87,12 +87,34 @@ fn is_word(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }
 
+macro_rules! static_regex {
+    ($name:ident, $pat:expr) => {
+        fn $name() -> &'static regex::Regex {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            RE.get_or_init(|| regex::Regex::new($pat).unwrap())
+        }
+    };
+}
+
+static_regex!(re_loadmodule, r#"loadmodule\s*"([^"\n]+)""#);
+static_regex!(
+    re_route_def,
+    r#"(?s)(?:failure_route|onreply_route|branch_route|timer_route|event_route|error_route|local_route|startup_route|route)\s*(?:\[\s*"?([A-Za-z0-9_.:-]+)"?\s*\])?\s*\{"#
+);
+static_regex!(
+    re_route_ref,
+    r#"route\s*\(\s*"?([A-Za-z0-9_.:-]+)"?\s*[,)]"#
+);
+static_regex!(
+    re_modparam_ctx,
+    r#"modparam\s*\(\s*"([^"\n]+)"\s*,\s*("[^"\n]*)?$"#
+);
+
 /// Every `loadmodule "x.so"` in code position, as bare module names.
 pub fn loaded_modules(text: &str) -> Vec<Located> {
     let classes = classify(text);
-    let re = regex::Regex::new(r#"loadmodule\s*"([^"\n]+)""#).unwrap();
     let mut out = Vec::new();
-    for c in re.captures_iter(text) {
+    for c in re_loadmodule().captures_iter(text) {
         let whole = c.get(0).unwrap();
         if classes.get(whole.start()) != Some(&Class::Code) {
             continue; // inside a comment or a string
@@ -117,18 +139,12 @@ pub fn loaded_modules(text: &str) -> Vec<Located> {
     out
 }
 
-const ROUTE_KINDS: &str = r"(?:failure_route|onreply_route|branch_route|timer_route|event_route|error_route|local_route|startup_route|route)";
-
 /// Every route-family block definition (`route`, `failure_route[x]`, ...);
 /// the main `route { }` has an empty name.
 pub fn route_defs(text: &str) -> Vec<Located> {
     let classes = classify(text);
-    let re = regex::Regex::new(&format!(
-        r#"(?s){ROUTE_KINDS}\s*(?:\[\s*"?([A-Za-z0-9_.:-]+)"?\s*\])?\s*\{{"#
-    ))
-    .unwrap();
     let mut out = Vec::new();
-    for c in re.captures_iter(text) {
+    for c in re_route_def().captures_iter(text) {
         let whole = c.get(0).unwrap();
         let start = whole.start();
         if classes.get(start) != Some(&Class::Code) {
@@ -148,7 +164,7 @@ pub fn route_defs(text: &str) -> Vec<Located> {
 /// Every `route(name)` call site (excluding `*_route(...)` look-alikes).
 pub fn route_refs(text: &str) -> Vec<Located> {
     let classes = classify(text);
-    let re = regex::Regex::new(r#"route\s*\(\s*"?([A-Za-z0-9_.:-]+)"?\s*[,)]"#).unwrap();
+    let re = re_route_ref();
     let mut out = Vec::new();
     for c in re.captures_iter(text) {
         let whole = c.get(0).unwrap();
@@ -175,7 +191,7 @@ pub fn route_refs(text: &str) -> Vec<Located> {
 /// string argument of a `modparam(...)`, return the module name from
 /// the first argument.
 pub fn modparam_context(line_prefix: &str) -> Option<String> {
-    let re = regex::Regex::new(r#"modparam\s*\(\s*"([^"\n]+)"\s*,\s*("[^"\n]*)?$"#).unwrap();
+    let re = re_modparam_ctx();
     re.captures(line_prefix).map(|c| c[1].to_string())
 }
 
