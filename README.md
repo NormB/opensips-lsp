@@ -14,8 +14,14 @@ script language (`opensips.cfg`).
 | **Document symbols** | All route blocks (`route`, `failure_route`, `onreply_route`, …). |
 
 The documentation catalog is harvested at startup from an OpenSIPS
-source tree: docbook (`modules/*/doc/*_admin.xml`) where present,
-4.x markdown (`modules/*/README.md`) otherwise.
+source tree. The 4.x markdown docs (`modules/*/README.md`) are the
+most current and win; docbook (`modules/*/doc/*_admin.xml`) is the
+fallback for older trees or placeholder READMEs. Core-language docs
+(functions, parameters, pseudo-variables) come from `docs/manual/`.
+
+Supported and version-proven: **OpenSIPS 4.x** (master) and
+**3.6.x** (3.6.8) — the proof suite runs against a real tree and
+binary of each (`OPENSIPS_LSP_TEST_TREE`/`OPENSIPS_LSP_TEST_BIN`).
 
 ## Configuration
 

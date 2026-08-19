@@ -75,3 +75,18 @@ fn column_range_never_reversed() {
         assert!(d.col_end >= d.col_start);
     }
 }
+
+// Verbatim opensips 3.6.8 -C output (captured 2026-08-19): the format
+// is identical to 4.x, and the parser must keep handling it.
+const REAL_368: &str = r#"Aug 19 14:20:53 [2737664] CRITICAL:core:yyerror: parse error in /tmp/x/proof36.cfg:2:13-14: failed to load module tm.so
+Aug 19 14:20:53 [2737664] CRITICAL:core:yyerror: parse error in /tmp/x/proof36.cfg:3:19-20: Parameter <no_such_param_xyz> not found in module <tm> - can't set
+Aug 19 14:20:53 [2737664] ERROR:core:parse_opensips_cfg: bad config file (2 errors)
+"#;
+
+#[test]
+fn parses_368_output_identically() {
+    let ds = parse_check_output(REAL_368, 255);
+    assert_eq!(ds.len(), 2);
+    assert_eq!(ds[0].line, 1);
+    assert!(ds[1].message.contains("no_such_param_xyz"));
+}

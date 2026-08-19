@@ -124,17 +124,20 @@ pub fn harvest_tree(tree_root: &Path) -> Vec<ModuleDoc> {
     };
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        // docbook (feature-branch modules) first, 4.x markdown otherwise
-        let admin = e.path().join("doc").join(format!("{name}_admin.xml"));
-        if let Ok(xml) = std::fs::read_to_string(&admin)
-            && let Ok(m) = parse_admin_xml(&name, &xml)
+        // 4.x markdown is the CURRENT documentation and wins; docbook
+        // is the fallback for older trees (and for placeholder
+        // READMEs carrying no exported sections).
+        let readme = e.path().join("README.md");
+        if let Ok(md) = std::fs::read_to_string(&readme)
+            && let Ok(m) = parse_readme_md(&name, &md)
+            && (!m.params.is_empty() || !m.functions.is_empty())
         {
             out.push(m);
             continue;
         }
-        let readme = e.path().join("README.md");
-        if let Ok(md) = std::fs::read_to_string(&readme)
-            && let Ok(m) = parse_readme_md(&name, &md)
+        let admin = e.path().join("doc").join(format!("{name}_admin.xml"));
+        if let Ok(xml) = std::fs::read_to_string(&admin)
+            && let Ok(m) = parse_admin_xml(&name, &xml)
         {
             out.push(m);
         }
