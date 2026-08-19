@@ -1,13 +1,17 @@
 # Getting Started
 
 This guide assumes no prior experience — just VS Code installed and
-an `opensips.cfg` file you want to edit. Two pieces work together:
-a small **server program** that does the analysis, and a **VS Code
-extension** that talks to it. The installer sets up both.
+an `opensips.cfg` file you want to edit.
 
 ## Install
 
-### Option A — one command (recommended)
+### Option A — from the Marketplace (easiest)
+
+Press **Ctrl+Shift+X** in VS Code, search for **opensips**, and click
+**Install** on "OpenSIPS Configuration". The platform builds bundle
+everything needed — no other steps.
+
+### Option B — one command in a terminal
 
 Open a terminal (in VS Code: **Terminal → New Terminal**), paste this
 line, and press Enter:
@@ -21,7 +25,7 @@ installs the server to `~/.local/bin`, and adds the extension to VS
 Code. It prints what it did; if something is missing (for example the
 `code` command), it prints exactly what to do instead.
 
-### Option B — by hand, step by step
+### Option C — by hand, step by step
 
 1. Open <https://github.com/NormB/opensips-lsp/releases/latest> in a
    browser.

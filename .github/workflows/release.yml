@@ -34,18 +34,36 @@ jobs:
           path: opensips-lsp-*.tar.gz
 
   vsix:
-    name: VS Code extension
+    name: VS Code extension (platform builds)
+    needs: [server]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Package
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: server-*
+          path: dist
+          merge-multiple: true
+      - name: Package platform + universal builds
         working-directory: client
         run: |
           npm install --no-audit --no-fund
           npm run compile
+          # platform builds carry the matching server binary
+          for pair in "linux-x64 x86_64" "linux-arm64 aarch64"; do
+            set -- $pair
+            target=$1; arch=$2
+            rm -rf server && mkdir server
+            tar -C server -xzf \
+              ../dist/opensips-lsp-${GITHUB_REF_NAME}-${arch}-linux-gnu.tar.gz
+            npx --yes @vscode/vsce package --target "$target" --out \
+              opensips-cfg-${GITHUB_REF_NAME}-${target}.vsix
+          done
+          # universal build: no binary, PATH/setting fallback
+          rm -rf server
           npx --yes @vscode/vsce package --out \
             opensips-cfg-${GITHUB_REF_NAME}.vsix
       - uses: actions/upload-artifact@v4
