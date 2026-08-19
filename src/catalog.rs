@@ -244,3 +244,135 @@ pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, String> {
     flush(&mut cur, &mut out);
     Ok(out)
 }
+
+/// Shared heading-walker for the 4.x manual markdown pages: collects
+/// `(heading, first paragraph)` pairs for headings at `level`.
+fn md_sections(md: &str, level: usize) -> Result<Vec<(String, String)>, String> {
+    if md.contains('\0') {
+        return Err("input contains NUL bytes".into());
+    }
+    if md.trim().is_empty() {
+        return Err("empty input".into());
+    }
+    let marker = format!("{} ", "#".repeat(level));
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut cur: Option<(String, Vec<String>, bool)> = None;
+    let mut in_fence = false;
+    for line in md.lines() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if let Some(h) = line.strip_prefix(&marker) {
+            if let Some((name, lines, _)) = cur.take() {
+                out.push((name, lines.join(" ")));
+            }
+            cur = Some((h.trim().to_string(), Vec::new(), false));
+            continue;
+        }
+        if line.starts_with('#') {
+            if let Some((name, lines, _)) = cur.take() {
+                out.push((name, lines.join(" ")));
+            }
+            continue;
+        }
+        if let Some((_, lines, finished)) = cur.as_mut() {
+            let t = line.trim();
+            if t.is_empty() {
+                if !lines.is_empty() {
+                    *finished = true;
+                }
+            } else if !*finished {
+                lines.push(t.to_string());
+            }
+        }
+    }
+    if let Some((name, lines, _)) = cur.take() {
+        out.push((name, lines.join(" ")));
+    }
+    Ok(out)
+}
+
+/// Parse `docs/manual/Script-CoreFunctions.md` (4.x): one `##
+/// name(sig)` heading per function, first paragraph = doc.
+pub fn parse_core_functions_md(md: &str) -> Result<Vec<Item>, String> {
+    Ok(md_sections(md, 2)?
+        .into_iter()
+        .filter_map(|(heading, doc)| {
+            let name = heading.split('(').next()?.trim();
+            if name.is_empty() || !heading.contains('(') {
+                return None;
+            }
+            Some(Item {
+                name: name.to_string(),
+                detail: heading,
+                doc,
+            })
+        })
+        .collect())
+}
+
+/// Parse `docs/manual/Script-CoreParameters.md` (4.x): `### name`
+/// headings, first paragraph = doc.
+pub fn parse_core_params_md(md: &str) -> Result<Vec<Item>, String> {
+    Ok(md_sections(md, 3)?
+        .into_iter()
+        .filter_map(|(heading, doc)| {
+            let name = heading.trim();
+            if name.is_empty() || name.contains(' ') {
+                return None;
+            }
+            Some(Item {
+                name: name.to_string(),
+                detail: "core parameter".into(),
+                doc,
+            })
+        })
+        .collect())
+}
+
+/// Parse `docs/manual/Script-CoreVar.md` (4.x): `### Description -
+/// $name` headings, first paragraph = doc.
+pub fn parse_core_vars_md(md: &str) -> Result<Vec<Item>, String> {
+    Ok(md_sections(md, 3)?
+        .into_iter()
+        .filter_map(|(heading, doc)| {
+            let (desc, var) = heading.rsplit_once(" - $")?;
+            let var = var.trim();
+            if var.is_empty() {
+                return None;
+            }
+            Some(Item {
+                name: format!("${var}"),
+                detail: desc.trim().to_string(),
+                doc,
+            })
+        })
+        .collect())
+}
+
+/// Core-language documentation harvested from `docs/manual/` (4.x).
+#[derive(Debug, Clone, Default)]
+pub struct CoreDocs {
+    /// Core script functions (`Script-CoreFunctions.md`).
+    pub functions: Vec<Item>,
+    /// Global core parameters (`Script-CoreParameters.md`).
+    pub params: Vec<Item>,
+    /// Pseudo-variables (`Script-CoreVar.md`), names include the `$`.
+    pub pvars: Vec<Item>,
+}
+
+/// Harvest the core-language docs from an OpenSIPS 4.x source tree;
+/// missing or unparsable pages simply yield empty sections.
+pub fn harvest_core(tree_root: &Path) -> CoreDocs {
+    let manual = tree_root.join("docs").join("manual");
+    let read = |f: &str| std::fs::read_to_string(manual.join(f)).unwrap_or_default();
+    CoreDocs {
+        functions: parse_core_functions_md(&read("Script-CoreFunctions.md")).unwrap_or_default(),
+        params: parse_core_params_md(&read("Script-CoreParameters.md")).unwrap_or_default(),
+        pvars: parse_core_vars_md(&read("Script-CoreVar.md")).unwrap_or_default(),
+    }
+}
