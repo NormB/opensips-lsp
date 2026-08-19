@@ -9,6 +9,10 @@ in `docs/ADMIN.md`.
 
 ## VS Code
 
+**Novice?** Use the [Getting Started guide](GETTING_STARTED.md)
+instead — one-command install and full usage walkthrough. The notes
+below are for building the extension from source.
+
 Use the bundled extension in `client/`:
 
 ```sh

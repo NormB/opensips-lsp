@@ -19,6 +19,7 @@ from pathlib import Path
 
 PAGES = {
     "README.md": "Home",
+    "docs/GETTING_STARTED.md": "Getting-Started",
     "docs/ADMIN.md": "Admin-Guide",
     "docs/EDITORS.md": "Editor-Setup",
 }
