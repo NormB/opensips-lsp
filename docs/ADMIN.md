@@ -95,3 +95,9 @@ diagnostics run against the on-disk file on open and save.
 `opensipsSrc` is not set, or the module is not `loadmodule`-ed in the
 current file: function completion is intentionally limited to loaded
 modules.
+
+### License
+
+Dual-licensed under MIT or Apache-2.0, at your option — the same
+terms as sipnab. See `LICENSE-MIT` and `LICENSE-APACHE` in the
+repository root.
