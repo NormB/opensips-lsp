@@ -144,3 +144,62 @@ startup_route { xlog("boot"); }
         (call_expression
           function: (identifier)
           (string))))))
+
+================================================================================
+socket globals
+================================================================================
+
+socket=udp:127.0.0.1:5060
+socket=tls:*:5061
+log_level = 2
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (global_assignment
+    name: (identifier)
+    value: (socket_value))
+  (global_assignment
+    name: (identifier)
+    value: (socket_value))
+  (global_assignment
+    name: (identifier)
+    value: (number)))
+
+================================================================================
+old-style block semicolons, alias globals, indexed pvars
+================================================================================
+
+alias=sip.example.com
+route {
+    if (1) {
+        exit;
+    };
+    while ( $(avp(gw)[$var(i)]) != NULL ) {
+        xlog("x");
+    }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (global_assignment
+    name: (identifier)
+    value: (host_value))
+  (route_definition
+    kind: (route_kind)
+    body: (block
+      (if_statement
+        (number)
+        (block
+          (keyword_statement)))
+      (empty_statement)
+      (while_statement
+        (binary_expression
+          (pseudo_variable)
+          (identifier))
+        (block
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              (string))))))))

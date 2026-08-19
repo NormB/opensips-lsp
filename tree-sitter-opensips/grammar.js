@@ -31,8 +31,16 @@ module.exports = grammar({
     ),
 
     global_assignment: $ => seq(
-      field('name', $.identifier), '=', field('value', $._expression),
+      field('name', $.identifier), '=',
+      field('value', choice($.socket_value, $.host_value, $._expression)),
     ),
+
+    // raw socket/listen values: udp:127.0.0.1:5060, tls:eth0:5061,
+    // udp:*:5060 — scheme-prefixed, unquoted
+    socket_value: _ => token(prec(1, /[A-Za-z][A-Za-z0-9+.-]*:[^\s;#]+/)),
+
+    // bare host/domain global values: alias=sip.example.com
+    host_value: _ => token(prec(-1, /[A-Za-z0-9][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+)+/)),
 
     route_definition: $ => seq(
       field('kind', $.route_kind),
@@ -49,6 +57,7 @@ module.exports = grammar({
     block: $ => seq('{', repeat($._statement), '}'),
 
     _statement: $ => choice(
+      $.empty_statement,
       $.if_statement,
       $.while_statement,
       $.for_statement,
@@ -58,6 +67,9 @@ module.exports = grammar({
       $.expression_statement,
       $.keyword_statement,
     ),
+
+    // old documented style closes blocks with `};`
+    empty_statement: _ => ';',
 
     if_statement: $ => prec.right(seq(
       'if', '(', $._expression, ')', $._statement,
@@ -129,8 +141,11 @@ module.exports = grammar({
     pseudo_variable: _ => token(seq(
       '$', optional('$'),
       choice(
-        seq(/[A-Za-z_][A-Za-z0-9_.]*/, optional(seq('(', /[^)\n]*/, ')'))),
-        seq('(', /[^)\n]+/, ')'),
+        seq(
+          /[A-Za-z_][A-Za-z0-9_.]*/,
+          optional(seq('(', /(?:[^()\n]|\([^()\n]*\))*/, ')')),
+        ),
+        seq('(', /(?:[^()\n]|\([^()\n]*\))+/, ')'),
       ),
     )),
 
