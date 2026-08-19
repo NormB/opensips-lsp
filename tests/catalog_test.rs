@@ -84,7 +84,12 @@ fn unknown_entities_do_not_kill_the_parse() {
 
 #[test]
 fn harvests_the_real_opensips_tree_when_present() {
-    let root = std::path::Path::new("/home/user/scratch/nats-audit-fixes");
+    // point OPENSIPS_LSP_TEST_TREE at an OpenSIPS source tree to run
+    let Ok(tree) = std::env::var("OPENSIPS_LSP_TEST_TREE") else {
+        eprintln!("SKIP: OPENSIPS_LSP_TEST_TREE not set");
+        return;
+    };
+    let root = std::path::Path::new(&tree);
     if !root.join("modules").is_dir() {
         eprintln!("SKIP: no opensips tree at {}", root.display());
         return;
