@@ -18,6 +18,9 @@ pub struct Backend {
     opensips_bin: std::sync::RwLock<Option<String>>,
     /// Serializes `opensips -C` runs: one at a time, no process storm.
     check_gate: tokio::sync::Mutex<()>,
+    snippet_completions: std::sync::RwLock<bool>,
+    max_diagnostics: std::sync::RwLock<usize>,
+    cache_dir_opt: std::sync::RwLock<Option<String>>,
     check_timeout: std::sync::RwLock<std::time::Duration>,
 }
 
@@ -32,6 +35,9 @@ impl Backend {
             src: std::sync::RwLock::new(None),
             opensips_bin: std::sync::RwLock::new(None),
             check_gate: tokio::sync::Mutex::new(()),
+            snippet_completions: std::sync::RwLock::new(true),
+            max_diagnostics: std::sync::RwLock::new(100),
+            cache_dir_opt: std::sync::RwLock::new(None),
             check_timeout: std::sync::RwLock::new(logic::resolve_timeout(
                 None,
                 std::env::var("OPENSIPS_LSP_CHECK_TIMEOUT_MS").ok(),
@@ -217,6 +223,20 @@ impl Backend {
                 ..Default::default()
             })
             .collect();
+        let cap = *self.max_diagnostics.read().unwrap();
+        let mut diags = diags;
+        if diags.len() > cap {
+            self.client
+                .log_message(
+                    MessageType::INFO,
+                    format!(
+                        "opensips-lsp: {} diagnostics on {path_str}, publishing the first {cap} (maxDiagnostics)",
+                        diags.len()
+                    ),
+                )
+                .await;
+            diags.truncate(cap);
+        }
         self.client
             .publish_diagnostics(uri.clone(), diags, Some(snap_version))
             .await;
@@ -234,6 +254,17 @@ impl LanguageServer for Backend {
         );
         *self.opensips_bin.write().unwrap() = bin;
 
+        if let Some(b) = opts.get("snippetCompletions").and_then(|v| v.as_bool()) {
+            *self.snippet_completions.write().unwrap() = b;
+        }
+        if let Some(n) = opts.get("maxDiagnostics").and_then(|v| v.as_u64()) {
+            *self.max_diagnostics.write().unwrap() = (n as usize).max(1);
+        }
+        if let Some(d) = opts.get("cacheDir").and_then(|v| v.as_str())
+            && !d.is_empty()
+        {
+            *self.cache_dir_opt.write().unwrap() = Some(d.to_string());
+        }
         if let Some(ms) = opts.get("checkTimeoutMs").and_then(|v| v.as_u64()) {
             *self.check_timeout.write().unwrap() = logic::resolve_timeout(
                 Some(ms),
@@ -283,11 +314,16 @@ impl LanguageServer for Backend {
         if let Some(src) = src {
             // the harvest runs off the executor thread and outside the
             // handshake; results are cached per tree fingerprint
+            let cache_opt = self.cache_dir_opt.read().unwrap().clone();
             let (harvested, core, hit) = tokio::task::spawn_blocking(move || {
                 let p = std::path::Path::new(&src);
-                let cache_dir = std::env::var("OPENSIPS_LSP_CACHE_DIR")
+                let cache_dir = cache_opt
                     .map(std::path::PathBuf::from)
-                    .ok()
+                    .or_else(|| {
+                        std::env::var("OPENSIPS_LSP_CACHE_DIR")
+                            .map(std::path::PathBuf::from)
+                            .ok()
+                    })
                     .or_else(|| {
                         std::env::var("XDG_CACHE_HOME")
                             .map(std::path::PathBuf::from)
@@ -361,25 +397,47 @@ impl LanguageServer for Backend {
         let prefix = Self::line_prefix(&text, p.text_document_position.position);
         let cat = self.catalog.read().unwrap();
         let core = self.core.read().unwrap();
+        let snippets = *self.snippet_completions.read().unwrap();
         let items: Vec<CompletionItem> = logic::completions_with_core(&cat, &core, &text, &prefix)
             .into_iter()
-            .map(|c| CompletionItem {
-                label: c.label,
-                detail: Some(c.detail),
-                documentation: (!c.doc.is_empty()).then_some({
-                    Documentation::MarkupContent(MarkupContent {
-                        kind: MarkupKind::Markdown,
-                        value: c.doc,
-                    })
-                }),
-                kind: Some(match c.kind {
-                    logic::CompKind::Module => CompletionItemKind::MODULE,
-                    logic::CompKind::Param => CompletionItemKind::PROPERTY,
-                    logic::CompKind::Function => CompletionItemKind::FUNCTION,
-                    logic::CompKind::Route => CompletionItemKind::REFERENCE,
-                    logic::CompKind::Keyword => CompletionItemKind::KEYWORD,
-                }),
-                ..Default::default()
+            .map(|c| {
+                // functions insert tabstop snippets unless disabled
+                let (insert_text, insert_text_format) =
+                    if snippets && c.kind == logic::CompKind::Function {
+                        if c.detail.contains("()") {
+                            (
+                                Some(format!("{}()$0", c.label)),
+                                Some(InsertTextFormat::SNIPPET),
+                            )
+                        } else {
+                            (
+                                Some(format!("{}($1)$0", c.label)),
+                                Some(InsertTextFormat::SNIPPET),
+                            )
+                        }
+                    } else {
+                        (None, None)
+                    };
+                CompletionItem {
+                    insert_text,
+                    insert_text_format,
+                    label: c.label,
+                    detail: Some(c.detail),
+                    documentation: (!c.doc.is_empty()).then_some({
+                        Documentation::MarkupContent(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: c.doc,
+                        })
+                    }),
+                    kind: Some(match c.kind {
+                        logic::CompKind::Module => CompletionItemKind::MODULE,
+                        logic::CompKind::Param => CompletionItemKind::PROPERTY,
+                        logic::CompKind::Function => CompletionItemKind::FUNCTION,
+                        logic::CompKind::Route => CompletionItemKind::REFERENCE,
+                        logic::CompKind::Keyword => CompletionItemKind::KEYWORD,
+                    }),
+                    ..Default::default()
+                }
             })
             .collect();
         Ok(Some(CompletionResponse::Array(items)))

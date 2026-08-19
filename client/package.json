@@ -60,9 +60,50 @@
           "type": "number",
           "default": 10000,
           "description": "Upper bound (ms) on one 'opensips -C' diagnostics run."
+        },
+        "opensipsLsp.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the OpenSIPS language server (restart applies automatically)."
+        },
+        "opensipsLsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the LSP traffic between VS Code and opensips-lsp in the output channel."
+        },
+        "opensipsLsp.diagnostics.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run 'opensips -C' checks on open/save. Diagnostics are also disabled automatically in untrusted workspaces."
+        },
+        "opensipsLsp.diagnostics.maxProblems": {
+          "type": "number",
+          "default": 100,
+          "description": "Maximum diagnostics published per file."
+        },
+        "opensipsLsp.completion.snippets": {
+          "type": "boolean",
+          "default": true,
+          "description": "Insert function completions as snippets with a tabstop between the parentheses."
+        },
+        "opensipsLsp.cacheDir": {
+          "type": "string",
+          "default": "",
+          "description": "Documentation-catalog cache directory (empty = the platform cache dir)."
         }
       }
-    }
+    },
+    "snippets": [
+      {
+        "language": "opensips-cfg",
+        "path": "./snippets/opensips.code-snippets"
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",

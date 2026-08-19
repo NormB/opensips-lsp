@@ -75,6 +75,8 @@ tests run in CI; `tree-sitter generate` builds the parser locally.
 
 ## Documentation
 
+- [`docs/FEATURES.md`](docs/FEATURES.md) — every feature, every
+  setting (VS Code / init option / environment), and the snippet set.
 - [`docs/ADMIN.md`](docs/ADMIN.md) — admin guide in the OpenSIPS
   module-doc structure (overview, dependencies, exported parameters,
   security, FAQ). Its structure is itself validated by the test suite
