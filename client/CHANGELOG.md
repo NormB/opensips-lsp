@@ -1,6 +1,10 @@
 # Changelog
 
-All notable changes to the OpenSIPS Configuration extension.
+All notable changes to the OpenSIPS Language Support extension.
+
+## [0.5.3] — 2026-08-19
+
+- Display name is now "OpenSIPS Language Support".
 
 ## [0.5.2] — 2026-08-19
 

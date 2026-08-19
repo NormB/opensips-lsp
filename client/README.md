@@ -1,4 +1,4 @@
-# OpenSIPS Configuration
+# OpenSIPS Language Support
 
 Language support for the [OpenSIPS](https://opensips.org) routing
 script (`opensips.cfg`) — **the real OpenSIPS parser checks your
