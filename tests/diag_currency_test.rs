@@ -161,3 +161,80 @@ fn midflight_buffer_change_suppresses_the_stale_result() {
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn output_flood_is_capped_and_clears_diagnostics() {
+    let dir = std::env::temp_dir().join(format!("oslsp-flood-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stub = dir.join("flood.sh");
+    // ~8 MiB of noise, then a "valid" error line that must never be seen
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\nhead -c 8388608 /dev/zero | tr '\\0' 'A' >&2\necho \"CRITICAL:core:yyerror: parse error in $3:1:1-2: after flood\" >&2\nexit 255\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut p = std::fs::metadata(&stub).unwrap().permissions();
+    p.set_mode(0o755);
+    std::fs::set_permissions(&stub, p).unwrap();
+    let cfg = dir.join("t.cfg");
+    std::fs::write(&cfg, "route{}\n").unwrap();
+    let uri = format!("file://{}", cfg.display());
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env("OPENSIPS_LSP_BIN", stub.display().to_string())
+        .env("OPENSIPS_LSP_OUTPUT_CAP_BYTES", "65536")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "init");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":"route{}\n"}}}),
+    );
+
+    // the flood must be reported via logMessage and the publish must be EMPTY
+    let log = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "window/logMessage"
+                && v["params"]["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("output cap")
+        },
+        "cap logMessage",
+    );
+    assert!(
+        log["params"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("output cap")
+    );
+    let d = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics",
+        "publish",
+    );
+    assert_eq!(
+        d["params"]["diagnostics"].as_array().unwrap().len(),
+        0,
+        "capped run must clear, not publish flood-derived results: {d}"
+    );
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&dir);
+}

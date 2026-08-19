@@ -56,7 +56,7 @@ pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
         };
         let col_start = cs.saturating_sub(1);
         let col_end = ce.max(cs).max(1); // inclusive 1-based end == exclusive 0-based
-        let msg = c[6].trim();
+        let msg = truncate_message(c[6].trim());
         out.push(Diag {
             file: c[2].to_string(),
             line: l.saturating_sub(1),
@@ -66,7 +66,7 @@ pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
             message: if msg.is_empty() {
                 "parse error".to_string()
             } else {
-                msg.to_string()
+                msg
             },
         });
     }
@@ -76,7 +76,7 @@ pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
         let msg = output
             .lines()
             .rev()
-            .find_map(|l| generic.captures(l).map(|c| c[1].trim().to_string()))
+            .find_map(|l| generic.captures(l).map(|c| truncate_message(c[1].trim())))
             .unwrap_or_else(|| format!("opensips -C failed (rc={rc}) with unparseable output"));
         out.push(Diag {
             file: String::new(),
@@ -88,4 +88,19 @@ pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
         });
     }
     out
+}
+
+/// Editors render diagnostics inline: bound the message so a hostile
+/// or broken checker cannot ship megabytes into the client.
+const MESSAGE_CAP: usize = 500;
+
+fn truncate_message(msg: &str) -> String {
+    if msg.len() <= MESSAGE_CAP {
+        return msg.to_string();
+    }
+    let mut end = MESSAGE_CAP;
+    while end > 0 && !msg.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\u{2026}", &msg[..end])
 }
