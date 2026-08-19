@@ -45,3 +45,27 @@ fn diag_file_matching_tolerates_symlinked_tmp() {
         std::path::Path::new("/tmp/a/test.cfg")
     ));
 }
+
+#[test]
+fn timeout_resolution_option_env_default() {
+    use opensips_lsp::logic::resolve_timeout;
+    use std::time::Duration;
+    // option (milliseconds) wins
+    assert_eq!(
+        resolve_timeout(Some(2500), Some("9000".into())),
+        Duration::from_millis(2500)
+    );
+    // env next
+    assert_eq!(
+        resolve_timeout(None, Some("300".into())),
+        Duration::from_millis(300)
+    );
+    // garbage env falls through to the default
+    assert_eq!(
+        resolve_timeout(None, Some("not-a-number".into())),
+        Duration::from_secs(10)
+    );
+    assert_eq!(resolve_timeout(None, None), Duration::from_secs(10));
+    // zero disables nothing: clamp to at least 1ms so timeout() still fires sanely
+    assert_eq!(resolve_timeout(Some(0), None), Duration::from_millis(1));
+}

@@ -17,6 +17,7 @@ export function activate(_context: vscode.ExtensionContext) {
         initializationOptions: {
             opensipsPath: cfg.get<string>('opensipsPath', 'opensips'),
             opensipsSrc: cfg.get<string>('opensipsSrc', ''),
+            checkTimeoutMs: cfg.get<number>('checkTimeoutMs', 10000),
         },
     };
     client = new LanguageClient(

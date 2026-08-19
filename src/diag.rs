@@ -1,20 +1,29 @@
 //! `opensips -C` execution and output parsing.
 
+/// Diagnostic severity, mirroring the LSP levels we emit.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Severity {
+    /// A parse or load error: the cfg will not start.
     Error,
+    /// A non-fatal complaint.
     Warning,
 }
 
+/// One diagnostic parsed out of `opensips -C` output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Diag {
+    /// File the parser attributed the error to (may be empty for
+    /// the global fallback diagnostic).
     pub file: String,
     /// 0-based.
     pub line: u32,
+    /// 0-based start column.
     pub col_start: u32,
-    /// exclusive.
+    /// Exclusive end column.
     pub col_end: u32,
+    /// Mapped severity.
     pub severity: Severity,
+    /// Human-readable message (the yyerror tail).
     pub message: String,
 }
 

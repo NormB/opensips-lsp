@@ -7,6 +7,7 @@ use tower_lsp::{Client, LanguageServer};
 
 use crate::{analyze, catalog, diag, logic};
 
+/// LSP backend: document store, doc catalog, and the `-C` runner.
 pub struct Backend {
     client: Client,
     docs: DashMap<Url, String>,
@@ -14,23 +15,22 @@ pub struct Backend {
     opensips_bin: std::sync::RwLock<Option<String>>,
     /// Serializes `opensips -C` runs: one at a time, no process storm.
     check_gate: tokio::sync::Mutex<()>,
-    check_timeout: std::time::Duration,
+    check_timeout: std::sync::RwLock<std::time::Duration>,
 }
 
 impl Backend {
+    /// Build a backend for one client connection.
     pub fn new(client: Client) -> Self {
-        let check_timeout = std::env::var("OPENSIPS_LSP_CHECK_TIMEOUT_MS")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .map(std::time::Duration::from_millis)
-            .unwrap_or(std::time::Duration::from_secs(10));
         Self {
             client,
             docs: DashMap::new(),
             catalog: std::sync::RwLock::new(Vec::new()),
             opensips_bin: std::sync::RwLock::new(None),
             check_gate: tokio::sync::Mutex::new(()),
-            check_timeout,
+            check_timeout: std::sync::RwLock::new(logic::resolve_timeout(
+                None,
+                std::env::var("OPENSIPS_LSP_CHECK_TIMEOUT_MS").ok(),
+            )),
         }
     }
 
@@ -69,7 +69,8 @@ impl Backend {
             .arg(&path_str)
             .kill_on_drop(true)
             .output();
-        let out = match tokio::time::timeout(self.check_timeout, fut).await {
+        let check_timeout = *self.check_timeout.read().unwrap();
+        let out = match tokio::time::timeout(check_timeout, fut).await {
             Ok(r) => r,
             Err(_) => {
                 self.client
@@ -77,7 +78,7 @@ impl Backend {
                         MessageType::WARNING,
                         format!(
                             "opensips-lsp: '{bin} -C' timed out after {:?} on {path_str}",
-                            self.check_timeout
+                            check_timeout
                         ),
                     )
                     .await;
@@ -132,6 +133,13 @@ impl LanguageServer for Backend {
             std::env::var("OPENSIPS_LSP_BIN").ok(),
         );
         *self.opensips_bin.write().unwrap() = bin;
+
+        if let Some(ms) = opts.get("checkTimeoutMs").and_then(|v| v.as_u64()) {
+            *self.check_timeout.write().unwrap() = logic::resolve_timeout(
+                Some(ms),
+                std::env::var("OPENSIPS_LSP_CHECK_TIMEOUT_MS").ok(),
+            );
+        }
 
         let src = opts
             .get("opensipsSrc")
