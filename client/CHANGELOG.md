@@ -2,6 +2,11 @@
 
 All notable changes to the OpenSIPS Configuration extension.
 
+## [0.5.2] — 2026-08-19
+
+- Full changelog now ships with the extension (this document).
+- Rewritten overview page.
+
 ## [0.5.1] — 2026-08-19
 
 - The OpenSIPS logo mark is now the extension icon.
