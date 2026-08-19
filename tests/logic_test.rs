@@ -1,7 +1,7 @@
 use opensips_lsp::catalog::{Item, ModuleDoc};
 use opensips_lsp::logic::{
-    CompKind, completions, definition_of, hover_markdown, route_occurrences, route_symbol_at,
-    valid_route_name,
+    CompKind, completions, completions_with_core, definition_of, hover_markdown, pvar_tail,
+    route_occurrences, route_symbol_at, signature_at, valid_route_name,
 };
 
 fn catalog() -> Vec<ModuleDoc> {
@@ -210,4 +210,113 @@ fn valid_route_name_gate() {
     assert!(!valid_route_name("quote\""));
     assert!(!valid_route_name("nul\0"));
     assert!(!valid_route_name("paren("));
+}
+
+fn sig_catalog() -> Vec<ModuleDoc> {
+    vec![ModuleDoc {
+        name: "tm".into(),
+        params: vec![],
+        functions: vec![Item {
+            name: "t_relay".into(),
+            detail: "t_relay([flags], [next_hop])".into(),
+            doc: "Relays the transaction.".into(),
+        }],
+    }]
+}
+
+#[test]
+fn signature_at_finds_active_parameter() {
+    let core = opensips_lsp::catalog::CoreDocs::default();
+    let doc = "loadmodule \"tm.so\"\nroute {\n}\n";
+    // first argument
+    let s = signature_at(&sig_catalog(), &core, doc, "    t_relay(").expect("sig");
+    assert_eq!(s.0, "t_relay([flags], [next_hop])");
+    assert_eq!(s.2, 0);
+    // second argument (comma inside a string must not count)
+    let s = signature_at(&sig_catalog(), &core, doc, r#"    t_relay("a,b", "#).expect("sig");
+    assert_eq!(s.2, 1);
+    // nested call: innermost unclosed wins
+    let core_with_fn = opensips_lsp::catalog::CoreDocs {
+        functions: vec![Item {
+            name: "xlog".into(),
+            detail: "xlog([level], format)".into(),
+            doc: String::new(),
+        }],
+        ..Default::default()
+    };
+    let s = signature_at(&sig_catalog(), &core_with_fn, doc, "    t_relay(xlog(").expect("sig");
+    assert_eq!(s.0, "xlog([level], format)");
+    // a CLOSED nested call pops back to the outer one
+    let s = signature_at(
+        &sig_catalog(),
+        &core_with_fn,
+        doc,
+        "    t_relay(xlog(\"x\"), ",
+    )
+    .expect("sig");
+    assert_eq!(s.0, "t_relay([flags], [next_hop])");
+    assert_eq!(s.2, 1);
+    // unknown function → none
+    assert!(signature_at(&sig_catalog(), &core, doc, "    nope(").is_none());
+    // adversarial: never panic
+    for p in ["", "(", ")))((", "\"", "t_relay(\"\\", "#t_relay(", "\0("] {
+        let _ = signature_at(&sig_catalog(), &core, doc, p);
+    }
+}
+
+#[test]
+fn completions_dedup_prefers_richer_items() {
+    // "xlog" exists as a core KEYWORD and as a core function: one item
+    // must survive, and it must be the function (it carries docs)
+    let core = opensips_lsp::catalog::CoreDocs {
+        functions: vec![Item {
+            name: "xlog".into(),
+            detail: "xlog([level], format)".into(),
+            doc: "Logs.".into(),
+        }],
+        ..Default::default()
+    };
+    let out = completions_with_core(&[], &core, "route {\n}\n", "    ");
+    let xlogs: Vec<_> = out.iter().filter(|c| c.label == "xlog").collect();
+    assert_eq!(xlogs.len(), 1, "duplicate labels must collapse");
+    assert_eq!(xlogs[0].kind, CompKind::Function);
+}
+
+#[test]
+fn route_call_argument_completes_route_names() {
+    let doc = "route[relay] {\n    exit;\n}\nroute {\n}\n";
+    let out = completions_with_core(
+        &[],
+        &opensips_lsp::catalog::CoreDocs::default(),
+        doc,
+        "    route(",
+    );
+    assert!(!out.is_empty());
+    assert!(
+        out.iter().all(|c| c.kind == CompKind::Route),
+        "inside route( only route names complete: {:?}",
+        out.iter().map(|c| &c.label).collect::<Vec<_>>()
+    );
+    assert!(out.iter().any(|c| c.label == "relay"));
+    // quoted form and partial names too
+    let out = completions_with_core(
+        &[],
+        &opensips_lsp::catalog::CoreDocs::default(),
+        doc,
+        "    route(\"re",
+    );
+    assert!(out.iter().any(|c| c.label == "relay"));
+}
+
+#[test]
+fn pvar_tail_reports_replacement_length() {
+    // "$ru" → replace "$ru" (3 bytes)
+    assert_eq!(pvar_tail("    $ru"), Some(3));
+    assert_eq!(pvar_tail("$"), Some(1));
+    assert_eq!(pvar_tail("xlog($si"), Some(3));
+    // not a pvar context
+    assert_eq!(pvar_tail("xlog("), None);
+    assert_eq!(pvar_tail(""), None);
+    // "$x y" — space breaks the tail
+    assert_eq!(pvar_tail("$x y"), None);
 }

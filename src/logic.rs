@@ -71,6 +71,15 @@ static_regex!(
     re_string_arg_ctx,
     r#"(modparam\s*\(\s*"|loadmodule\s*")[^"]*$"#
 );
+static_regex!(
+    re_route_call_arg,
+    r#"(?:^|[^A-Za-z0-9_])route\s*\(\s*"?[A-Za-z0-9_.:-]*$"#
+);
+
+/// Is the cursor inside the name argument of a `route(...)` call?
+fn route_call_context(line_prefix: &str) -> bool {
+    re_route_call_arg().is_match(line_prefix)
+}
 
 /// Context-sensitive completion candidates for a cursor whose line
 /// starts with `line_prefix`: modparam values/modules, loadmodule
@@ -111,6 +120,20 @@ pub fn completions(catalog: &[ModuleDoc], doc: &str, line_prefix: &str) -> Vec<C
                 detail: "module".into(),
                 doc: String::new(),
                 kind: CompKind::Module,
+            })
+            .collect();
+    }
+
+    // route(<cursor>) → route names only
+    if route_call_context(line_prefix) {
+        return analyze::route_defs(doc)
+            .into_iter()
+            .filter(|r| !r.name.is_empty())
+            .map(|r| Comp {
+                label: r.name,
+                detail: "route".into(),
+                doc: String::new(),
+                kind: CompKind::Route,
             })
             .collect();
     }
@@ -331,11 +354,7 @@ pub fn completions_with_core(
     line_prefix: &str,
 ) -> Vec<Comp> {
     // "$" prefix → pseudo-variables, nothing else
-    if let Some(tail) = line_prefix.rsplit_once('$').map(|(_, t)| t)
-        && tail
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
-    {
+    if pvar_tail(line_prefix).is_some() {
         return core
             .pvars
             .iter()
@@ -349,9 +368,10 @@ pub fn completions_with_core(
     }
     let mut out = completions(catalog, doc, line_prefix);
     // only plain code position gains core items (the string-argument
-    // contexts returned early inside `completions`)
+    // and route(...) contexts returned early inside `completions`)
     let in_string_ctx = analyze::modparam_context(line_prefix).is_some()
-        || re_string_arg_ctx().is_match(line_prefix);
+        || re_string_arg_ctx().is_match(line_prefix)
+        || route_call_context(line_prefix);
     if !in_string_ctx {
         for f in &core.functions {
             out.push(Comp {
@@ -370,7 +390,127 @@ pub fn completions_with_core(
             });
         }
     }
-    out
+    dedup_completions(out)
+}
+
+/// If the cursor sits in a pseudo-variable context (`$` plus an
+/// alphanumeric/`.`/`_` tail reaching the cursor), the byte length of
+/// the `$`-prefixed token to replace.
+pub fn pvar_tail(line_prefix: &str) -> Option<usize> {
+    let (_, tail) = line_prefix.rsplit_once('$')?;
+    tail.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+        .then_some(1 + tail.len())
+}
+
+/// Collapse duplicate labels, keeping the most informative kind
+/// (Function > Param > Route > Module > Keyword); ties keep the first
+/// occurrence (loaded-module items precede core items).
+fn dedup_completions(items: Vec<Comp>) -> Vec<Comp> {
+    fn rank(k: &CompKind) -> u8 {
+        match k {
+            CompKind::Function => 4,
+            CompKind::Param => 3,
+            CompKind::Route => 2,
+            CompKind::Module => 1,
+            CompKind::Keyword => 0,
+        }
+    }
+    let mut best: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut out: Vec<Option<Comp>> = Vec::with_capacity(items.len());
+    for c in items {
+        match best.get(&c.label) {
+            Some(&i) => {
+                if rank(&c.kind) > rank(&out[i].as_ref().unwrap().kind) {
+                    out[i] = Some(c);
+                }
+            }
+            None => {
+                best.insert(c.label.clone(), out.len());
+                out.push(Some(c));
+            }
+        }
+    }
+    out.into_iter().flatten().collect()
+}
+
+/// The signature under the cursor: the innermost UNCLOSED call in
+/// `line_prefix` resolved against loaded-module functions first, then
+/// any module's, then core functions.  Returns (signature, doc,
+/// active-parameter index); commas inside strings do not advance the
+/// index and a `#` comment ends the scan.
+pub fn signature_at(
+    catalog: &[ModuleDoc],
+    core: &crate::catalog::CoreDocs,
+    doc: &str,
+    line_prefix: &str,
+) -> Option<(String, String, u32)> {
+    let b = line_prefix.as_bytes();
+    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    let mut stack: Vec<(String, u32)> = Vec::new();
+    let mut in_str = false;
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if in_str {
+            if c == b'\\' {
+                i += 2;
+                continue;
+            }
+            if c == b'"' {
+                in_str = false;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            b'"' => in_str = true,
+            b'#' => break,
+            b'(' => {
+                let mut s = i;
+                while s > 0 && (b[s - 1] as char).is_whitespace() {
+                    s -= 1;
+                }
+                let e = s;
+                while s > 0 && word(b[s - 1]) {
+                    s -= 1;
+                }
+                let ident = std::str::from_utf8(&b[s..e]).unwrap_or("").to_string();
+                stack.push((ident, 0));
+            }
+            b')' => {
+                stack.pop();
+            }
+            b',' => {
+                if let Some(top) = stack.last_mut() {
+                    top.1 += 1;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let (name, commas) = stack.pop()?;
+    if name.is_empty() {
+        return None;
+    }
+    let loaded: Vec<String> = analyze::loaded_modules(doc)
+        .into_iter()
+        .map(|m| m.name)
+        .collect();
+    let ordered = catalog
+        .iter()
+        .filter(|m| loaded.contains(&m.name))
+        .chain(catalog.iter().filter(|m| !loaded.contains(&m.name)));
+    for m in ordered {
+        if let Some(f) = m.functions.iter().find(|f| f.name == name) {
+            return Some((f.detail.clone(), f.doc.clone(), commas));
+        }
+    }
+    core.functions
+        .iter()
+        .find(|f| f.name == name)
+        .map(|f| (f.detail.clone(), f.doc.clone(), commas))
 }
 
 /// [`hover_markdown`] plus core functions, core parameters, and

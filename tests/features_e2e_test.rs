@@ -231,3 +231,104 @@ fn all_features_over_stdio_against_a_synthetic_tree() {
     child2.kill().ok();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn signature_help_and_pvar_text_edits() {
+    let base = std::env::temp_dir().join(format!("oslsp-sig-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let tree = base.join("tree");
+    mk_tree(&tree);
+    let doc = "loadmodule \"mymod.so\"\nroute {\n    my_func(\n    $r\n}\n";
+    let cfg = base.join("s.cfg");
+    std::fs::write(&cfg, doc).unwrap();
+    let uri = format!("file://{}", cfg.display());
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env_remove("OPENSIPS_LSP_BIN")
+        .env_remove("OPENSIPS_LSP_SRC")
+        .env(
+            "OPENSIPS_LSP_CACHE_DIR",
+            base.join("cache").display().to_string(),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "capabilities":{},
+        "initializationOptions":{"opensipsPath":"","opensipsSrc": tree.display().to_string()}}}),
+    );
+    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    let sig_caps = &init["result"]["capabilities"]["signatureHelpProvider"];
+    assert!(
+        sig_caps["triggerCharacters"]
+            .as_array()
+            .map(|a| a.iter().any(|c| c == "(") && a.iter().any(|c| c == ","))
+            .unwrap_or(false),
+        "signatureHelp triggers ( and , must be advertised: {init}"
+    );
+    let comp_triggers = &init["result"]["capabilities"]["completionProvider"]["triggerCharacters"];
+    assert!(
+        comp_triggers
+            .as_array()
+            .map(|a| a.iter().any(|c| c == "$"))
+            .unwrap_or(false),
+        "completion must trigger on $"
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    wait_for(
+        &rx,
+        |v| {
+            v["method"] == "window/logMessage"
+                && v["params"]["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("ready")
+        },
+        "ready log",
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":doc}}}),
+    );
+    // signature help just after `my_func(`
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/signatureHelp","params":{
+        "textDocument":{"uri":uri},"position":{"line":2,"character":12}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "signatureHelp");
+    assert_eq!(v["result"]["signatures"][0]["label"], "my_func(arg)");
+    assert_eq!(v["result"]["activeParameter"], 0);
+    // pvar completion replaces the typed `$r`, not appends to it
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{
+        "textDocument":{"uri":uri},"position":{"line":3,"character":6}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 3, "completion");
+    let items = v["result"].as_array().expect("items");
+    let ru = items
+        .iter()
+        .find(|i| i["label"] == "$ru")
+        .expect("$ru item");
+    let te = &ru["textEdit"];
+    assert_eq!(te["newText"], "$ru", "insert the full pvar: {ru}");
+    assert_eq!(te["range"]["start"]["line"], 3);
+    assert_eq!(te["range"]["start"]["character"], 4, "edit starts at the $");
+    assert_eq!(
+        te["range"]["end"]["character"], 6,
+        "edit ends at the cursor"
+    );
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&base);
+}
