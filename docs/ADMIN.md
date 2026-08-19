@@ -6,15 +6,19 @@
 
 `opensips-lsp` is a Language Server Protocol server for the OpenSIPS
 routing script language (`opensips.cfg`). It provides diagnostics,
-completion, hover documentation, go-to-definition and document
-symbols to any LSP-capable editor.
+context-sensitive completion (modules, parameters, exported and core
+functions, pseudo-variables after `$`), hover documentation,
+go-to-definition for routes, and document symbols to any LSP-capable
+editor. Positions are exchanged in UTF-16 units per the LSP default,
+correct on multibyte lines.
 
 Semantic validation is delegated to OpenSIPS itself: the server runs
 `opensips -C -f <file>` and maps the parser's own errors
 (file:line:column) to LSP diagnostics, so results are exact for the
 OpenSIPS version installed. Editor intelligence (completion, hover)
 comes from a documentation catalog harvested from an OpenSIPS source
-tree at startup — the 4.x markdown docs (`modules/*/README.md`) are
+tree right after initialization (a readiness log message reports the
+counts; results are cached — see Caching) — the 4.x markdown docs (`modules/*/README.md`) are
 the most current and win; docbook (`modules/*/doc/*_admin.xml`) is
 the fallback for older trees. Supported and version-proven: OpenSIPS
 4.x (master) and 3.6.x (3.6.8).
@@ -75,6 +79,17 @@ exceeds it is killed and reported via a client log message.
 { "checkTimeoutMs": 3000 }
 ```
 
+### Caching
+
+Harvest results are cached per source tree under
+`$XDG_CACHE_HOME/opensips-lsp` (or `~/.cache/opensips-lsp`), keyed by
+a fingerprint of the tree's path and the modification times of its
+`modules/` and `docs/manual/` directories — adding or removing a
+module or doc page invalidates the cache automatically. The readiness
+log message says `, cached` on a hit. Override the location with the
+`OPENSIPS_LSP_CACHE_DIR` environment variable (env-only knob); delete
+the directory to force a re-harvest.
+
 ### Security
 
 `opensips -C` **dlopens the modules the configuration loads**, so
@@ -96,7 +111,14 @@ diagnostics run against the on-disk file on open and save.
 
 `opensipsSrc` is not set, or the module is not `loadmodule`-ed in the
 current file: function completion is intentionally limited to loaded
-modules.
+modules. Core functions and parameters also come from the tree
+(`docs/manual/`).
+
+#### Completion looks stale after I updated the source tree
+
+Editing a file inside a module does not bump the directory mtimes the
+cache fingerprint watches. Delete the cache directory (see Caching)
+or touch `modules/` to force a re-harvest.
 
 ### License
 

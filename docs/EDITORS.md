@@ -1,7 +1,9 @@
 # Editor setup
 
-Install the server first: `cargo build --release` and put
-`target/release/opensips-lsp` on PATH (or note its absolute path).
+Install the server first — either grab a prebuilt binary from the
+[releases page](https://github.com/NormB/opensips-lsp/releases)
+(x86_64/aarch64 Linux tarballs), or `cargo build --release` and put
+`target/release/opensips-lsp` on PATH.
 All examples pass the same three `initializationOptions` documented
 in `docs/ADMIN.md`.
 
@@ -66,15 +68,12 @@ language-servers = ["opensips-lsp"]
 (add-to-list 'auto-mode-alist '("opensips\\.cfg\\'" . opensips-cfg-mode))
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs
-               '(opensips-cfg-mode . ("opensips-lsp")))
-  (setq-default eglot-workspace-configuration '())
-  ;; initializationOptions:
-  (add-to-list 'eglot-server-programs
                `(opensips-cfg-mode
                  . ("opensips-lsp"
                     :initializationOptions
                     (:opensipsPath "/usr/local/sbin/opensips"
-                     :opensipsSrc "/path/to/opensips")))))
+                     :opensipsSrc "/path/to/opensips"
+                     :checkTimeoutMs 10000)))))
 ```
 
 ## Vim (prabirshrestha/vim-lsp)
