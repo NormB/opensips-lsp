@@ -1,0 +1,51 @@
+name: Sync docs to Wiki
+
+# docs/ + README.md are the single source of truth. On every change,
+# regenerate the wiki tree (scripts/build-wiki.py, gated by
+# tests/wiki_build_test.rs) and force-push it to the wiki repo, so the
+# GitHub Wiki never drifts from the in-repo docs.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'docs/**'
+      - 'scripts/build-wiki.py'
+      - '.github/workflows/wiki-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wiki-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    # The wiki lives at <repo>.wiki.git and is pushed with
+    # GITHUB_TOKEN, so this job genuinely needs write.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build wiki tree from docs
+        run: python3 scripts/build-wiki.py build/wiki
+      - name: Push to wiki
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd build/wiki
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "docs: sync wiki from docs/ @ ${GITHUB_SHA::7}"
+          git push -f \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" \
+            HEAD:master
