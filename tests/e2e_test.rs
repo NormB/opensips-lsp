@@ -337,3 +337,112 @@ fn folding_and_nested_symbols_over_stdio() {
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn references_rename_highlight_over_stdio() {
+    let dir = std::env::temp_dir().join(format!("oslsp-refs-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cfg = dir.join("refs.cfg");
+    let text =
+        "route {\n    route(relay);\n    route(\"relay\");\n}\nroute[relay] {\n    exit;\n}\n";
+    std::fs::write(&cfg, text).unwrap();
+    let uri = format!("file://{}", cfg.display());
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env("OPENSIPS_LSP_BIN", "")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
+    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    for cap in ["referencesProvider", "documentHighlightProvider"] {
+        assert!(
+            init["result"]["capabilities"][cap]
+                .as_bool()
+                .unwrap_or(false),
+            "{cap} must be advertised"
+        );
+    }
+    assert!(
+        !init["result"]["capabilities"]["renameProvider"].is_null(),
+        "renameProvider must be advertised"
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
+    );
+    // references from a call site, declaration included → 2 refs + def
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/references","params":{
+        "textDocument":{"uri":uri},"position":{"line":1,"character":11},
+        "context":{"includeDeclaration":true}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "references");
+    let locs = v["result"].as_array().expect("locations");
+    assert_eq!(locs.len(), 3, "2 refs + 1 def: {locs:?}");
+    // declaration excluded → 2
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/references","params":{
+        "textDocument":{"uri":uri},"position":{"line":1,"character":11},
+        "context":{"includeDeclaration":false}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 3, "references-nodecl");
+    assert_eq!(v["result"].as_array().unwrap().len(), 2);
+    // highlights at the def name: 3 occurrences, def is Write(3)
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"textDocument/documentHighlight","params":{
+        "textDocument":{"uri":uri},"position":{"line":4,"character":7}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 4, "highlight");
+    let hls = v["result"].as_array().expect("highlights");
+    assert_eq!(hls.len(), 3);
+    assert!(
+        hls.iter().any(|h| h["kind"] == 3),
+        "def highlighted as Write"
+    );
+    // rename to a valid name rewrites every occurrence
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":5,"method":"textDocument/rename","params":{
+        "textDocument":{"uri":uri},"position":{"line":1,"character":11},"newName":"fwd.1"}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 5, "rename");
+    let edits = v["result"]["changes"][&uri].as_array().expect("edits");
+    assert_eq!(edits.len(), 3);
+    assert!(edits.iter().all(|e| e["newText"] == "fwd.1"));
+    // the quoted ref's edit replaces only the name inside the quotes
+    let quoted = edits
+        .iter()
+        .find(|e| e["range"]["start"]["line"] == 2)
+        .unwrap();
+    assert_eq!(quoted["range"]["start"]["character"], 11);
+    assert_eq!(quoted["range"]["end"]["character"], 16);
+    // rename to an ILLEGAL name is rejected with an error
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":6,"method":"textDocument/rename","params":{
+        "textDocument":{"uri":uri},"position":{"line":1,"character":11},"newName":"has space"}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 6, "rename-bad");
+    assert!(
+        !v["error"].is_null(),
+        "illegal new name must be a jsonrpc error: {v}"
+    );
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&dir);
+}
