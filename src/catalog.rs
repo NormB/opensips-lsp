@@ -4,7 +4,7 @@
 use std::path::Path;
 
 /// One documented module symbol: a parameter or a function.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Item {
     /// Bare name (`kv_bucket`, `nats_kv_get`).
     pub name: String,
@@ -15,7 +15,7 @@ pub struct Item {
 }
 
 /// The harvested documentation of one OpenSIPS module.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ModuleDoc {
     /// Module name (directory name under `modules/`).
     pub name: String,
@@ -358,7 +358,7 @@ pub fn parse_core_vars_md(md: &str) -> Result<Vec<Item>, String> {
 }
 
 /// Core-language documentation harvested from `docs/manual/` (4.x).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct CoreDocs {
     /// Core script functions (`Script-CoreFunctions.md`).
     pub functions: Vec<Item>,
@@ -378,4 +378,64 @@ pub fn harvest_core(tree_root: &Path) -> CoreDocs {
         params: parse_core_params_md(&read("Script-CoreParameters.md")).unwrap_or_default(),
         pvars: parse_core_vars_md(&read("Script-CoreVar.md")).unwrap_or_default(),
     }
+}
+
+/// A cheap change-detector for a source tree: canonical path plus the
+/// modification times of `modules/` and `docs/manual/` (module or doc
+/// additions/removals bump the directory mtimes).
+pub fn tree_fingerprint(tree_root: &Path) -> String {
+    use std::time::UNIX_EPOCH;
+    let mtime = |p: &Path| -> u128 {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_millis())
+            .unwrap_or(0)
+    };
+    let canon = std::fs::canonicalize(tree_root).unwrap_or_else(|_| tree_root.to_path_buf());
+    let raw = format!(
+        "{}|{}|{}",
+        canon.display(),
+        mtime(&canon.join("modules")),
+        mtime(&canon.join("docs").join("manual")),
+    );
+    // stable, filesystem-safe name
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in raw.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{h:016x}")
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct CacheFile {
+    modules: Vec<ModuleDoc>,
+    core: CoreDocs,
+}
+
+/// Load a cached harvest for `tree_root`, if the cache is present,
+/// parseable, and matches the tree's current fingerprint.
+pub fn load_cached(tree_root: &Path, cache_dir: &Path) -> Option<(Vec<ModuleDoc>, CoreDocs)> {
+    let f = cache_dir.join(format!("{}.json", tree_fingerprint(tree_root)));
+    let bytes = std::fs::read(f).ok()?;
+    let c: CacheFile = serde_json::from_slice(&bytes).ok()?;
+    Some((c.modules, c.core))
+}
+
+/// Persist a harvest under the tree's current fingerprint.
+pub fn save_cache(
+    tree_root: &Path,
+    cache_dir: &Path,
+    modules: &[ModuleDoc],
+    core: &CoreDocs,
+) -> Result<(), String> {
+    std::fs::create_dir_all(cache_dir).map_err(|e| e.to_string())?;
+    let f = cache_dir.join(format!("{}.json", tree_fingerprint(tree_root)));
+    let c = CacheFile {
+        modules: modules.to_vec(),
+        core: core.clone(),
+    };
+    std::fs::write(f, serde_json::to_vec(&c).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }

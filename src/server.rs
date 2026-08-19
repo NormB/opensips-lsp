@@ -38,16 +38,15 @@ impl Backend {
         }
     }
 
+    fn doc_line(text: &str, line: u32) -> String {
+        text.lines().nth(line as usize).unwrap_or("").to_string()
+    }
+
     fn line_prefix(text: &str, pos: Position) -> String {
         text.lines()
             .nth(pos.line as usize)
             .map(|l| {
-                let end = (pos.character as usize).min(l.len());
-                // avoid slicing inside a UTF-8 char
-                let mut e = end;
-                while e > 0 && !l.is_char_boundary(e) {
-                    e -= 1;
-                }
+                let e = analyze::utf16_to_byte(l, pos.character);
                 l[..e].to_string()
             })
             .unwrap_or_default()
@@ -104,13 +103,21 @@ impl Backend {
             String::from_utf8_lossy(&out.stderr)
         );
         let rc = out.status.code().unwrap_or(-1);
+        // opensips reports byte columns; the client expects UTF-16 units
+        let doc_text = self.docs.get(uri).map(|t| t.clone()).unwrap_or_default();
         let diags: Vec<Diagnostic> = diag::parse_check_output(&text, rc)
             .into_iter()
             .filter(|d| logic::diag_matches_file(&d.file, &path))
             .map(|d| Diagnostic {
-                range: Range {
-                    start: Position::new(d.line, d.col_start),
-                    end: Position::new(d.line, d.col_end),
+                range: {
+                    let lt = Self::doc_line(&doc_text, d.line);
+                    Range {
+                        start: Position::new(
+                            d.line,
+                            analyze::byte_to_utf16(&lt, d.col_start as usize),
+                        ),
+                        end: Position::new(d.line, analyze::byte_to_utf16(&lt, d.col_end as usize)),
+                    }
                 },
                 severity: Some(match d.severity {
                     diag::Severity::Error => DiagnosticSeverity::ERROR,
@@ -183,24 +190,50 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         let src = self.src.read().unwrap().clone();
+        let mut cached = false;
         if let Some(src) = src {
-            // a large tree takes seconds to harvest; keep it off the
-            // async executor thread and out of the handshake
-            let (harvested, core) = tokio::task::spawn_blocking(move || {
+            // the harvest runs off the executor thread and outside the
+            // handshake; results are cached per tree fingerprint
+            let (harvested, core, hit) = tokio::task::spawn_blocking(move || {
                 let p = std::path::Path::new(&src);
-                (catalog::harvest_tree(p), catalog::harvest_core(p))
+                let cache_dir = std::env::var("OPENSIPS_LSP_CACHE_DIR")
+                    .map(std::path::PathBuf::from)
+                    .ok()
+                    .or_else(|| {
+                        std::env::var("XDG_CACHE_HOME")
+                            .map(std::path::PathBuf::from)
+                            .ok()
+                            .or_else(|| {
+                                std::env::var("HOME")
+                                    .map(|h| std::path::PathBuf::from(h).join(".cache"))
+                                    .ok()
+                            })
+                            .map(|c| c.join("opensips-lsp"))
+                    });
+                if let Some(dir) = &cache_dir
+                    && let Some((m, c)) = catalog::load_cached(p, dir)
+                {
+                    return (m, c, true);
+                }
+                let out = (catalog::harvest_tree(p), catalog::harvest_core(p));
+                if let Some(dir) = &cache_dir {
+                    let _ = catalog::save_cache(p, dir, &out.0, &out.1);
+                }
+                (out.0, out.1, false)
             })
             .await
             .unwrap_or_default();
             *self.catalog.write().unwrap() = harvested;
             *self.core.write().unwrap() = core;
+            cached = hit;
         }
         let n = self.catalog.read().unwrap().len();
         let c = self.core.read().unwrap().functions.len();
+        let tag = if cached { ", cached" } else { "" };
         self.client
             .log_message(
                 MessageType::INFO,
-                format!("opensips-lsp ready ({n} documented modules, {c} core functions)"),
+                format!("opensips-lsp ready ({n} documented modules, {c} core functions{tag})"),
             )
             .await;
     }
@@ -270,7 +303,8 @@ impl LanguageServer for Backend {
         let Some(line) = text.lines().nth(pos.line as usize) else {
             return Ok(None);
         };
-        let Some(word) = analyze::word_at(line, pos.character as usize) else {
+        let byte_col = analyze::utf16_to_byte(line, pos.character);
+        let Some(word) = analyze::word_at(line, byte_col) else {
             return Ok(None);
         };
         let cat = self.catalog.read().unwrap();
@@ -295,17 +329,19 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&uri).map(|d| d.clone()) else {
             return Ok(None);
         };
-        Ok(
-            logic::definition_of(&text, pos.line, pos.character).map(|d| {
-                GotoDefinitionResponse::Scalar(Location {
-                    uri,
-                    range: Range {
-                        start: Position::new(d.line, d.col),
-                        end: Position::new(d.line, d.col),
-                    },
-                })
-            }),
-        )
+        let line_text = Self::doc_line(&text, pos.line);
+        let byte_col = analyze::utf16_to_byte(&line_text, pos.character) as u32;
+        Ok(logic::definition_of(&text, pos.line, byte_col).map(|d| {
+            let def_line = Self::doc_line(&text, d.line);
+            let c = analyze::byte_to_utf16(&def_line, d.col as usize);
+            GotoDefinitionResponse::Scalar(Location {
+                uri,
+                range: Range {
+                    start: Position::new(d.line, c),
+                    end: Position::new(d.line, c),
+                },
+            })
+        }))
     }
 
     async fn document_symbol(
@@ -329,9 +365,13 @@ impl LanguageServer for Backend {
                 deprecated: None,
                 location: Location {
                     uri: p.text_document.uri.clone(),
-                    range: Range {
-                        start: Position::new(r.line, r.col),
-                        end: Position::new(r.line, r.col),
+                    range: {
+                        let lt = Self::doc_line(&text, r.line);
+                        let c = analyze::byte_to_utf16(&lt, r.col as usize);
+                        Range {
+                            start: Position::new(r.line, c),
+                            end: Position::new(r.line, c),
+                        }
                     },
                 },
                 container_name: None,
