@@ -303,6 +303,7 @@ impl LanguageServer for Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 ..Default::default()
             },
         })
@@ -501,31 +502,53 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         #[allow(deprecated)]
-        let syms: Vec<SymbolInformation> = analyze::route_defs(&text)
+        let syms: Vec<DocumentSymbol> = analyze::route_blocks(&text)
             .into_iter()
-            .map(|r| SymbolInformation {
-                name: if r.name.is_empty() {
-                    "route (main)".into()
-                } else {
-                    format!("route[{}]", r.name)
-                },
-                kind: SymbolKind::FUNCTION,
-                tags: None,
-                deprecated: None,
-                location: Location {
-                    uri: p.text_document.uri.clone(),
-                    range: {
-                        let lt = Self::doc_line(&text, r.line);
-                        let c = analyze::byte_to_utf16(&lt, r.col as usize);
-                        Range {
-                            start: Position::new(r.line, c),
-                            end: Position::new(r.line, c),
+            .map(|b| {
+                let lt = Self::doc_line(&text, b.line);
+                let start = Position::new(b.line, analyze::byte_to_utf16(&lt, b.col as usize));
+                let et = Self::doc_line(&text, b.end_line);
+                let end =
+                    Position::new(b.end_line, analyze::byte_to_utf16(&et, b.end_col as usize));
+                DocumentSymbol {
+                    name: if b.name.is_empty() {
+                        if b.kind == "route" {
+                            "route (main)".into()
+                        } else {
+                            b.kind.clone()
                         }
+                    } else {
+                        format!("{}[{}]", b.kind, b.name)
                     },
-                },
-                container_name: None,
+                    detail: None,
+                    kind: SymbolKind::FUNCTION,
+                    tags: None,
+                    deprecated: None,
+                    range: Range { start, end },
+                    selection_range: Range { start, end: start },
+                    children: None,
+                }
             })
             .collect();
-        Ok(Some(DocumentSymbolResponse::Flat(syms)))
+        Ok(Some(DocumentSymbolResponse::Nested(syms)))
+    }
+
+    async fn folding_range(&self, p: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
+        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let ranges: Vec<FoldingRange> = analyze::route_blocks(&text)
+            .into_iter()
+            .filter(|b| b.end_line > b.line)
+            .map(|b| FoldingRange {
+                start_line: b.line,
+                start_character: None,
+                end_line: b.end_line,
+                end_character: None,
+                kind: Some(FoldingRangeKind::Region),
+                collapsed_text: None,
+            })
+            .collect();
+        Ok(Some(ranges))
     }
 }
