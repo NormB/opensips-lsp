@@ -104,3 +104,55 @@ fn adversarial_docs_do_not_panic() {
         let _ = definition_of(text, 0, 0);
     }
 }
+
+fn core() -> opensips_lsp::catalog::CoreDocs {
+    opensips_lsp::catalog::CoreDocs {
+        functions: vec![Item {
+            name: "cache_store".into(),
+            detail: "cache_store(storage_id, attribute, value, [timeout])".into(),
+            doc: "Stores a value.".into(),
+        }],
+        params: vec![Item {
+            name: "advertised_address".into(),
+            detail: "core parameter".into(),
+            doc: "Address advertised in Via.".into(),
+        }],
+        pvars: vec![Item {
+            name: "$ru".into(),
+            detail: "Request URI".into(),
+            doc: "The full request URI.".into(),
+        }],
+    }
+}
+
+#[test]
+fn code_position_offers_core_functions() {
+    use opensips_lsp::logic::completions_with_core;
+    let items = completions_with_core(&catalog(), &core(), DOC, "    cache_");
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(labels.contains(&"cache_store"));
+    assert!(labels.contains(&"t_relay")); // module functions still there
+    assert!(labels.contains(&"advertised_address")); // core params too
+}
+
+#[test]
+fn dollar_prefix_offers_pseudo_variables_only() {
+    use opensips_lsp::logic::completions_with_core;
+    let items = completions_with_core(&catalog(), &core(), DOC, "    xlog(\"$");
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(labels, vec!["$ru"]);
+}
+
+#[test]
+fn hover_covers_core_items() {
+    use opensips_lsp::logic::hover_markdown_with_core;
+    let h = hover_markdown_with_core(&catalog(), &core(), DOC, "cache_store").unwrap();
+    assert!(h.contains("cache_store(storage_id"));
+    let h = hover_markdown_with_core(&catalog(), &core(), DOC, "ru").unwrap();
+    assert!(h.contains("Request URI"));
+    let h = hover_markdown_with_core(&catalog(), &core(), DOC, "advertised_address").unwrap();
+    assert!(h.contains("Via"));
+    // module symbols still win where they exist
+    let h = hover_markdown_with_core(&catalog(), &core(), DOC, "t_relay").unwrap();
+    assert!(h.contains("module tm"));
+}

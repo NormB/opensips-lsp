@@ -242,3 +242,88 @@ pub fn resolve_timeout(option_ms: Option<u64>, env: Option<String>) -> std::time
         .unwrap_or(10_000);
     std::time::Duration::from_millis(ms.max(1))
 }
+
+/// [`completions`] plus core-language items: core functions and core
+/// parameters in code position, and pseudo-variables when the cursor
+/// follows a `$`.
+pub fn completions_with_core(
+    catalog: &[ModuleDoc],
+    core: &crate::catalog::CoreDocs,
+    doc: &str,
+    line_prefix: &str,
+) -> Vec<Comp> {
+    // "$" prefix → pseudo-variables, nothing else
+    if let Some(tail) = line_prefix.rsplit_once('$').map(|(_, t)| t)
+        && tail
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+    {
+        return core
+            .pvars
+            .iter()
+            .map(|v| Comp {
+                label: v.name.clone(),
+                detail: v.detail.clone(),
+                doc: v.doc.clone(),
+                kind: CompKind::Keyword,
+            })
+            .collect();
+    }
+    let mut out = completions(catalog, doc, line_prefix);
+    // only plain code position gains core items (the string-argument
+    // contexts returned early inside `completions`)
+    let in_string_ctx = analyze::modparam_context(line_prefix).is_some()
+        || regex::Regex::new(r#"(modparam\s*\(\s*"|loadmodule\s*")[^"]*$"#)
+            .unwrap()
+            .is_match(line_prefix);
+    if !in_string_ctx {
+        for f in &core.functions {
+            out.push(Comp {
+                label: f.name.clone(),
+                detail: f.detail.clone(),
+                doc: f.doc.clone(),
+                kind: CompKind::Function,
+            });
+        }
+        for p in &core.params {
+            out.push(Comp {
+                label: p.name.clone(),
+                detail: p.detail.clone(),
+                doc: p.doc.clone(),
+                kind: CompKind::Param,
+            });
+        }
+    }
+    out
+}
+
+/// [`hover_markdown`] plus core functions, core parameters, and
+/// pseudo-variables (`word` may be given without the `$`).
+pub fn hover_markdown_with_core(
+    catalog: &[ModuleDoc],
+    core: &crate::catalog::CoreDocs,
+    doc: &str,
+    word: &str,
+) -> Option<String> {
+    if let Some(h) = hover_markdown(catalog, doc, word) {
+        return Some(h);
+    }
+    if let Some(f) = core.functions.iter().find(|f| f.name == word) {
+        return Some(format!(
+            "```\n{}\n```\n*core function*\n\n{}",
+            f.detail, f.doc
+        ));
+    }
+    if let Some(p) = core.params.iter().find(|p| p.name == word) {
+        return Some(format!("**{}** — core parameter\n\n{}", p.name, p.doc));
+    }
+    let dollar = format!("${word}");
+    if let Some(v) = core
+        .pvars
+        .iter()
+        .find(|v| v.name == word || v.name == dollar)
+    {
+        return Some(format!("**{}** — {}\n\n{}", v.name, v.detail, v.doc));
+    }
+    None
+}
