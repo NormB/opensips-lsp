@@ -49,6 +49,24 @@ impl Backend {
         text.lines().nth(line as usize).unwrap_or("").to_string()
     }
 
+    /// The route name under an LSP (UTF-16) position, if any.
+    fn route_name_at(text: &str, pos: Position) -> Option<String> {
+        let line = text.lines().nth(pos.line as usize)?;
+        let byte_col = analyze::utf16_to_byte(line, pos.character) as u32;
+        logic::route_symbol_at(text, pos.line, byte_col)
+    }
+
+    /// UTF-16 range of one route-name occurrence.
+    fn occurrence_range(text: &str, l: &analyze::Located) -> Range {
+        let lt = Self::doc_line(text, l.line);
+        let s = analyze::byte_to_utf16(&lt, l.col as usize);
+        let e = analyze::byte_to_utf16(&lt, l.col as usize + l.name.len());
+        Range {
+            start: Position::new(l.line, s),
+            end: Position::new(l.line, e),
+        }
+    }
+
     fn line_prefix(text: &str, pos: Position) -> String {
         text.lines()
             .nth(pos.line as usize)
@@ -304,6 +322,9 @@ impl LanguageServer for Backend {
                 definition_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                references_provider: Some(OneOf::Left(true)),
+                document_highlight_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Left(true)),
                 ..Default::default()
             },
         })
@@ -531,6 +552,83 @@ impl LanguageServer for Backend {
             })
             .collect();
         Ok(Some(DocumentSymbolResponse::Nested(syms)))
+    }
+
+    async fn references(&self, p: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = p.text_document_position.text_document.uri;
+        let pos = p.text_document_position.position;
+        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let Some(name) = Self::route_name_at(&text, pos) else {
+            return Ok(None);
+        };
+        let include_decl = p.context.include_declaration;
+        let locs = logic::route_occurrences(&text, &name)
+            .into_iter()
+            .filter(|(_, is_def)| include_decl || !is_def)
+            .map(|(l, _)| Location {
+                uri: uri.clone(),
+                range: Self::occurrence_range(&text, &l),
+            })
+            .collect();
+        Ok(Some(locs))
+    }
+
+    async fn document_highlight(
+        &self,
+        p: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        let uri = p.text_document_position_params.text_document.uri;
+        let pos = p.text_document_position_params.position;
+        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let Some(name) = Self::route_name_at(&text, pos) else {
+            return Ok(None);
+        };
+        let hls = logic::route_occurrences(&text, &name)
+            .into_iter()
+            .map(|(l, is_def)| DocumentHighlight {
+                range: Self::occurrence_range(&text, &l),
+                kind: Some(if is_def {
+                    DocumentHighlightKind::WRITE
+                } else {
+                    DocumentHighlightKind::READ
+                }),
+            })
+            .collect();
+        Ok(Some(hls))
+    }
+
+    async fn rename(&self, p: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = p.text_document_position.text_document.uri;
+        let pos = p.text_document_position.position;
+        let new_name = p.new_name;
+        if !logic::valid_route_name(&new_name) {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(format!(
+                "'{new_name}' is not a legal route name ([A-Za-z0-9_.:-]+)"
+            )));
+        }
+        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let Some(name) = Self::route_name_at(&text, pos) else {
+            return Ok(None);
+        };
+        let edits: Vec<TextEdit> = logic::route_occurrences(&text, &name)
+            .into_iter()
+            .map(|(l, _)| TextEdit {
+                range: Self::occurrence_range(&text, &l),
+                new_text: new_name.clone(),
+            })
+            .collect();
+        let mut changes = std::collections::HashMap::new();
+        changes.insert(uri, edits);
+        Ok(Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }))
     }
 
     async fn folding_range(&self, p: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {

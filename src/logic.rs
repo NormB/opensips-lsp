@@ -188,20 +188,79 @@ pub fn hover_markdown(catalog: &[ModuleDoc], doc: &str, word: &str) -> Option<St
     })
 }
 
+/// Is byte position (line, col) inside the name span starting at `l`?
+fn in_span(l: &Located, name: &str, line: u32, col: u32) -> bool {
+    l.line == line && col >= l.col && col < l.col + name.len() as u32
+}
+
 /// Go-to-definition: a route name under the cursor resolves to its
-/// `route[name]` block.
+/// `route[name]` block.  Matching is span-based, so dotted names like
+/// `to.b` resolve whole (they are legal in route names).
 pub fn definition_of(doc: &str, line: u32, col: u32) -> Option<Located> {
-    let text_line = doc.lines().nth(line as usize)?;
-    let word = analyze::word_at(text_line, col as usize)?;
-    let on_ref = analyze::route_refs(doc)
+    let name = analyze::route_refs(doc)
         .into_iter()
-        .any(|r| r.line == line && r.name == word);
-    if !on_ref {
-        return None;
-    }
+        .find(|r| in_span(r, &r.name, line, col))?
+        .name;
     analyze::route_defs(doc)
         .into_iter()
-        .find(|d| d.name == word)
+        .find(|d| d.name == name)
+}
+
+/// The route name whose span covers byte position (line, col) — at a
+/// `route(name)` call site or at the NAME inside a `route[name]`
+/// definition.  The anonymous main route has no symbol.
+pub fn route_symbol_at(doc: &str, line: u32, col: u32) -> Option<String> {
+    if let Some(r) = analyze::route_refs(doc)
+        .into_iter()
+        .find(|r| in_span(r, &r.name, line, col))
+    {
+        return Some(r.name);
+    }
+    analyze::route_blocks(doc)
+        .into_iter()
+        .filter(|b| !b.name.is_empty())
+        .find(|b| {
+            let at = Located {
+                name: b.name.clone(),
+                line: b.name_line,
+                col: b.name_col,
+            };
+            in_span(&at, &b.name, line, col)
+        })
+        .map(|b| b.name)
+}
+
+/// Every occurrence of route `name` in `doc`: call sites and the
+/// definition's name span.  The bool is `true` for the definition.
+pub fn route_occurrences(doc: &str, name: &str) -> Vec<(Located, bool)> {
+    if name.is_empty() {
+        return Vec::new();
+    }
+    let mut out: Vec<(Located, bool)> = analyze::route_refs(doc)
+        .into_iter()
+        .filter(|r| r.name == name)
+        .map(|r| (r, false))
+        .collect();
+    for b in analyze::route_blocks(doc) {
+        if b.name == name {
+            out.push((
+                Located {
+                    name: b.name,
+                    line: b.name_line,
+                    col: b.name_col,
+                },
+                true,
+            ));
+        }
+    }
+    out
+}
+
+/// Is `s` a legal route name (`[A-Za-z0-9_.:-]+`)?  Gates rename.
+pub fn valid_route_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
 }
 
 /// Resolve the opensips binary used for `-C` diagnostics.

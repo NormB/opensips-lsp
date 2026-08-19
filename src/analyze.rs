@@ -167,6 +167,10 @@ pub struct Block {
     pub end_line: u32,
     /// 0-based column just past the closing brace.
     pub end_col: u32,
+    /// 0-based line of the route NAME (keyword line if unnamed).
+    pub name_line: u32,
+    /// 0-based start column of the route NAME (keyword col if unnamed).
+    pub name_col: u32,
 }
 
 /// [`route_defs`] with block extents: braces are matched through the
@@ -214,6 +218,10 @@ pub fn route_blocks(text: &str) -> Vec<Block> {
             }
             None => line_col(text, text.len()),
         };
+        let (name_line, name_col) = c
+            .get(2)
+            .map(|m| line_col(text, m.start()))
+            .unwrap_or((line, col));
         out.push(Block {
             name: c.get(2).map(|m| m.as_str().to_string()).unwrap_or_default(),
             kind: c.get(1).unwrap().as_str().to_string(),
@@ -221,6 +229,8 @@ pub fn route_blocks(text: &str) -> Vec<Block> {
             col,
             end_line,
             end_col,
+            name_line,
+            name_col,
         });
     }
     out
