@@ -437,5 +437,14 @@ pub fn save_cache(
         modules: modules.to_vec(),
         core: core.clone(),
     };
-    std::fs::write(f, serde_json::to_vec(&c).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    let bytes = serde_json::to_vec(&c).map_err(|e| e.to_string())?;
+    // atomic publish: concurrent servers may write the same file, and
+    // readers must never see a torn cache — write-then-rename
+    let tmp = cache_dir.join(format!(
+        ".{}.{}.tmp",
+        tree_fingerprint(tree_root),
+        std::process::id()
+    ));
+    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &f).map_err(|e| e.to_string())
 }
