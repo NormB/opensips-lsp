@@ -14,7 +14,7 @@ one automatically.
 
 **VSCodium / Cursor / Gitpod** (and other Open VSX editors): press
 **Ctrl+Shift+X**, search for **opensips**, click **Install** on
-"OpenSIPS Language Support" — done; the platform builds bundle
+"OpenSIPS Routing Script" — done; the platform builds bundle
 everything.
 
 **Standard VS Code** ships with Microsoft's marketplace, where this

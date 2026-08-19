@@ -1,6 +1,11 @@
 # Changelog
 
-All notable changes to the OpenSIPS Language Support extension.
+All notable changes to the OpenSIPS Routing Script extension.
+
+## [0.5.4] — 2026-08-19
+
+- Display name is now "OpenSIPS Routing Script" (the previous names
+  collide with Microsoft's marketplace similarity rules).
 
 ## [0.5.3] — 2026-08-19
 
