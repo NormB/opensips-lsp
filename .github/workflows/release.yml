@@ -125,9 +125,14 @@ jobs:
             echo "OVSX_PAT secret not set — skipping Open VSX publish."
             exit 0
           fi
-          # first publish needs the namespace; idempotent afterwards
-          npx --yes ovsx create-namespace NormBrandinger -p "$OVSX_PAT" || true
-          npx --yes ovsx publish *.vsix -p "$OVSX_PAT"
+          # first publish needs the namespace (derived from the vsix
+          # manifest so it can never drift); idempotent afterwards
+          NS=$(python3 -c "import zipfile,json,glob; \
+            print(json.loads(zipfile.ZipFile(sorted(glob.glob('*.vsix'))[0]).read('extension/package.json'))['publisher'])")
+          npx --yes ovsx create-namespace "$NS" -p "$OVSX_PAT" || true
+          for f in *.vsix; do
+            npx --yes ovsx publish "$f" -p "$OVSX_PAT" || exit 1
+          done
 
   publish:
     name: GitHub release
