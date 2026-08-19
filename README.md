@@ -43,6 +43,15 @@ usually what you want).
 
 ## Install
 
+**New to all of this?** Follow the
+[Getting Started guide](docs/GETTING_STARTED.md) — one-command
+install plus click-by-click usage instructions. Short version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/NormB/opensips-lsp/main/install.sh | sh
+```
+
+
 Prebuilt server binaries (x86_64 and aarch64 Linux) and the VS Code
 `.vsix` ship with every [GitHub release](https://github.com/NormB/opensips-lsp/releases):
 

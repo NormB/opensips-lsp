@@ -47,6 +47,7 @@ fn wiki_tree_is_generated_from_docs() {
 
     let sidebar = std::fs::read_to_string(out.join("_Sidebar.md")).unwrap();
     assert!(sidebar.contains("Admin-Guide") && sidebar.contains("Editor-Setup"));
+    assert!(sidebar.contains("Getting-Started"));
 
     let _ = std::fs::remove_dir_all(&out);
 }
