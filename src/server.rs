@@ -315,8 +315,13 @@ impl LanguageServer for Backend {
                     },
                 )),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec!["\"".into()]),
+                    trigger_characters: Some(vec!["\"".into(), "$".into()]),
                     ..Default::default()
+                }),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".into(), ",".into()]),
+                    retrigger_characters: None,
+                    work_done_progress_options: Default::default(),
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
@@ -416,7 +421,17 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let prefix = Self::line_prefix(&text, p.text_document_position.position);
+        let pos = p.text_document_position.position;
+        let prefix = Self::line_prefix(&text, pos);
+        // typed `$` + tail: completions REPLACE the typed token (labels
+        // carry the `$`, so plain insertion would double it)
+        let pvar_edit_range = logic::pvar_tail(&prefix).map(|n| {
+            // the tail is ASCII, so bytes == UTF-16 units
+            Range {
+                start: Position::new(pos.line, pos.character.saturating_sub(n as u32)),
+                end: pos,
+            }
+        });
         let cat = self.catalog.read().unwrap();
         let core = self.core.read().unwrap();
         let snippets = *self.snippet_completions.read().unwrap();
@@ -441,6 +456,12 @@ impl LanguageServer for Backend {
                         (None, None)
                     };
                 CompletionItem {
+                    text_edit: pvar_edit_range.map(|range| {
+                        CompletionTextEdit::Edit(TextEdit {
+                            range,
+                            new_text: c.label.clone(),
+                        })
+                    }),
                     insert_text,
                     insert_text_format,
                     label: c.label,
@@ -552,6 +573,52 @@ impl LanguageServer for Backend {
             })
             .collect();
         Ok(Some(DocumentSymbolResponse::Nested(syms)))
+    }
+
+    async fn signature_help(&self, p: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let uri = p.text_document_position_params.text_document.uri;
+        let pos = p.text_document_position_params.position;
+        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let prefix = Self::line_prefix(&text, pos);
+        let cat = self.catalog.read().unwrap();
+        let core = self.core.read().unwrap();
+        Ok(
+            logic::signature_at(&cat, &core, &text, &prefix).map(|(sig, doc, active)| {
+                // parameter labels: the signature's top-level
+                // comma-separated pieces between the outer parens
+                let params: Vec<ParameterInformation> = sig
+                    .find('(')
+                    .zip(sig.rfind(')'))
+                    .filter(|(o, c)| o + 1 < *c)
+                    .map(|(o, c)| {
+                        sig[o + 1..c]
+                            .split(',')
+                            .map(|s| ParameterInformation {
+                                label: ParameterLabel::Simple(s.trim().to_string()),
+                                documentation: None,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                SignatureHelp {
+                    signatures: vec![SignatureInformation {
+                        label: sig,
+                        documentation: (!doc.is_empty()).then_some(Documentation::MarkupContent(
+                            MarkupContent {
+                                kind: MarkupKind::Markdown,
+                                value: doc,
+                            },
+                        )),
+                        parameters: (!params.is_empty()).then_some(params),
+                        active_parameter: Some(active),
+                    }],
+                    active_signature: Some(0),
+                    active_parameter: Some(active),
+                }
+            }),
+        )
     }
 
     async fn references(&self, p: ReferenceParams) -> Result<Option<Vec<Location>>> {
