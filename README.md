@@ -74,3 +74,14 @@ cargo test                   # full suite, includes a stdio LSP e2e test
 Semantic truth stays in OpenSIPS itself (`-C`); the server never
 guesses about grammar validity, so it is automatically correct for
 whatever OpenSIPS version it is pointed at.
+
+## Security note
+
+`opensips -C` **dlopens the modules the cfg loads** — their
+constructors run. Opening a config from an untrusted source therefore
+executes code paths you did not write. Rely on your editor's
+workspace-trust prompt, and/or disable diagnostics entirely by
+setting `opensipsPath` (or `OPENSIPS_LSP_BIN`) to an **empty string**
+— completion, hover, and navigation keep working without it.
+`-C` runs are serialized and bounded (10s default,
+`OPENSIPS_LSP_CHECK_TIMEOUT_MS` to tune).

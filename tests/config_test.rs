@@ -28,11 +28,17 @@ fn option_beats_env() {
 #[test]
 fn diag_file_matching_tolerates_symlinked_tmp() {
     // exact match
-    assert!(diag_matches_file("/x/test.cfg", std::path::Path::new("/x/test.cfg")));
+    assert!(diag_matches_file(
+        "/x/test.cfg",
+        std::path::Path::new("/x/test.cfg")
+    ));
     // empty diag file = global fallback, always attaches
     assert!(diag_matches_file("", std::path::Path::new("/x/test.cfg")));
     // different basename never matches
-    assert!(!diag_matches_file("/x/other.cfg", std::path::Path::new("/x/test.cfg")));
+    assert!(!diag_matches_file(
+        "/x/other.cfg",
+        std::path::Path::new("/x/test.cfg")
+    ));
     // same basename, different dir spelling (symlink case) DOES match
     assert!(diag_matches_file(
         "/private/tmp/a/test.cfg",
