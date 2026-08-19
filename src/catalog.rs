@@ -25,6 +25,28 @@ pub struct ModuleDoc {
     pub functions: Vec<Item>,
 }
 
+/// Harvested documentation is untrusted input rendered as Markdown in
+/// editor popups: strip raw HTML and neutralize links whose scheme is
+/// not http(s) (`command:`, `javascript:`, ...) — the label survives.
+fn sanitize_doc(text: &str) -> String {
+    static HTML: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static LINK: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let html = HTML.get_or_init(|| regex::Regex::new(r"</?[A-Za-z][^>]*>").unwrap());
+    let link = LINK.get_or_init(|| {
+        regex::Regex::new(r"\[([^\]]*)\]\(([A-Za-z][A-Za-z0-9+.-]*):[^)]*\)").unwrap()
+    });
+    let no_html = html.replace_all(text, "");
+    link.replace_all(&no_html, |c: &regex::Captures| {
+        let scheme = c[2].to_ascii_lowercase();
+        if scheme == "http" || scheme == "https" {
+            c[0].to_string()
+        } else {
+            c[1].to_string()
+        }
+    })
+    .into_owned()
+}
+
 /// The docbook sources use DTD entities (`&osips;`, `&adminguide;`)
 /// whose definitions live in files we do not load; neutralize every
 /// non-predefined entity so the XML still parses standalone.
@@ -49,7 +71,7 @@ fn collapsed_text(node: roxmltree::Node) -> String {
             out.push(' ');
         }
     }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    sanitize_doc(&out.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
 /// First direct `<para>` child of a section, collapsed.
@@ -176,11 +198,13 @@ pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, String> {
     let flush = |cur: &mut Option<(bool, String, String, Vec<String>, bool)>,
                  out: &mut ModuleDoc| {
         if let Some((is_param, name, detail, lines, _)) = cur.take() {
-            let doc = lines
-                .join(" ")
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ");
+            let doc = sanitize_doc(
+                &lines
+                    .join(" ")
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
             let item = Item { name, detail, doc };
             if is_param {
                 out.params.push(item);
@@ -271,14 +295,14 @@ fn md_sections(md: &str, level: usize) -> Result<Vec<(String, String)>, String> 
         }
         if let Some(h) = line.strip_prefix(&marker) {
             if let Some((name, lines, _)) = cur.take() {
-                out.push((name, lines.join(" ")));
+                out.push((name, sanitize_doc(&lines.join(" "))));
             }
             cur = Some((h.trim().to_string(), Vec::new(), false));
             continue;
         }
         if line.starts_with('#') {
             if let Some((name, lines, _)) = cur.take() {
-                out.push((name, lines.join(" ")));
+                out.push((name, sanitize_doc(&lines.join(" "))));
             }
             continue;
         }
@@ -294,7 +318,7 @@ fn md_sections(md: &str, level: usize) -> Result<Vec<(String, String)>, String> 
         }
     }
     if let Some((name, lines, _)) = cur.take() {
-        out.push((name, lines.join(" ")));
+        out.push((name, sanitize_doc(&lines.join(" "))));
     }
     Ok(out)
 }
