@@ -20,8 +20,9 @@ command -v curl >/dev/null 2>&1 || fail "curl is required"
 command -v tar  >/dev/null 2>&1 || fail "tar is required"
 
 case "$(uname -s)" in
-    Linux) ;;
-    *) fail "prebuilt binaries are Linux-only for now; see README 'Build & test' for other systems" ;;
+    Linux)  OS=linux-gnu ;;
+    Darwin) OS=darwin ;;
+    *) fail "no prebuilt binaries for $(uname -s); see README 'Build & test'" ;;
 esac
 case "$(uname -m)" in
     x86_64|amd64)   ARCH=x86_64 ;;
@@ -43,8 +44,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 BASE="https://github.com/$REPO/releases/download/$TAG"
 curl -fsSL -o "$TMP/server.tar.gz" \
-    "$BASE/opensips-lsp-$TAG-$ARCH-linux-gnu.tar.gz" \
-    || fail "download failed: $BASE/opensips-lsp-$TAG-$ARCH-linux-gnu.tar.gz"
+    "$BASE/opensips-lsp-$TAG-$ARCH-$OS.tar.gz" \
+    || fail "download failed: $BASE/opensips-lsp-$TAG-$ARCH-$OS.tar.gz"
 tar -C "$TMP" -xzf "$TMP/server.tar.gz"
 mkdir -p "$PREFIX"
 install -m755 "$TMP/opensips-lsp" "$PREFIX/opensips-lsp"

@@ -14,9 +14,17 @@ jobs:
       matrix:
         include:
           - arch: x86_64
+            os: linux-gnu
             runner: ubuntu-latest
           - arch: aarch64
+            os: linux-gnu
             runner: ubuntu-24.04-arm
+          - arch: aarch64
+            os: darwin
+            runner: macos-14
+          - arch: x86_64
+            os: darwin
+            runner: macos-13
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -26,11 +34,11 @@ jobs:
         run: |
           cargo build --release
           tar -C target/release -czf \
-            opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-linux-gnu.tar.gz \
+            opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-${{ matrix.os }}.tar.gz \
             opensips-lsp
       - uses: actions/upload-artifact@v4
         with:
-          name: server-${{ matrix.arch }}
+          name: server-${{ matrix.arch }}-${{ matrix.os }}
           path: opensips-lsp-*.tar.gz
 
   vsix:
@@ -53,12 +61,13 @@ jobs:
           npm install --no-audit --no-fund
           npm run compile
           # platform builds carry the matching server binary
-          for pair in "linux-x64 x86_64" "linux-arm64 aarch64"; do
-            set -- $pair
-            target=$1; arch=$2
+          for triple in "linux-x64 x86_64 linux-gnu" "linux-arm64 aarch64 linux-gnu" \
+                        "darwin-arm64 aarch64 darwin" "darwin-x64 x86_64 darwin"; do
+            set -- $triple
+            target=$1; arch=$2; os=$3
             rm -rf server && mkdir server
             tar -C server -xzf \
-              ../dist/opensips-lsp-${GITHUB_REF_NAME}-${arch}-linux-gnu.tar.gz
+              ../dist/opensips-lsp-${GITHUB_REF_NAME}-${arch}-${os}.tar.gz
             npx --yes @vscode/vsce package --target "$target" --out \
               opensips-cfg-${GITHUB_REF_NAME}-${target}.vsix
           done
