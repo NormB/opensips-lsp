@@ -31,7 +31,7 @@ Code. It prints what it did; if something is missing (for example the
    browser.
 2. Download two files from the **Assets** list:
    - `opensips-lsp-…-x86_64-linux-gnu.tar.gz` (or `aarch64` on ARM)
-   - `opensips-cfg-….vsix`
+   - `opensips-lsp-ext-….vsix`
 3. Install the server — in a terminal:
 
    ```sh
@@ -44,7 +44,7 @@ Code. It prints what it did; if something is missing (for example the
    1. Press **Ctrl+Shift+X** (the Extensions panel opens).
    2. Click the **⋯** button in the panel's top-right corner.
    3. Choose **Install from VSIX…**
-   4. Pick the `opensips-cfg-….vsix` file you downloaded.
+   4. Pick the `opensips-lsp-ext-….vsix` file you downloaded.
 
 ## First use
 

@@ -1,5 +1,5 @@
 {
-  "name": "opensips-cfg",
+  "name": "opensips-lsp",
   "displayName": "OpenSIPS Configuration",
   "description": "Language support for opensips.cfg routing scripts (diagnostics via opensips -C, completion, hover, go-to-definition). Community project, not affiliated with the OpenSIPS project.",
   "version": "0.3.1",

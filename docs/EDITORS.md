@@ -17,8 +17,8 @@ Use the bundled extension in `client/`:
 
 ```sh
 cd client && npm install && npm run compile
-npx @vscode/vsce package        # produces opensips-cfg-<version>.vsix
-code --install-extension opensips-cfg-*.vsix
+npx @vscode/vsce package        # produces opensips-lsp-ext-<version>.vsix
+code --install-extension opensips-lsp-ext-*.vsix
 ```
 
 Settings: `opensipsLsp.serverPath`, `opensipsLsp.opensipsPath`,
