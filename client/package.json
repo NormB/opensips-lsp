@@ -129,5 +129,6 @@
         "opensipsLsp.opensipsPath"
       ]
     }
-  }
+  },
+  "icon": "icon.png"
 }
