@@ -36,10 +36,10 @@ fn spawn_reader(child: &mut Child) -> mpsc::Receiver<serde_json::Value> {
             if r.read_exact(&mut buf).is_err() {
                 return;
             }
-            if let Ok(v) = serde_json::from_slice(&buf) {
-                if tx.send(v).is_err() {
-                    return;
-                }
+            if let Ok(v) = serde_json::from_slice(&buf)
+                && tx.send(v).is_err()
+            {
+                return;
             }
         }
     });
@@ -158,5 +158,119 @@ fn diagnostics_flow_over_stdio() {
         std::thread::sleep(Duration::from_millis(50));
     };
     assert!(status.success(), "clean exit, got {status:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn hanging_opensips_check_is_bounded_and_reported() {
+    let dir = std::env::temp_dir().join(format!("oslsp-e2e-hang-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stub = dir.join("opensips-hang.sh");
+    std::fs::write(&stub, "#!/bin/sh\nsleep 60\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perm = std::fs::metadata(&stub).unwrap().permissions();
+    perm.set_mode(0o755);
+    std::fs::set_permissions(&stub, perm).unwrap();
+    let cfg = dir.join("t.cfg");
+    std::fs::write(&cfg, "route{}\n").unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env("OPENSIPS_LSP_BIN", stub.display().to_string())
+        .env("OPENSIPS_LSP_CHECK_TIMEOUT_MS", "300")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "initialize result");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":format!("file://{}", cfg.display()),"languageId":"opensips-cfg","version":1,"text":"route{}\n"}}}),
+    );
+
+    // within a couple seconds (NOT 60) we must hear the timeout warning
+    let log = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "window/logMessage"
+                && v["params"]["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("timed out")
+        },
+        "check-timeout logMessage",
+    );
+    assert!(
+        log["params"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("timed out")
+    );
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn empty_opensips_bin_disables_checks_entirely() {
+    let dir = std::env::temp_dir().join(format!("oslsp-e2e-off-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cfg = dir.join("t.cfg");
+    std::fs::write(&cfg, "route{}\n").unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env("OPENSIPS_LSP_BIN", "") // explicit opt-out
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "initialize result");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":format!("file://{}", cfg.display()),"languageId":"opensips-cfg","version":1,"text":"route{}\n"}}}),
+    );
+    // request hover to force a full round-trip; NO publishDiagnostics
+    // may arrive before its response
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{
+        "textDocument":{"uri":format!("file://{}", cfg.display())},"position":{"line":0,"character":1}}}),
+    );
+    let mut saw_diags = false;
+    loop {
+        let v = wait_for(&rx, |_| true, "hover response");
+        if v["method"] == "textDocument/publishDiagnostics" {
+            saw_diags = true;
+        }
+        if v["id"] == 2 {
+            break;
+        }
+    }
+    assert!(!saw_diags, "diagnostics must be fully disabled");
+    child.kill().ok();
     let _ = std::fs::remove_dir_all(&dir);
 }
