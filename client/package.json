@@ -6,7 +6,7 @@
   "publisher": "NormB",
   "license": "(MIT OR Apache-2.0)",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.91.0"
   },
   "categories": [
     "Programming Languages",
@@ -72,7 +72,7 @@
     "vscode-languageclient": "^9.0.1"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.91.0",
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0"
   }
