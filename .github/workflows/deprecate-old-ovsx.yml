@@ -1,0 +1,49 @@
+name: Deprecate old Open VSX id
+
+# One-off: publishes a tombstone version of the RETIRED extension id
+# NormBrandinger.opensips-cfg on Open VSX, pointing users at the
+# current id NormB.opensips-lsp.  Open VSX has no self-serve delete;
+# a latest-version tombstone is the accepted deprecation mechanism.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tombstone:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build and publish the tombstone
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          test -n "$OVSX_PAT" || { echo "OVSX_PAT not set"; exit 1; }
+          mkdir tomb && cd tomb
+          cat > package.json <<'PKG'
+          {
+            "name": "opensips-cfg",
+            "displayName": "DEPRECATED — moved to NormB.opensips-lsp",
+            "description": "This extension id is retired. Install 'OpenSIPS Configuration' (NormB.opensips-lsp) instead.",
+            "version": "0.4.0",
+            "publisher": "NormBrandinger",
+            "license": "MIT",
+            "engines": { "vscode": "^1.91.0" },
+            "repository": { "type": "git", "url": "https://github.com/NormB/opensips-lsp.git" },
+            "contributes": {}
+          }
+          PKG
+          cat > README.md <<'MD'
+          # Deprecated
+
+          This extension id (`NormBrandinger.opensips-cfg`) is retired.
+
+          Install **[OpenSIPS Configuration (NormB.opensips-lsp)](https://open-vsx.org/extension/NormB/opensips-lsp)** instead — same extension, current identity, actively updated.
+          MD
+          echo "MIT" > LICENSE.md
+          npx --yes @vscode/vsce package --allow-missing-repository --out tomb.vsix
+          npx --yes ovsx publish tomb.vsix -p "$OVSX_PAT"
