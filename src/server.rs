@@ -12,6 +12,8 @@ pub struct Backend {
     client: Client,
     docs: DashMap<Url, String>,
     catalog: std::sync::RwLock<Vec<catalog::ModuleDoc>>,
+    core: std::sync::RwLock<catalog::CoreDocs>,
+    src: std::sync::RwLock<Option<String>>,
     opensips_bin: std::sync::RwLock<Option<String>>,
     /// Serializes `opensips -C` runs: one at a time, no process storm.
     check_gate: tokio::sync::Mutex<()>,
@@ -25,6 +27,8 @@ impl Backend {
             client,
             docs: DashMap::new(),
             catalog: std::sync::RwLock::new(Vec::new()),
+            core: std::sync::RwLock::new(catalog::CoreDocs::default()),
+            src: std::sync::RwLock::new(None),
             opensips_bin: std::sync::RwLock::new(None),
             check_gate: tokio::sync::Mutex::new(()),
             check_timeout: std::sync::RwLock::new(logic::resolve_timeout(
@@ -147,16 +151,9 @@ impl LanguageServer for Backend {
             .map(str::to_string)
             .or_else(|| std::env::var("OPENSIPS_LSP_SRC").ok())
             .filter(|s| !s.is_empty());
-        if let Some(src) = src {
-            // a large tree takes seconds to harvest; keep it off the
-            // async executor thread
-            let harvested = tokio::task::spawn_blocking(move || {
-                catalog::harvest_tree(std::path::Path::new(&src))
-            })
-            .await
-            .unwrap_or_default();
-            *self.catalog.write().unwrap() = harvested;
-        }
+        // the harvest happens in `initialized` so a large tree never
+        // delays the initialize handshake
+        *self.src.write().unwrap() = src;
 
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
@@ -185,11 +182,25 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        let src = self.src.read().unwrap().clone();
+        if let Some(src) = src {
+            // a large tree takes seconds to harvest; keep it off the
+            // async executor thread and out of the handshake
+            let (harvested, core) = tokio::task::spawn_blocking(move || {
+                let p = std::path::Path::new(&src);
+                (catalog::harvest_tree(p), catalog::harvest_core(p))
+            })
+            .await
+            .unwrap_or_default();
+            *self.catalog.write().unwrap() = harvested;
+            *self.core.write().unwrap() = core;
+        }
         let n = self.catalog.read().unwrap().len();
+        let c = self.core.read().unwrap().functions.len();
         self.client
             .log_message(
                 MessageType::INFO,
-                format!("opensips-lsp ready ({n} documented modules)"),
+                format!("opensips-lsp ready ({n} documented modules, {c} core functions)"),
             )
             .await;
     }
@@ -225,7 +236,8 @@ impl LanguageServer for Backend {
         };
         let prefix = Self::line_prefix(&text, p.text_document_position.position);
         let cat = self.catalog.read().unwrap();
-        let items: Vec<CompletionItem> = logic::completions(&cat, &text, &prefix)
+        let core = self.core.read().unwrap();
+        let items: Vec<CompletionItem> = logic::completions_with_core(&cat, &core, &text, &prefix)
             .into_iter()
             .map(|c| CompletionItem {
                 label: c.label,
@@ -262,13 +274,16 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let cat = self.catalog.read().unwrap();
-        Ok(logic::hover_markdown(&cat, &text, &word).map(|md| Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: md,
+        let core = self.core.read().unwrap();
+        Ok(
+            logic::hover_markdown_with_core(&cat, &core, &text, &word).map(|md| Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: md,
+                }),
+                range: None,
             }),
-            range: None,
-        }))
+        )
     }
 
     async fn goto_definition(
