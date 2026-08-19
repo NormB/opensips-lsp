@@ -56,6 +56,22 @@ const CORE_KEYWORDS: &[&str] = &[
     "launch",
 ];
 
+macro_rules! static_regex {
+    ($name:ident, $pat:expr) => {
+        fn $name() -> &'static regex::Regex {
+            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            RE.get_or_init(|| regex::Regex::new($pat).unwrap())
+        }
+    };
+}
+
+static_regex!(re_modparam_first_arg, r#"modparam\s*\(\s*"[^"]*$"#);
+static_regex!(re_loadmodule_arg, r#"loadmodule\s*"[^"]*$"#);
+static_regex!(
+    re_string_arg_ctx,
+    r#"(modparam\s*\(\s*"|loadmodule\s*")[^"]*$"#
+);
+
 /// Context-sensitive completion candidates for a cursor whose line
 /// starts with `line_prefix`: modparam values/modules, loadmodule
 /// targets, or (in code) loaded modules' functions, routes, keywords.
@@ -75,10 +91,7 @@ pub fn completions(catalog: &[ModuleDoc], doc: &str, line_prefix: &str) -> Vec<C
             .collect();
     }
     // modparam first argument → module names
-    if regex::Regex::new(r#"modparam\s*\(\s*"[^"]*$"#)
-        .unwrap()
-        .is_match(line_prefix)
-    {
+    if re_modparam_first_arg().is_match(line_prefix) {
         return catalog
             .iter()
             .map(|m| Comp {
@@ -90,10 +103,7 @@ pub fn completions(catalog: &[ModuleDoc], doc: &str, line_prefix: &str) -> Vec<C
             .collect();
     }
     // loadmodule argument → module .so names
-    if regex::Regex::new(r#"loadmodule\s*"[^"]*$"#)
-        .unwrap()
-        .is_match(line_prefix)
-    {
+    if re_loadmodule_arg().is_match(line_prefix) {
         return catalog
             .iter()
             .map(|m| Comp {
@@ -282,9 +292,7 @@ pub fn completions_with_core(
     // only plain code position gains core items (the string-argument
     // contexts returned early inside `completions`)
     let in_string_ctx = analyze::modparam_context(line_prefix).is_some()
-        || regex::Regex::new(r#"(modparam\s*\(\s*"|loadmodule\s*")[^"]*$"#)
-            .unwrap()
-            .is_match(line_prefix);
+        || re_string_arg_ctx().is_match(line_prefix);
     if !in_string_ctx {
         for f in &core.functions {
             out.push(Comp {
