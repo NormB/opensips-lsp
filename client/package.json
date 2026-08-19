@@ -1,0 +1,58 @@
+{
+  "name": "opensips-cfg",
+  "displayName": "OpenSIPS Configuration",
+  "description": "Language support for opensips.cfg routing scripts (diagnostics via opensips -C, completion, hover, go-to-definition)",
+  "version": "0.1.0",
+  "publisher": "NormB",
+  "license": "MIT",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Programming Languages", "Linters"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [{
+      "id": "opensips-cfg",
+      "aliases": ["OpenSIPS config", "opensips"],
+      "filenames": ["opensips.cfg"],
+      "extensions": [".cfg"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "opensips-cfg",
+      "scopeName": "source.opensips",
+      "path": "./syntaxes/opensips.tmLanguage.json"
+    }],
+    "configuration": {
+      "title": "OpenSIPS LSP",
+      "properties": {
+        "opensipsLsp.serverPath": {
+          "type": "string",
+          "default": "opensips-lsp",
+          "description": "Path to the opensips-lsp server binary."
+        },
+        "opensipsLsp.opensipsPath": {
+          "type": "string",
+          "default": "opensips",
+          "description": "Path to the opensips binary used for -C diagnostics."
+        },
+        "opensipsLsp.opensipsSrc": {
+          "type": "string",
+          "default": "",
+          "description": "OpenSIPS source tree to harvest module documentation from (completion/hover)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  }
+}
