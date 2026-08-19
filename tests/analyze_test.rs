@@ -1,4 +1,6 @@
-use opensips_lsp::analyze::{loaded_modules, modparam_context, route_defs, route_refs, word_at};
+use opensips_lsp::analyze::{
+    loaded_modules, modparam_context, route_blocks, route_defs, route_refs, word_at,
+};
 
 const CFG: &str = r#"# reachability-only config
 loadmodule "proto_udp.so"
@@ -112,5 +114,51 @@ fn adversarial_inputs_do_not_panic() {
         let _ = route_refs(s);
         let _ = modparam_context(s);
         let _ = word_at(s, 3);
+    }
+}
+
+#[test]
+fn route_blocks_report_full_extents() {
+    let text = "loadmodule \"tm.so\"\nroute {\n    if (1) {\n        exit;\n    }\n}\nfailure_route[fr] {\n    xlog(\"x\");\n}\n";
+    let blocks = route_blocks(text);
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0].kind, "route");
+    assert_eq!(blocks[0].name, "");
+    assert_eq!((blocks[0].line, blocks[0].col), (1, 0));
+    // nested braces are matched: the block ends at line 5's `}`
+    assert_eq!((blocks[0].end_line, blocks[0].end_col), (5, 1));
+    assert_eq!(blocks[1].kind, "failure_route");
+    assert_eq!(blocks[1].name, "fr");
+    assert_eq!((blocks[1].line, blocks[1].end_line), (6, 8));
+}
+
+#[test]
+fn route_blocks_ignore_braces_in_strings_and_comments() {
+    let text = "route {\n    xlog(\"}\");\n    # }\n    /* } */\n    exit;\n}\n";
+    let blocks = route_blocks(text);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!((blocks[0].end_line, blocks[0].end_col), (5, 1));
+}
+
+#[test]
+fn unterminated_route_block_extends_to_eof() {
+    let text = "route {\n    exit;\n";
+    let blocks = route_blocks(text);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].end_line, 2);
+}
+
+#[test]
+fn route_blocks_adversarial_do_not_panic() {
+    for s in [
+        "",
+        "route {",
+        "route }{",
+        "route {{{{",
+        "route[\u{0}] {}",
+        "route[a] { \"unterminated",
+        "}}}}",
+    ] {
+        let _ = route_blocks(s);
     }
 }

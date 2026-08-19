@@ -99,7 +99,7 @@ macro_rules! static_regex {
 static_regex!(re_loadmodule, r#"loadmodule\s*"([^"\n]+)""#);
 static_regex!(
     re_route_def,
-    r#"(?s)(?:failure_route|onreply_route|branch_route|timer_route|event_route|error_route|local_route|startup_route|route)\s*(?:\[\s*"?([A-Za-z0-9_.:-]+)"?\s*\])?\s*\{"#
+    r#"(?s)(failure_route|onreply_route|branch_route|timer_route|event_route|error_route|local_route|startup_route|route)\s*(?:\[\s*"?([A-Za-z0-9_.:-]+)"?\s*\])?\s*\{"#
 );
 static_regex!(
     re_route_ref,
@@ -142,7 +142,39 @@ pub fn loaded_modules(text: &str) -> Vec<Located> {
 /// Every route-family block definition (`route`, `failure_route[x]`, ...);
 /// the main `route { }` has an empty name.
 pub fn route_defs(text: &str) -> Vec<Located> {
+    route_blocks(text)
+        .into_iter()
+        .map(|b| Located {
+            name: b.name,
+            line: b.line,
+            col: b.col,
+        })
+        .collect()
+}
+
+/// A route-family block definition with its full brace extent.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block {
+    /// Route name; empty for the main `route { }`.
+    pub name: String,
+    /// Block keyword (`route`, `failure_route`, ...).
+    pub kind: String,
+    /// 0-based line of the keyword.
+    pub line: u32,
+    /// 0-based start column of the keyword.
+    pub col: u32,
+    /// 0-based line of the closing brace (last line if unterminated).
+    pub end_line: u32,
+    /// 0-based column just past the closing brace.
+    pub end_col: u32,
+}
+
+/// [`route_defs`] with block extents: braces are matched through the
+/// comment/string classifier, so a `}` in a string or comment does not
+/// close a block; an unterminated block extends to end of text.
+pub fn route_blocks(text: &str) -> Vec<Block> {
     let classes = classify(text);
+    let b = text.as_bytes();
     let mut out = Vec::new();
     for c in re_route_def().captures_iter(text) {
         let whole = c.get(0).unwrap();
@@ -151,12 +183,45 @@ pub fn route_defs(text: &str) -> Vec<Located> {
             continue;
         }
         // reject matches that are a tail of a longer identifier
-        if start > 0 && is_word(text.as_bytes()[start - 1]) {
+        if start > 0 && is_word(b[start - 1]) {
             continue;
         }
-        let name = c.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+        // the match ends just past the opening brace
+        let mut depth = 1usize;
+        let mut i = whole.end();
+        let mut close = None;
+        while i < b.len() {
+            if classes[i] == Class::Code {
+                match b[i] {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            close = Some(i);
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
         let (line, col) = line_col(text, start);
-        out.push(Located { name, line, col });
+        let (end_line, end_col) = match close {
+            Some(p) => {
+                let (l, c2) = line_col(text, p);
+                (l, c2 + 1)
+            }
+            None => line_col(text, text.len()),
+        };
+        out.push(Block {
+            name: c.get(2).map(|m| m.as_str().to_string()).unwrap_or_default(),
+            kind: c.get(1).unwrap().as_str().to_string(),
+            line,
+            col,
+            end_line,
+            end_col,
+        });
     }
     out
 }

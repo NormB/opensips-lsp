@@ -256,13 +256,84 @@ fn symbol_columns_are_utf16_on_multibyte_lines() {
         "textDocument":{"uri":uri}}}),
     );
     let v = wait_for(&rx, |v| v["id"] == 2, "symbols");
-    let col = v["result"][0]["location"]["range"]["start"]["character"]
+    let col = v["result"][0]["selectionRange"]["start"]["character"]
         .as_u64()
         .unwrap();
     assert_eq!(
         col, 10,
         "must be the UTF-16 column, not the byte column (13)"
     );
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn folding_and_nested_symbols_over_stdio() {
+    let dir = std::env::temp_dir().join(format!("oslsp-fold-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cfg = dir.join("fold.cfg");
+    let text = "loadmodule \"tm.so\"\nroute {\n    if (1) {\n        exit;\n    }\n}\nfailure_route[fr] {\n    xlog(\"}\");\n}\n";
+    std::fs::write(&cfg, text).unwrap();
+    let uri = format!("file://{}", cfg.display());
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env("OPENSIPS_LSP_BIN", "")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
+    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    assert!(
+        init["result"]["capabilities"]["foldingRangeProvider"]
+            .as_bool()
+            .unwrap_or(false),
+        "foldingRangeProvider must be advertised"
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/foldingRange","params":{
+        "textDocument":{"uri":uri}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "folding");
+    let folds = v["result"].as_array().expect("folding array");
+    assert_eq!(folds.len(), 2, "one fold per route block: {folds:?}");
+    assert_eq!(folds[0]["startLine"], 1);
+    assert_eq!(folds[0]["endLine"], 5);
+    assert_eq!(folds[1]["startLine"], 6);
+    assert_eq!(folds[1]["endLine"], 8);
+
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/documentSymbol","params":{
+        "textDocument":{"uri":uri}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 3, "symbols");
+    let syms = v["result"].as_array().expect("symbol array");
+    assert_eq!(syms.len(), 2);
+    // nested DocumentSymbol shape: full block range + selectionRange
+    assert_eq!(syms[0]["name"], "route (main)");
+    assert_eq!(syms[0]["range"]["start"]["line"], 1);
+    assert_eq!(syms[0]["range"]["end"]["line"], 5);
+    assert_eq!(syms[0]["range"]["end"]["character"], 1);
+    assert_eq!(syms[0]["selectionRange"]["start"]["line"], 1);
+    assert_eq!(syms[1]["name"], "failure_route[fr]");
+    assert_eq!(syms[1]["range"]["end"]["line"], 8);
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&dir);
 }
