@@ -90,3 +90,17 @@ fn parses_368_output_identically() {
     assert_eq!(ds[0].line, 1);
     assert!(ds[1].message.contains("no_such_param_xyz"));
 }
+
+#[test]
+fn absurdly_long_messages_are_truncated() {
+    let long = "x".repeat(50_000);
+    let out = format!("CRITICAL:core:yyerror: parse error in a.cfg:1:1-2: {long}\n");
+    let ds = parse_check_output(&out, 255);
+    assert_eq!(ds.len(), 1);
+    assert!(
+        ds[0].message.len() <= 600,
+        "message must be bounded, got {} bytes",
+        ds[0].message.len()
+    );
+    assert!(ds[0].message.ends_with('…'), "truncation must be visible");
+}

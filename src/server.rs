@@ -82,12 +82,51 @@ impl Backend {
         {
             tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
         }
-        let fut = tokio::process::Command::new(&bin)
-            .arg("-C")
-            .arg("-f")
-            .arg(&path_str)
-            .kill_on_drop(true)
-            .output();
+        // stream stdout+stderr with a byte cap: the timeout bounds
+        // seconds, this bounds memory — a flooding checker is killed
+        let cap = std::env::var("OPENSIPS_LSP_OUTPUT_CAP_BYTES")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(1_048_576);
+        let fut = async {
+            let mut child = tokio::process::Command::new(&bin)
+                .arg("-C")
+                .arg("-f")
+                .arg(&path_str)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()?;
+            use tokio::io::AsyncReadExt;
+            async fn read_capped(
+                mut s: impl tokio::io::AsyncRead + Unpin,
+                cap: usize,
+            ) -> std::io::Result<(Vec<u8>, bool)> {
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                loop {
+                    let n = s.read(&mut chunk).await?;
+                    if n == 0 {
+                        return Ok((buf, false));
+                    }
+                    if buf.len() + n > cap {
+                        return Ok((buf, true));
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                }
+            }
+            let stdout = child.stdout.take().expect("piped");
+            let stderr = child.stderr.take().expect("piped");
+            let (o, e) = tokio::join!(read_capped(stdout, cap), read_capped(stderr, cap));
+            let (o_buf, o_capped) = o?;
+            let (e_buf, e_capped) = e?;
+            if o_capped || e_capped {
+                let _ = child.kill().await;
+                return Ok::<_, std::io::Error>((None, Vec::new(), Vec::new()));
+            }
+            let status = child.wait().await?;
+            Ok((Some(status), o_buf, e_buf))
+        };
         let check_timeout = *self.check_timeout.read().unwrap();
         let out = match tokio::time::timeout(check_timeout, fut).await {
             Ok(r) => r,
@@ -108,7 +147,7 @@ impl Backend {
                 return;
             }
         };
-        let Ok(out) = out else {
+        let Ok((status, o_buf, e_buf)) = out else {
             self.client
                 .log_message(
                     MessageType::WARNING,
@@ -120,12 +159,27 @@ impl Backend {
                 .await;
             return;
         };
+        let Some(status) = status else {
+            // capped: the run's output is untrustworthy — clear and log
+            self.client
+                .log_message(
+                    MessageType::WARNING,
+                    format!(
+                        "opensips-lsp: '{bin} -C' exceeded the output cap ({cap} bytes) on {path_str}; run discarded"
+                    ),
+                )
+                .await;
+            self.client
+                .publish_diagnostics(uri.clone(), Vec::new(), Some(snap_version))
+                .await;
+            return;
+        };
         let text = format!(
             "{}{}",
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
+            String::from_utf8_lossy(&o_buf),
+            String::from_utf8_lossy(&e_buf)
         );
-        let rc = out.status.code().unwrap_or(-1);
+        let rc = status.code().unwrap_or(-1);
         // the buffer moved while the check ran: results belong to a
         // text that no longer exists — suppress; the next save re-checks
         let current = self.docs.get(uri).map(|d| d.0);
