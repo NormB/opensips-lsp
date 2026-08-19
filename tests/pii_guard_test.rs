@@ -66,31 +66,37 @@ fn detector_allows_documentation_placeholders() {
     assert!(find_pii("Copyright (c) 2026 Norm Brandinger").is_empty());
 }
 
-fn walk(dir: &Path, hits: &mut Vec<String>) {
-    let skip = ["target", ".git", "node_modules", "out"];
-    for e in std::fs::read_dir(dir).unwrap().flatten() {
-        let p = e.path();
-        let name = e.file_name().to_string_lossy().into_owned();
-        // `.git` is a FILE in git worktrees (gitdir pointer to the
-        // real repository) — skip it in either form
-        if skip.contains(&name.as_str()) {
-            continue;
-        }
-        if p.is_dir() {
-            walk(&p, hits);
-        } else if let Ok(text) = std::fs::read_to_string(&p) {
-            for h in find_pii(&text) {
-                hits.push(format!("{}: {}", p.display(), h));
-            }
-        }
-    }
+/// The guard protects what SHIPS: scan exactly the git-tracked files
+/// (local generated artifacts and excluded tooling never ship, and
+/// scanning them produces false positives about the checkout path).
+fn tracked_files(root: &Path) -> Vec<std::path::PathBuf> {
+    let out = std::process::Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(root)
+        .output()
+        .expect("git ls-files");
+    assert!(out.status.success(), "git ls-files failed");
+    String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|p| !p.is_empty())
+        .map(|p| root.join(p))
+        .collect()
 }
 
 #[test]
 fn repository_tree_is_free_of_personal_infrastructure() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut hits = Vec::new();
-    walk(root, &mut hits);
+    let files = tracked_files(root);
+    assert!(files.len() > 30, "suspiciously small tracked set");
+    for p in files {
+        let Ok(text) = std::fs::read_to_string(&p) else {
+            continue;
+        };
+        for h in find_pii(&text) {
+            hits.push(format!("{}: {}", p.display(), h));
+        }
+    }
     // this file plants examples on purpose; everything else must be clean
     hits.retain(|h| !h.contains("pii_guard_test.rs"));
     assert!(

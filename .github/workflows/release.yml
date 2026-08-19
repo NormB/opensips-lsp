@@ -28,6 +28,12 @@ jobs:
             # GitHub retired the Intel macos-13 runners; cross-compile
             # the x86_64 slice on the arm64 runner instead
             target: x86_64-apple-darwin
+          - arch: x86_64
+            os: windows
+            runner: windows-latest
+          - arch: aarch64
+            os: windows
+            runner: windows-11-arm
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -36,6 +42,7 @@ jobs:
           targets: ${{ matrix.target || '' }}
       - uses: Swatinem/rust-cache@v2
       - name: Build and package
+        shell: bash
         run: |
           if [ -n "${{ matrix.target }}" ]; then
             cargo build --release --target "${{ matrix.target }}"
@@ -44,13 +51,22 @@ jobs:
             cargo build --release
             BINDIR="target/release"
           fi
-          tar -C "$BINDIR" -czf \
-            opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-${{ matrix.os }}.tar.gz \
-            opensips-lsp
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            # zip: what Windows users (and Explorer) expect
+            7z a -tzip \
+              opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-windows.zip \
+              "./$BINDIR/opensips-lsp.exe" >/dev/null
+          else
+            tar -C "$BINDIR" -czf \
+              opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-${{ matrix.os }}.tar.gz \
+              opensips-lsp
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: server-${{ matrix.arch }}-${{ matrix.os }}
-          path: opensips-lsp-*.tar.gz
+          path: |
+            opensips-lsp-*.tar.gz
+            opensips-lsp-*.zip
 
   vsix:
     name: VS Code extension (platform builds)
@@ -73,12 +89,18 @@ jobs:
           npm run compile
           # platform builds carry the matching server binary
           for triple in "linux-x64 x86_64 linux-gnu" "linux-arm64 aarch64 linux-gnu" \
-                        "darwin-arm64 aarch64 darwin" "darwin-x64 x86_64 darwin"; do
+                        "darwin-arm64 aarch64 darwin" "darwin-x64 x86_64 darwin" \
+                        "win32-x64 x86_64 windows" "win32-arm64 aarch64 windows"; do
             set -- $triple
             target=$1; arch=$2; os=$3
             rm -rf server && mkdir server
-            tar -C server -xzf \
-              ../dist/opensips-lsp-${GITHUB_REF_NAME}-${arch}-${os}.tar.gz
+            if [ "$os" = "windows" ]; then
+              unzip -q -d server \
+                ../dist/opensips-lsp-${GITHUB_REF_NAME}-${arch}-windows.zip
+            else
+              tar -C server -xzf \
+                ../dist/opensips-lsp-${GITHUB_REF_NAME}-${arch}-${os}.tar.gz
+            fi
             npx --yes @vscode/vsce package --target "$target" --out \
               opensips-lsp-ext-${GITHUB_REF_NAME}-${target}.vsix
           done
@@ -150,4 +172,4 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
-            opensips-lsp-*.tar.gz *.vsix
+            opensips-lsp-*.tar.gz opensips-lsp-*.zip *.vsix

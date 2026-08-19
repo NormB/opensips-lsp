@@ -18,7 +18,8 @@ function serverCommand(context: vscode.ExtensionContext): string {
     if (configured && configured !== 'opensips-lsp') {
         return configured;
     }
-    const bundled = path.join(context.extensionPath, 'server', 'opensips-lsp');
+    const exe = process.platform === 'win32' ? 'opensips-lsp.exe' : 'opensips-lsp';
+    const bundled = path.join(context.extensionPath, 'server', exe);
     if (fs.existsSync(bundled)) {
         try {
             fs.chmodSync(bundled, 0o755);
