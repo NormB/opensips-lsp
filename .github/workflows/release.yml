@@ -24,16 +24,27 @@ jobs:
             runner: macos-14
           - arch: x86_64
             os: darwin
-            runner: macos-13
+            runner: macos-14
+            # GitHub retired the Intel macos-13 runners; cross-compile
+            # the x86_64 slice on the arm64 runner instead
+            target: x86_64-apple-darwin
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target || '' }}
       - uses: Swatinem/rust-cache@v2
       - name: Build and package
         run: |
-          cargo build --release
-          tar -C target/release -czf \
+          if [ -n "${{ matrix.target }}" ]; then
+            cargo build --release --target "${{ matrix.target }}"
+            BINDIR="target/${{ matrix.target }}/release"
+          else
+            cargo build --release
+            BINDIR="target/release"
+          fi
+          tar -C "$BINDIR" -czf \
             opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-${{ matrix.os }}.tar.gz \
             opensips-lsp
       - uses: actions/upload-artifact@v4
