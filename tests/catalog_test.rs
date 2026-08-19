@@ -129,3 +129,37 @@ fn the_shipped_admin_doc_follows_the_opensips_readme_standard() {
             .all(|p| !p.doc.is_empty() && !p.detail.is_empty())
     );
 }
+
+#[test]
+fn hostile_doc_content_is_sanitized_at_harvest() {
+    let md = r#"# evil
+
+### Exported Parameters
+
+#### bad_param (string)
+
+Text with <img src=x onerror=alert(1)> raw html, a
+[command link](command:workbench.action.evil), a
+[js link](javascript:alert(1)), and a
+[good link](https://example.com/doc) that stays.
+"#;
+    let m = opensips_lsp::catalog::parse_readme_md("evil", md).unwrap();
+    let doc = &m.params[0].doc;
+    assert!(
+        !doc.contains('<') && !doc.contains('>'),
+        "raw html must be stripped: {doc}"
+    );
+    assert!(
+        !doc.contains("command:"),
+        "command links must be neutralized: {doc}"
+    );
+    assert!(
+        !doc.contains("javascript:"),
+        "js links must be neutralized: {doc}"
+    );
+    assert!(doc.contains("command link"), "link labels survive: {doc}");
+    assert!(
+        doc.contains("https://example.com/doc"),
+        "http(s) links survive: {doc}"
+    );
+}
