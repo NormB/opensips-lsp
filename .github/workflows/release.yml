@@ -53,6 +53,24 @@ jobs:
           name: vsix
           path: client/*.vsix
 
+  marketplace:
+    name: VS Code Marketplace
+    needs: [vsix]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+      - name: Publish to the Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "$VSCE_PAT" ]; then
+            echo "VSCE_PAT secret not set — skipping Marketplace publish."
+            exit 0
+          fi
+          npx --yes @vscode/vsce publish --packagePath *.vsix -p "$VSCE_PAT"
+
   publish:
     name: GitHub release
     needs: [server, vsix]
