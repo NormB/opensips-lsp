@@ -24,7 +24,14 @@ extension and it just works.
 - **Hover documentation** for functions, parameters, modules, and
   pseudo-variables, harvested from OpenSIPS's own docs.
 - **Navigation** — Ctrl+Click `route(name)` to jump to its
-  definition; Ctrl+Shift+O lists every route block.
+  definition (even into an `include_file`); Ctrl+Shift+O lists every
+  route block with its full extent; route blocks fold.
+- **Signature help** — type `(` or `,` in a call and the signature
+  pops up with the active parameter highlighted.
+- **References & rename** — Shift+F12 lists every call site of a
+  route; F2 renames it everywhere, quoted call sites included.
+- **Instant warnings** — undefined `route()` targets and duplicate
+  route definitions are flagged as you type, no save needed.
 - **Snippets** — `route`, `failure_route`, `ifmethod`, `modparam`,
   `switch`, `xlog`, and more.
 - **Safe by default** — in untrusted workspaces diagnostics stay off
@@ -57,6 +64,7 @@ covers installation and usage click by click.
 | `opensipsLsp.opensipsSrc` | — | Source tree for completion/hover docs. |
 | `opensipsLsp.diagnostics.enable` | `true` | Toggle checks without losing the path. |
 | `opensipsLsp.diagnostics.maxProblems` | `100` | Diagnostics cap per file. |
+| `opensipsLsp.diagnostics.analyzer` | `true` | As-you-type analyzer warnings. |
 | `opensipsLsp.checkTimeoutMs` | `10000` | Bound on one `-C` run. |
 | `opensipsLsp.completion.snippets` | `true` | Function completions as snippets. |
 | `opensipsLsp.cacheDir` | platform | Documentation-cache location. |

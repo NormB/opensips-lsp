@@ -2,6 +2,30 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.6.0] — 2026-08-19
+
+- **Signature help**: the innermost unclosed call's signature with
+  the active parameter highlighted, on `(` and `,` — module exports
+  first, then core functions.
+- **References, rename, highlights** for route names: Shift+F12
+  lists every call site and the definition, F2 renames everywhere
+  (quoted call sites rewritten inside the quotes, illegal names
+  rejected), occurrences highlight with the definition as a write.
+- **Include awareness**: `include_file`/`import_file` are followed
+  (open buffers preferred over disk, cycle-safe, capped) — completion
+  sees included modules and routes, and go-to-definition jumps into
+  the include. Dotted route names resolve whole.
+- **Instant analyzer warnings** between saves, debounced as you
+  type: undefined `route()` targets and duplicate route definitions.
+  New setting `opensipsLsp.diagnostics.analyzer`.
+- **Folding** for every route-family block, and the outline/breadcrumbs
+  now carry full block extents (nested document symbols).
+- Completion quality: duplicate labels collapse to the most
+  informative item, a typed `$token` is replaced instead of doubled,
+  and `route(` completes route names.
+- Fixed: `maxDiagnostics` was ignored in the check path (shadowed by
+  the output cap).
+
 ## [0.5.4] — 2026-08-19
 
 - Display name is now "OpenSIPS Routing Script" (the previous names
