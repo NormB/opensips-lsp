@@ -5,13 +5,27 @@ an `opensips.cfg` file you want to edit.
 
 ## Install
 
+Works the same on **Linux, macOS, and Windows** — every release ships
+native builds for all three (x86_64 and arm64), and the platform
+extension packages bundle the server, so your editor picks the right
+one automatically.
+
 ### Option A — from the Marketplace (easiest)
 
 Press **Ctrl+Shift+X** in VS Code, search for **opensips**, and click
 **Install** on "OpenSIPS Configuration". The platform builds bundle
-everything needed — no other steps.
+everything needed — no other steps. (If your search doesn't find it
+yet, use Option B — the listing may still be rolling out.)
 
 ### Option B — one command in a terminal
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/NormB/opensips-lsp/main/install.ps1 | iex
+```
+
+**Linux / macOS:**
 
 Open a terminal (in VS Code: **Terminal → New Terminal**), paste this
 line, and press Enter:
@@ -32,10 +46,12 @@ Code. It prints what it did; if something is missing (for example the
 2. Download two files from the **Assets** list:
    - `opensips-lsp-…-x86_64-linux-gnu.tar.gz` (or `aarch64` on ARM)
    - `opensips-lsp-ext-….vsix`
-3. Install the server — in a terminal:
+3. Install the server — Linux/macOS in a terminal (Windows: just
+   unzip `opensips-lsp-…-windows.zip` anywhere, e.g.
+   `%LOCALAPPDATA%\opensips-lsp`):
 
    ```sh
-   tar xzf opensips-lsp-*-linux-gnu.tar.gz
+   tar xzf opensips-lsp-*-linux-gnu.tar.gz    # or *-darwin.tar.gz
    mkdir -p ~/.local/bin
    install -m755 opensips-lsp ~/.local/bin/
    ```
