@@ -10,12 +10,16 @@ native builds for all three (x86_64 and arm64), and the platform
 extension packages bundle the server, so your editor picks the right
 one automatically.
 
-### Option A — from the Marketplace (easiest)
+### Option A — from your editor's marketplace
 
-Press **Ctrl+Shift+X** in VS Code, search for **opensips**, and click
-**Install** on "OpenSIPS Configuration". The platform builds bundle
-everything needed — no other steps. (If your search doesn't find it
-yet, use Option B — the listing may still be rolling out.)
+**VSCodium / Cursor / Gitpod** (and other Open VSX editors): press
+**Ctrl+Shift+X**, search for **opensips**, click **Install** on
+"OpenSIPS Configuration" — done; the platform builds bundle
+everything.
+
+**Standard VS Code** ships with Microsoft's marketplace, where this
+extension is not distributed — use Option B (one command, installs
+the extension for you) or Option C.
 
 ### Option B — one command in a terminal
 
