@@ -1,5 +1,5 @@
 use opensips_lsp::analyze::{
-    loaded_modules, modparam_context, route_blocks, route_defs, route_refs, word_at,
+    includes, loaded_modules, modparam_context, route_blocks, route_defs, route_refs, word_at,
 };
 
 const CFG: &str = r#"# reachability-only config
@@ -161,4 +161,30 @@ fn route_blocks_adversarial_do_not_panic() {
     ] {
         let _ = route_blocks(s);
     }
+}
+
+#[test]
+fn includes_are_extracted_from_code_position_only() {
+    let text = "include_file \"a.cfg\"\nimport_file \"sub/b.cfg\"\n# include_file \"no.cfg\"\n/* include_file \"no2.cfg\" */\nxlog(\"include_file \\\"no3.cfg\\\"\");\n";
+    let inc = includes(text);
+    let names: Vec<&str> = inc.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(names, vec!["a.cfg", "sub/b.cfg"]);
+    assert_eq!(inc[0].line, 0);
+    assert_eq!(inc[1].line, 1);
+}
+
+#[test]
+fn includes_adversarial_do_not_panic() {
+    for s in [
+        "",
+        "include_file",
+        "include_file \"",
+        "include_file \"\0\"",
+        "import_file \"\\\"\"",
+        "reinclude_file \"x\"",
+    ] {
+        let _ = includes(s);
+    }
+    // an identifier tail must not match (reinclude_file)
+    assert!(includes("reinclude_file \"x.cfg\"").is_empty());
 }

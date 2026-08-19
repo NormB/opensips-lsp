@@ -262,6 +262,38 @@ pub fn route_refs(text: &str) -> Vec<Located> {
     out
 }
 
+static_regex!(re_include, r#"(?:include_file|import_file)\s*"([^"\n]+)""#);
+
+/// Every `include_file "x"` / `import_file "x"` in code position;
+/// `name` is the quoted path verbatim.
+pub fn includes(text: &str) -> Vec<Located> {
+    let classes = classify(text);
+    let b = text.as_bytes();
+    let mut out = Vec::new();
+    for c in re_include().captures_iter(text) {
+        let whole = c.get(0).unwrap();
+        let start = whole.start();
+        if classes.get(start) != Some(&Class::Code) {
+            continue;
+        }
+        // reject matches that are a tail of a longer identifier
+        if start > 0 && is_word(b[start - 1]) {
+            continue;
+        }
+        let path = c.get(1).unwrap().as_str();
+        if path.is_empty() || path.contains('\0') {
+            continue;
+        }
+        let (line, col) = line_col(text, start);
+        out.push(Located {
+            name: path.to_string(),
+            line,
+            col,
+        });
+    }
+    out
+}
+
 /// If the cursor (end of `line_prefix`) sits inside the *second*
 /// string argument of a `modparam(...)`, return the module name from
 /// the first argument.

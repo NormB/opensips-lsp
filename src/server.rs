@@ -22,6 +22,14 @@ pub struct Backend {
     max_diagnostics: std::sync::RwLock<usize>,
     cache_dir_opt: std::sync::RwLock<Option<String>>,
     check_timeout: std::sync::RwLock<std::time::Duration>,
+    /// Last published `-C` results per document; merged with analyzer
+    /// diagnostics on every publish.
+    check_diags: std::sync::Arc<DashMap<Url, Vec<Diagnostic>>>,
+    /// Fast analyzer diagnostics between saves (init option).
+    analyzer_enabled: std::sync::RwLock<bool>,
+    /// didChange generation per document: only the latest debounced
+    /// analyzer task publishes.
+    change_gen: std::sync::Arc<DashMap<Url, u64>>,
 }
 
 impl Backend {
@@ -42,11 +50,112 @@ impl Backend {
                 None,
                 std::env::var("OPENSIPS_LSP_CHECK_TIMEOUT_MS").ok(),
             )),
+            check_diags: std::sync::Arc::new(DashMap::new()),
+            analyzer_enabled: std::sync::RwLock::new(true),
+            change_gen: std::sync::Arc::new(DashMap::new()),
         }
+    }
+
+    /// Snapshot of open file-scheme buffers, for include resolution
+    /// that prefers editor contents over disk.
+    fn open_docs_snapshot(&self) -> std::collections::HashMap<std::path::PathBuf, String> {
+        self.docs
+            .iter()
+            .filter_map(|e| {
+                let url = e.key();
+                if url.scheme() != "file" {
+                    return None;
+                }
+                url.to_file_path().ok().map(|p| (p, e.value().1.clone()))
+            })
+            .collect()
+    }
+
+    /// A file loader over an open-buffer snapshot with a disk
+    /// fallback, size-capped so a hostile include stays cheap.
+    fn make_loader(
+        open: std::collections::HashMap<std::path::PathBuf, String>,
+    ) -> impl Fn(&std::path::Path) -> Option<String> {
+        move |p: &std::path::Path| {
+            if let Some(t) = open.get(p) {
+                return Some(t.clone());
+            }
+            let md = std::fs::metadata(p).ok()?;
+            if !md.is_file() || md.len() > 1_048_576 {
+                return None;
+            }
+            std::fs::read_to_string(p).ok()
+        }
+    }
+
+    /// Analyzer diagnostics for `text`, mapped to LSP (UTF-16) ranges.
+    fn analyzer_lsp_diags(
+        path: &std::path::Path,
+        text: &str,
+        loader: &dyn Fn(&std::path::Path) -> Option<String>,
+    ) -> Vec<Diagnostic> {
+        logic::analyzer_diagnostics(path, text, loader)
+            .into_iter()
+            .map(|d| {
+                let lt = Self::doc_line(text, d.line);
+                Diagnostic {
+                    range: Range {
+                        start: Position::new(
+                            d.line,
+                            analyze::byte_to_utf16(&lt, d.col_start as usize),
+                        ),
+                        end: Position::new(d.line, analyze::byte_to_utf16(&lt, d.col_end as usize)),
+                    },
+                    severity: Some(DiagnosticSeverity::WARNING),
+                    source: Some("opensips-lsp".into()),
+                    message: d.message,
+                    ..Default::default()
+                }
+            })
+            .collect()
+    }
+
+    /// Merge stored `-C` results with fresh analyzer diagnostics and
+    /// publish, capped.  Static so the debounce task can call it.
+    #[allow(clippy::too_many_arguments)]
+    async fn merge_and_publish(
+        client: &Client,
+        check_map: &DashMap<Url, Vec<Diagnostic>>,
+        analyzer_enabled: bool,
+        cap: usize,
+        uri: &Url,
+        version: i32,
+        text: &str,
+        open: std::collections::HashMap<std::path::PathBuf, String>,
+        skip_if_empty: bool,
+    ) {
+        let mut merged = check_map.get(uri).map(|v| v.clone()).unwrap_or_default();
+        if analyzer_enabled && let Ok(path) = uri.to_file_path() {
+            let loader = Self::make_loader(open);
+            merged.extend(Self::analyzer_lsp_diags(&path, text, &loader));
+        }
+        if merged.is_empty() && skip_if_empty {
+            return;
+        }
+        merged.truncate(cap.max(1));
+        client
+            .publish_diagnostics(uri.clone(), merged, Some(version))
+            .await;
     }
 
     fn doc_line(text: &str, line: u32) -> String {
         text.lines().nth(line as usize).unwrap_or("").to_string()
+    }
+
+    /// The include closure rooted at an open document: the document
+    /// itself plus transitively included files (open buffers first,
+    /// disk fallback).  Non-file documents get a single-entry closure.
+    fn closure_for(&self, uri: &Url, text: &str) -> Vec<(std::path::PathBuf, String)> {
+        let Ok(path) = uri.to_file_path() else {
+            return vec![(std::path::PathBuf::new(), text.to_string())];
+        };
+        let loader = Self::make_loader(self.open_docs_snapshot());
+        logic::include_closure(&path, text, &loader)
     }
 
     /// The route name under an LSP (UTF-16) position, if any.
@@ -78,9 +187,6 @@ impl Backend {
     }
 
     async fn check(&self, uri: &Url) {
-        let Some(bin) = self.opensips_bin.read().unwrap().clone() else {
-            return;
-        };
         if uri.scheme() != "file" {
             return;
         }
@@ -96,6 +202,26 @@ impl Backend {
             .get(uri)
             .map(|d| d.clone())
             .unwrap_or((0, String::new()));
+        let analyzer_enabled = *self.analyzer_enabled.read().unwrap();
+        let cap = *self.max_diagnostics.read().unwrap();
+        let Some(bin) = self.opensips_bin.read().unwrap().clone() else {
+            // -C disabled: analyzer-only pass.  skip_if_empty keeps the
+            // no-checks contract quiet for clean documents.
+            self.check_diags.insert(uri.clone(), Vec::new());
+            Self::merge_and_publish(
+                &self.client,
+                &self.check_diags,
+                analyzer_enabled,
+                cap,
+                uri,
+                snap_version,
+                &snap_text,
+                self.open_docs_snapshot(),
+                true,
+            )
+            .await;
+            return;
+        };
         // one -C at a time; a burst of didOpen events must not fork a
         // process per file
         let _gate = self.check_gate.lock().await;
@@ -108,7 +234,7 @@ impl Backend {
         }
         // stream stdout+stderr with a byte cap: the timeout bounds
         // seconds, this bounds memory — a flooding checker is killed
-        let cap = std::env::var("OPENSIPS_LSP_OUTPUT_CAP_BYTES")
+        let out_cap = std::env::var("OPENSIPS_LSP_OUTPUT_CAP_BYTES")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(1_048_576);
@@ -141,7 +267,7 @@ impl Backend {
             }
             let stdout = child.stdout.take().expect("piped");
             let stderr = child.stderr.take().expect("piped");
-            let (o, e) = tokio::join!(read_capped(stdout, cap), read_capped(stderr, cap));
+            let (o, e) = tokio::join!(read_capped(stdout, out_cap), read_capped(stderr, out_cap));
             let (o_buf, o_capped) = o?;
             let (e_buf, e_capped) = e?;
             if o_capped || e_capped {
@@ -165,9 +291,19 @@ impl Backend {
                     )
                     .await;
                 // an incomplete check must not leave stale results pinned
-                self.client
-                    .publish_diagnostics(uri.clone(), Vec::new(), Some(snap_version))
-                    .await;
+                self.check_diags.insert(uri.clone(), Vec::new());
+                Self::merge_and_publish(
+                    &self.client,
+                    &self.check_diags,
+                    analyzer_enabled,
+                    cap,
+                    uri,
+                    snap_version,
+                    &snap_text,
+                    self.open_docs_snapshot(),
+                    false,
+                )
+                .await;
                 return;
             }
         };
@@ -178,9 +314,19 @@ impl Backend {
                     format!("opensips-lsp: cannot run '{bin} -C' (configure opensipsPath)"),
                 )
                 .await;
-            self.client
-                .publish_diagnostics(uri.clone(), Vec::new(), Some(snap_version))
-                .await;
+            self.check_diags.insert(uri.clone(), Vec::new());
+            Self::merge_and_publish(
+                &self.client,
+                &self.check_diags,
+                analyzer_enabled,
+                cap,
+                uri,
+                snap_version,
+                &snap_text,
+                self.open_docs_snapshot(),
+                false,
+            )
+            .await;
             return;
         };
         let Some(status) = status else {
@@ -189,13 +335,23 @@ impl Backend {
                 .log_message(
                     MessageType::WARNING,
                     format!(
-                        "opensips-lsp: '{bin} -C' exceeded the output cap ({cap} bytes) on {path_str}; run discarded"
+                        "opensips-lsp: '{bin} -C' exceeded the output cap ({out_cap} bytes) on {path_str}; run discarded"
                     ),
                 )
                 .await;
-            self.client
-                .publish_diagnostics(uri.clone(), Vec::new(), Some(snap_version))
-                .await;
+            self.check_diags.insert(uri.clone(), Vec::new());
+            Self::merge_and_publish(
+                &self.client,
+                &self.check_diags,
+                analyzer_enabled,
+                cap,
+                uri,
+                snap_version,
+                &snap_text,
+                self.open_docs_snapshot(),
+                false,
+            )
+            .await;
             return;
         };
         let text = format!(
@@ -217,7 +373,7 @@ impl Backend {
             return;
         }
         // opensips reports byte columns; the client expects UTF-16 units
-        let doc_text = snap_text;
+        let doc_text = snap_text.clone();
         let diags: Vec<Diagnostic> = diag::parse_check_output(&text, rc)
             .into_iter()
             .filter(|d| logic::diag_matches_file(&d.file, &path))
@@ -241,7 +397,6 @@ impl Backend {
                 ..Default::default()
             })
             .collect();
-        let cap = *self.max_diagnostics.read().unwrap();
         let mut diags = diags;
         if diags.len() > cap {
             self.client
@@ -255,9 +410,19 @@ impl Backend {
                 .await;
             diags.truncate(cap);
         }
-        self.client
-            .publish_diagnostics(uri.clone(), diags, Some(snap_version))
-            .await;
+        self.check_diags.insert(uri.clone(), diags);
+        Self::merge_and_publish(
+            &self.client,
+            &self.check_diags,
+            analyzer_enabled,
+            cap,
+            uri,
+            snap_version,
+            &snap_text,
+            self.open_docs_snapshot(),
+            false,
+        )
+        .await;
     }
 }
 
@@ -274,6 +439,9 @@ impl LanguageServer for Backend {
 
         if let Some(b) = opts.get("snippetCompletions").and_then(|v| v.as_bool()) {
             *self.snippet_completions.write().unwrap() = b;
+        }
+        if let Some(b) = opts.get("analyzerDiagnostics").and_then(|v| v.as_bool()) {
+            *self.analyzer_enabled.write().unwrap() = b;
         }
         if let Some(n) = opts.get("maxDiagnostics").and_then(|v| v.as_u64()) {
             *self.max_diagnostics.write().unwrap() = (n as usize).max(1);
@@ -402,10 +570,43 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, p: DidChangeTextDocumentParams) {
-        if let Some(change) = p.content_changes.into_iter().last() {
-            self.docs
-                .insert(p.text_document.uri, (p.text_document.version, change.text));
+        let Some(change) = p.content_changes.into_iter().last() else {
+            return;
+        };
+        let uri = p.text_document.uri;
+        let version = p.text_document.version;
+        self.docs
+            .insert(uri.clone(), (version, change.text.clone()));
+        // debounced analyzer pass: fast feedback between saves
+        if !*self.analyzer_enabled.read().unwrap() || uri.scheme() != "file" {
+            return;
         }
+        let generation = {
+            let mut e = self.change_gen.entry(uri.clone()).or_insert(0);
+            *e += 1;
+            *e
+        };
+        let gen_map = self.change_gen.clone();
+        let check_map = self.check_diags.clone();
+        let client = self.client.clone();
+        let open = self.open_docs_snapshot();
+        let cap = *self.max_diagnostics.read().unwrap();
+        let debounce = std::env::var("OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(300);
+        let text = change.text;
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(debounce)).await;
+            // superseded by a newer edit: let the newest task publish
+            if gen_map.get(&uri).map(|g| *g) != Some(generation) {
+                return;
+            }
+            Backend::merge_and_publish(
+                &client, &check_map, true, cap, &uri, version, &text, open, false,
+            )
+            .await;
+        });
     }
 
     async fn did_save(&self, p: DidSaveTextDocumentParams) {
@@ -414,6 +615,8 @@ impl LanguageServer for Backend {
 
     async fn did_close(&self, p: DidCloseTextDocumentParams) {
         self.docs.remove(&p.text_document.uri);
+        self.check_diags.remove(&p.text_document.uri);
+        self.change_gen.remove(&p.text_document.uri);
     }
 
     async fn completion(&self, p: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -432,57 +635,59 @@ impl LanguageServer for Backend {
                 end: pos,
             }
         });
+        let files = self.closure_for(&uri, &text);
         let cat = self.catalog.read().unwrap();
         let core = self.core.read().unwrap();
         let snippets = *self.snippet_completions.read().unwrap();
-        let items: Vec<CompletionItem> = logic::completions_with_core(&cat, &core, &text, &prefix)
-            .into_iter()
-            .map(|c| {
-                // functions insert tabstop snippets unless disabled
-                let (insert_text, insert_text_format) =
-                    if snippets && c.kind == logic::CompKind::Function {
-                        if c.detail.contains("()") {
-                            (
-                                Some(format!("{}()$0", c.label)),
-                                Some(InsertTextFormat::SNIPPET),
-                            )
+        let items: Vec<CompletionItem> =
+            logic::completions_with_core_files(&cat, &core, &files, &prefix)
+                .into_iter()
+                .map(|c| {
+                    // functions insert tabstop snippets unless disabled
+                    let (insert_text, insert_text_format) =
+                        if snippets && c.kind == logic::CompKind::Function {
+                            if c.detail.contains("()") {
+                                (
+                                    Some(format!("{}()$0", c.label)),
+                                    Some(InsertTextFormat::SNIPPET),
+                                )
+                            } else {
+                                (
+                                    Some(format!("{}($1)$0", c.label)),
+                                    Some(InsertTextFormat::SNIPPET),
+                                )
+                            }
                         } else {
-                            (
-                                Some(format!("{}($1)$0", c.label)),
-                                Some(InsertTextFormat::SNIPPET),
-                            )
-                        }
-                    } else {
-                        (None, None)
-                    };
-                CompletionItem {
-                    text_edit: pvar_edit_range.map(|range| {
-                        CompletionTextEdit::Edit(TextEdit {
-                            range,
-                            new_text: c.label.clone(),
-                        })
-                    }),
-                    insert_text,
-                    insert_text_format,
-                    label: c.label,
-                    detail: Some(c.detail),
-                    documentation: (!c.doc.is_empty()).then_some({
-                        Documentation::MarkupContent(MarkupContent {
-                            kind: MarkupKind::Markdown,
-                            value: c.doc,
-                        })
-                    }),
-                    kind: Some(match c.kind {
-                        logic::CompKind::Module => CompletionItemKind::MODULE,
-                        logic::CompKind::Param => CompletionItemKind::PROPERTY,
-                        logic::CompKind::Function => CompletionItemKind::FUNCTION,
-                        logic::CompKind::Route => CompletionItemKind::REFERENCE,
-                        logic::CompKind::Keyword => CompletionItemKind::KEYWORD,
-                    }),
-                    ..Default::default()
-                }
-            })
-            .collect();
+                            (None, None)
+                        };
+                    CompletionItem {
+                        text_edit: pvar_edit_range.map(|range| {
+                            CompletionTextEdit::Edit(TextEdit {
+                                range,
+                                new_text: c.label.clone(),
+                            })
+                        }),
+                        insert_text,
+                        insert_text_format,
+                        label: c.label,
+                        detail: Some(c.detail),
+                        documentation: (!c.doc.is_empty()).then_some({
+                            Documentation::MarkupContent(MarkupContent {
+                                kind: MarkupKind::Markdown,
+                                value: c.doc,
+                            })
+                        }),
+                        kind: Some(match c.kind {
+                            logic::CompKind::Module => CompletionItemKind::MODULE,
+                            logic::CompKind::Param => CompletionItemKind::PROPERTY,
+                            logic::CompKind::Function => CompletionItemKind::FUNCTION,
+                            logic::CompKind::Route => CompletionItemKind::REFERENCE,
+                            logic::CompKind::Keyword => CompletionItemKind::KEYWORD,
+                        }),
+                        ..Default::default()
+                    }
+                })
+                .collect();
         Ok(Some(CompletionResponse::Array(items)))
     }
 
@@ -523,17 +728,40 @@ impl LanguageServer for Backend {
         };
         let line_text = Self::doc_line(&text, pos.line);
         let byte_col = analyze::utf16_to_byte(&line_text, pos.character) as u32;
-        Ok(logic::definition_of(&text, pos.line, byte_col).map(|d| {
+        if let Some(d) = logic::definition_of(&text, pos.line, byte_col) {
             let def_line = Self::doc_line(&text, d.line);
             let c = analyze::byte_to_utf16(&def_line, d.col as usize);
-            GotoDefinitionResponse::Scalar(Location {
+            return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                 uri,
                 range: Range {
                     start: Position::new(d.line, c),
                     end: Position::new(d.line, c),
                 },
-            })
-        }))
+            })));
+        }
+        // not defined in this file: search the include closure
+        let Some(name) = logic::route_symbol_at(&text, pos.line, byte_col) else {
+            return Ok(None);
+        };
+        let files = self.closure_for(&uri, &text);
+        for (path, ftext) in files.iter().skip(1) {
+            if let Some(d) = analyze::route_defs(ftext)
+                .into_iter()
+                .find(|d| d.name == name)
+                && let Ok(target) = Url::from_file_path(path)
+            {
+                let def_line = Self::doc_line(ftext, d.line);
+                let c = analyze::byte_to_utf16(&def_line, d.col as usize);
+                return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                    uri: target,
+                    range: Range {
+                        start: Position::new(d.line, c),
+                        end: Position::new(d.line, c),
+                    },
+                })));
+            }
+        }
+        Ok(None)
     }
 
     async fn document_symbol(
