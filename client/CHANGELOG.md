@@ -2,6 +2,35 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.8.0] — 2026-08-20
+
+- **Route-family namespaces**: `route(x)` resolves only against the
+  main table (`route[x]`) — navigation, references, highlight, and
+  rename never cross into a same-named `failure_route[x]` or other
+  block kinds, matching OpenSIPS semantics.
+- **Checker cwd parity**: the server runs `opensips -C` from the
+  config's own directory, exactly like the CLI — relative includes
+  and module paths resolve identically everywhere.
+- **Latest-wins checks**: a newer save kills a superseded `-C` run
+  (queued or executing); slow parses no longer block fresh results.
+- **prepareRename**: F2 is blocked off-symbol and pre-selects the
+  route name otherwise.
+- **Include links**: `include_file`/`import_file` paths are
+  Ctrl+Click document links.
+- **Semantic tokens range** requests for viewport-sized responses.
+- **Live settings**: runtime toggles (analyzer, snippets, code lens,
+  maxDiagnostics, checkTimeoutMs) apply without a server restart.
+- **Content-aware doc cache**: editing module docs in place now
+  invalidates the harvest cache (was: directory mtimes only).
+- **Harvest progress + misconfiguration warning**: the doc harvest
+  shows editor progress; a configured tree yielding no documentation
+  raises a visible warning.
+- **Narrowed file association**: only `opensips.cfg` and
+  `*.opensips.cfg` are claimed — the generic `.cfg` extension is left
+  alone (use `files.associations` for custom names).
+- Internal: grammar↔scanner drift gate; per-version scanner
+  memoization for hot requests.
+
 ## [0.7.1] — 2026-08-20
 
 - **Semantic-token fix**: comments are now excluded byte-by-byte
