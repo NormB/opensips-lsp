@@ -5,7 +5,7 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer};
 
-use crate::{analyze, catalog, diag, logic};
+use crate::{analyze, catalog, diag, logic, memo};
 
 /// LSP backend: document store, doc catalog, and the `-C` runner.
 pub struct Backend {
@@ -35,6 +35,8 @@ pub struct Backend {
     /// Per-document check generation: a newer check supersedes (and
     /// kills) an older one still queued or running for the same URI.
     check_super: std::sync::Arc<DashMap<Url, u64>>,
+    /// Per-(document, version) scanner memoization for hot handlers.
+    memo: memo::AnalysisCache,
 }
 
 impl Backend {
@@ -60,6 +62,7 @@ impl Backend {
             change_gen: std::sync::Arc::new(DashMap::new()),
             code_lens_refs: std::sync::RwLock::new(true),
             check_super: std::sync::Arc::new(DashMap::new()),
+            memo: memo::AnalysisCache::default(),
         }
     }
 
@@ -801,6 +804,7 @@ impl LanguageServer for Backend {
         self.docs.remove(&p.text_document.uri);
         self.check_diags.remove(&p.text_document.uri);
         self.change_gen.remove(&p.text_document.uri);
+        self.memo.evict(p.text_document.uri.as_str());
     }
 
     async fn completion(&self, p: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -958,12 +962,16 @@ impl LanguageServer for Backend {
         &self,
         p: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
-        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
+        let Some((version, text)) = self.docs.get(&p.text_document.uri).map(|d| d.clone()) else {
             return Ok(None);
         };
+        let analysis = self
+            .memo
+            .get_or_compute(p.text_document.uri.as_str(), version, &text);
         #[allow(deprecated)]
-        let syms: Vec<DocumentSymbol> = analyze::route_blocks(&text)
-            .into_iter()
+        let syms: Vec<DocumentSymbol> = analysis
+            .blocks
+            .iter()
             .map(|b| {
                 let lt = Self::doc_line(&text, b.line);
                 let start = Position::new(b.line, analyze::byte_to_utf16(&lt, b.col as usize));
@@ -1340,12 +1348,14 @@ impl LanguageServer for Backend {
             return Ok(None);
         }
         let uri = p.text_document.uri;
-        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
+        let Some((version, text)) = self.docs.get(&uri).map(|d| d.clone()) else {
             return Ok(None);
         };
         let files = self.closure_for(&uri, &text);
-        let lenses = analyze::route_blocks(&text)
-            .into_iter()
+        let analysis = self.memo.get_or_compute(uri.as_str(), version, &text);
+        let lenses = analysis
+            .blocks
+            .iter()
             // only request routes are route()-callable; other kinds'
             // arming isn't tracked, so a count would mislead
             .filter(|b| b.kind == "route" && !b.name.is_empty())
@@ -1383,11 +1393,15 @@ impl LanguageServer for Backend {
     }
 
     async fn folding_range(&self, p: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
-        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
+        let Some((version, text)) = self.docs.get(&p.text_document.uri).map(|d| d.clone()) else {
             return Ok(None);
         };
-        let ranges: Vec<FoldingRange> = analyze::route_blocks(&text)
-            .into_iter()
+        let analysis = self
+            .memo
+            .get_or_compute(p.text_document.uri.as_str(), version, &text);
+        let ranges: Vec<FoldingRange> = analysis
+            .blocks
+            .iter()
             .filter(|b| b.end_line > b.line)
             .map(|b| FoldingRange {
                 start_line: b.line,
