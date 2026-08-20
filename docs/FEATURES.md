@@ -65,6 +65,11 @@ rewritten inside the quotes; illegal names are rejected); all
 occurrences of the route under the cursor are highlighted, the
 definition as a write.
 
+Route families are separate namespaces, matching OpenSIPS: `route(x)`
+invokes only the main table (`route[x]`), so navigation, references,
+and rename never cross into a same-named `failure_route[x]`,
+`event_route[x]`, etc. — renaming one leaves the others untouched.
+
 #### Workspace symbols, code lenses
 
 **Ctrl+T** searches route definitions across every open file and its

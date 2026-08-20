@@ -165,11 +165,12 @@ impl Backend {
         logic::include_closure(&path, text, &loader)
     }
 
-    /// The route name under an LSP (UTF-16) position, if any.
-    fn route_name_at(text: &str, pos: Position) -> Option<String> {
+    /// The route name under an LSP (UTF-16) position with its
+    /// namespace, if any.
+    fn route_name_at(text: &str, pos: Position) -> Option<(String, logic::RouteNs)> {
         let line = text.lines().nth(pos.line as usize)?;
         let byte_col = analyze::utf16_to_byte(line, pos.character) as u32;
-        logic::route_symbol_at(text, pos.line, byte_col)
+        logic::route_symbol_ns_at(text, pos.line, byte_col)
     }
 
     /// UTF-16 range of one route-name occurrence.
@@ -251,6 +252,14 @@ impl Backend {
                 .arg("-C")
                 .arg("-f")
                 .arg(&path_str)
+                // relative includes/module paths resolve against the
+                // checker's cwd — run from the cfg's dir like the CLI
+                .current_dir(
+                    std::path::Path::new(&path_str)
+                        .parent()
+                        .filter(|p| !p.as_os_str().is_empty())
+                        .unwrap_or_else(|| std::path::Path::new(".")),
+                )
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true)
@@ -792,8 +801,14 @@ impl LanguageServer for Backend {
         };
         let files = self.closure_for(&uri, &text);
         for (path, ftext) in files.iter().skip(1) {
-            if let Some(d) = analyze::route_defs(ftext)
+            if let Some(d) = analyze::route_blocks(ftext)
                 .into_iter()
+                .filter(|b| b.kind == "route")
+                .map(|b| analyze::Located {
+                    name: b.name,
+                    line: b.line,
+                    col: b.col,
+                })
                 .find(|d| d.name == name)
                 && let Ok(target) = Url::from_file_path(path)
             {
@@ -895,7 +910,7 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let Some(name) = Self::route_name_at(&text, pos) else {
+        let Some((name, ns)) = Self::route_name_at(&text, pos) else {
             return Ok(None);
         };
         let include_decl = p.context.include_declaration;
@@ -907,7 +922,7 @@ impl LanguageServer for Backend {
             let Ok(furi) = Url::from_file_path(path) else {
                 continue;
             };
-            for (l, is_def) in logic::route_occurrences(ftext, &name) {
+            for (l, is_def) in logic::ns_occurrences(ftext, &name, &ns) {
                 if include_decl || !is_def {
                     locs.push(Location {
                         uri: furi.clone(),
@@ -928,10 +943,10 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let Some(name) = Self::route_name_at(&text, pos) else {
+        let Some((name, ns)) = Self::route_name_at(&text, pos) else {
             return Ok(None);
         };
-        let hls = logic::route_occurrences(&text, &name)
+        let hls = logic::ns_occurrences(&text, &name, &ns)
             .into_iter()
             .map(|(l, is_def)| DocumentHighlight {
                 range: Self::occurrence_range(&text, &l),
@@ -957,10 +972,11 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let Some(name) = Self::route_name_at(&text, pos) else {
+        let Some((name, ns)) = Self::route_name_at(&text, pos) else {
             return Ok(None);
         };
-        // rewrite every occurrence in the whole include closure
+        // rewrite every occurrence of the symbol's namespace in the
+        // whole include closure
         let files = self.closure_for(&uri, &text);
         let mut changes: std::collections::HashMap<Url, Vec<TextEdit>> =
             std::collections::HashMap::new();
@@ -968,7 +984,7 @@ impl LanguageServer for Backend {
             let Ok(furi) = Url::from_file_path(path) else {
                 continue;
             };
-            let edits: Vec<TextEdit> = logic::route_occurrences(ftext, &name)
+            let edits: Vec<TextEdit> = logic::ns_occurrences(ftext, &name, &ns)
                 .into_iter()
                 .map(|(l, _)| TextEdit {
                     range: Self::occurrence_range(ftext, &l),
