@@ -2,6 +2,39 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.6.1] — 2026-08-20
+
+Deep-audit release: every claim was re-verified against the real
+OpenSIPS binary and grammar (cfg.y/cfg.lex), and everything found was
+fixed.
+
+- **Diagnostics ranges corrected**: OpenSIPS reports an EXCLUSIVE end
+  column; squiggles no longer extend one character past the token.
+- **Errors inside `include_file` targets now surface** on the root
+  document at the include directive (they were silently dropped — a
+  broken config could render clean).
+- **`timer_route[name, interval]` recognized** everywhere (outline,
+  folding, duplicate detection, highlighting).
+- **Single-quoted strings** (real OpenSIPS syntax) understood by the
+  analyzer, both grammars, and route names/includes.
+- **Rename is grammar-safe**: only names legal UNQUOTED (identifier
+  or number) are accepted — renaming to `a.b`/`x-y` produced configs
+  the parser rejects.
+- **Analyzer precision**: `route(0)` resolves to the main route;
+  `failure_route[x]` no longer satisfies `route(x)` (separate
+  namespaces); duplicates tracked per kind. These warnings are
+  additive — `opensips -C` accepts undefined route targets.
+- **Signature help** keeps nested parameters intact
+  (`json_link($json(a), $json(b))`).
+- Keyword completion: `strlen` (nonexistent), `send_reply`
+  (signaling module), `subst` (textops) removed; `break` added.
+- **Security**: `serverPath` is now restricted in untrusted
+  workspaces, like the checker path.
+- References/rename operate across the include closure; docs quote
+  the full parser message and state include-resolution semantics
+  honestly; admin guide documents every option and env var
+  (CI-gated).
+
 ## [0.6.0] — 2026-08-19
 
 - **Signature help**: the innermost unclosed call's signature with
