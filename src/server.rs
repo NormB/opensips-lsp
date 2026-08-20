@@ -154,6 +154,30 @@ impl Backend {
             .await;
     }
 
+    /// Apply the RUNTIME-tunable options (shared by initialize and
+    /// workspace/didChangeConfiguration).  Binary/tree/cache paths are
+    /// deliberately excluded: those need a restart.
+    fn apply_runtime_opts(&self, opts: &serde_json::Value) {
+        if let Some(b) = opts.get("snippetCompletions").and_then(|v| v.as_bool()) {
+            *self.snippet_completions.write().unwrap() = b;
+        }
+        if let Some(b) = opts.get("analyzerDiagnostics").and_then(|v| v.as_bool()) {
+            *self.analyzer_enabled.write().unwrap() = b;
+        }
+        if let Some(b) = opts.get("codeLensReferences").and_then(|v| v.as_bool()) {
+            *self.code_lens_refs.write().unwrap() = b;
+        }
+        if let Some(n) = opts.get("maxDiagnostics").and_then(|v| v.as_u64()) {
+            *self.max_diagnostics.write().unwrap() = (n as usize).max(1);
+        }
+        if let Some(ms) = opts.get("checkTimeoutMs").and_then(|v| v.as_u64()) {
+            *self.check_timeout.write().unwrap() = logic::resolve_timeout(
+                Some(ms),
+                std::env::var("OPENSIPS_LSP_CHECK_TIMEOUT_MS").ok(),
+            );
+        }
+    }
+
     fn doc_line(text: &str, line: u32) -> String {
         text.lines().nth(line as usize).unwrap_or("").to_string()
     }
@@ -497,28 +521,11 @@ impl LanguageServer for Backend {
         );
         *self.opensips_bin.write().unwrap() = bin;
 
-        if let Some(b) = opts.get("snippetCompletions").and_then(|v| v.as_bool()) {
-            *self.snippet_completions.write().unwrap() = b;
-        }
-        if let Some(b) = opts.get("analyzerDiagnostics").and_then(|v| v.as_bool()) {
-            *self.analyzer_enabled.write().unwrap() = b;
-        }
-        if let Some(b) = opts.get("codeLensReferences").and_then(|v| v.as_bool()) {
-            *self.code_lens_refs.write().unwrap() = b;
-        }
-        if let Some(n) = opts.get("maxDiagnostics").and_then(|v| v.as_u64()) {
-            *self.max_diagnostics.write().unwrap() = (n as usize).max(1);
-        }
+        self.apply_runtime_opts(&opts);
         if let Some(d) = opts.get("cacheDir").and_then(|v| v.as_str())
             && !d.is_empty()
         {
             *self.cache_dir_opt.write().unwrap() = Some(d.to_string());
-        }
-        if let Some(ms) = opts.get("checkTimeoutMs").and_then(|v| v.as_u64()) {
-            *self.check_timeout.write().unwrap() = logic::resolve_timeout(
-                Some(ms),
-                std::env::var("OPENSIPS_LSP_CHECK_TIMEOUT_MS").ok(),
-            );
         }
 
         let src = opts
@@ -705,6 +712,37 @@ impl LanguageServer for Backend {
 
     async fn shutdown(&self) -> Result<()> {
         Ok(())
+    }
+
+    async fn did_change_configuration(&self, p: DidChangeConfigurationParams) {
+        // accept both the flat init-option shape and the VS Code
+        // nested one ({"opensipsLsp": {...}})
+        let s = &p.settings;
+        let opts = s.get("opensipsLsp").unwrap_or(s);
+        self.apply_runtime_opts(opts);
+        // re-publish every open document under the new configuration
+        let analyzer_enabled = *self.analyzer_enabled.read().unwrap();
+        let cap = *self.max_diagnostics.read().unwrap();
+        let open: Vec<(Url, i32, String)> = self
+            .docs
+            .iter()
+            .map(|e| (e.key().clone(), e.value().0, e.value().1.clone()))
+            .collect();
+        for (uri, version, text) in open {
+            Self::merge_and_publish(
+                &self.client,
+                &self.check_diags,
+                analyzer_enabled,
+                cap,
+                &uri,
+                version,
+                &text,
+                self.open_docs_snapshot(),
+                &self.catalog,
+                false,
+            )
+            .await;
+        }
     }
 
     async fn did_open(&self, p: DidOpenTextDocumentParams) {
