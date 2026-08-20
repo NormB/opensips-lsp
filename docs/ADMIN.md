@@ -17,8 +17,10 @@ Semantic validation is delegated to OpenSIPS itself: the server runs
 (file:line:column) to LSP diagnostics, so results are exact for the
 OpenSIPS version installed. Editor intelligence (completion, hover)
 comes from a documentation catalog harvested from an OpenSIPS source
-tree right after initialization (a readiness log message reports the
-counts; results are cached — see Caching) — the 4.x markdown docs (`modules/*/README.md`) are
+tree right after initialization (the harvest shows as editor
+progress, a readiness log message reports the counts, and a
+configured tree yielding no documentation raises a visible warning;
+results are cached — see Caching) — the 4.x markdown docs (`modules/*/README.md`) are
 the most current and win; docbook (`modules/*/doc/*_admin.xml`) is
 the fallback for older trees. Supported and version-proven: OpenSIPS
 4.x (master) and 3.6.x (3.6.8).

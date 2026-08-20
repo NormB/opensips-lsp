@@ -598,11 +598,42 @@ impl LanguageServer for Backend {
         let src = self.src.read().unwrap().clone();
         let mut cached = false;
         if let Some(src) = src {
+            // editors showing workDoneProgress see the harvest as a
+            // background job; the create round-trip is time-bounded so
+            // clients that never answer cannot stall startup
+            let token = NumberOrString::String("opensips-lsp/harvest".into());
+            let progress = tokio::time::timeout(
+                std::time::Duration::from_millis(500),
+                self.client.send_request::<request::WorkDoneProgressCreate>(
+                    WorkDoneProgressCreateParams {
+                        token: token.clone(),
+                    },
+                ),
+            )
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false);
+            if progress {
+                self.client
+                    .send_notification::<notification::Progress>(ProgressParams {
+                        token: token.clone(),
+                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                            WorkDoneProgressBegin {
+                                title: "Harvesting OpenSIPS documentation".into(),
+                                cancellable: Some(false),
+                                message: Some(src.clone()),
+                                percentage: None,
+                            },
+                        )),
+                    })
+                    .await;
+            }
             // the harvest runs off the executor thread and outside the
             // handshake; results are cached per tree fingerprint
             let cache_opt = self.cache_dir_opt.read().unwrap().clone();
+            let src_tree = src.clone();
             let (harvested, core, hit) = tokio::task::spawn_blocking(move || {
-                let p = std::path::Path::new(&src);
+                let p = std::path::Path::new(&src_tree);
                 let cache_dir = cache_opt
                     .map(std::path::PathBuf::from)
                     .or_else(|| {
@@ -634,9 +665,32 @@ impl LanguageServer for Backend {
             })
             .await
             .unwrap_or_default();
+            let empty = harvested.is_empty();
             *self.catalog.write().unwrap() = harvested;
             *self.core.write().unwrap() = core;
             cached = hit;
+            if progress {
+                self.client
+                    .send_notification::<notification::Progress>(ProgressParams {
+                        token,
+                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                            WorkDoneProgressEnd { message: None },
+                        )),
+                    })
+                    .await;
+            }
+            // a tree the user explicitly configured that documents
+            // nothing is a misconfiguration, not a quiet default
+            if empty {
+                self.client
+                    .show_message(
+                        MessageType::WARNING,
+                        format!(
+                            "opensips-lsp: '{src}' yields no module documentation —                              check that opensipsSrc points at an OpenSIPS source tree"
+                        ),
+                    )
+                    .await;
+            }
         }
         let n = self.catalog.read().unwrap().len();
         let c = self.core.read().unwrap().functions.len();
