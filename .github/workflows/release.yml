@@ -135,7 +135,13 @@ jobs:
             print(json.loads(zipfile.ZipFile(sorted(glob.glob('*.vsix'))[0]).read('extension/package.json'))['publisher'])")
           npx --yes ovsx create-namespace "$NS" -p "$OVSX_PAT" || true
           for f in *.vsix; do
-            npx --yes ovsx publish "$f" -p "$OVSX_PAT" || exit 1
+            out=$(npx --yes ovsx publish "$f" -p "$OVSX_PAT" 2>&1); rc=$?
+            echo "$out"
+            if [ $rc -ne 0 ]; then
+              # a rerun of an already-accepted publish is not a failure
+              echo "$out" | grep -q "already published" || exit 1
+              echo "skipping $f (already published)"
+            fi
           done
 
   publish:
@@ -150,8 +156,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes \
-            opensips-lsp-*.tar.gz opensips-lsp-*.zip *.vsix
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            # rerun: refresh the assets on the existing release
+            gh release upload "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" --clobber \
+              opensips-lsp-*.tar.gz opensips-lsp-*.zip *.vsix
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --title "${GITHUB_REF_NAME}" \
+              --generate-notes \
+              opensips-lsp-*.tar.gz opensips-lsp-*.zip *.vsix
+          fi
