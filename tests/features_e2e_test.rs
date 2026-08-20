@@ -332,3 +332,102 @@ fn signature_help_and_pvar_text_edits() {
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn undocumented_modparam_warns_between_saves() {
+    let base = std::env::temp_dir().join(format!("oslsp-catv-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let tree = base.join("tree");
+    mk_tree(&tree); // mymod documents my_param
+    let doc = "loadmodule \"mymod.so\"\nroute {\n    exit;\n}\n";
+    let cfg = base.join("c.cfg");
+    std::fs::write(&cfg, doc).unwrap();
+    let uri = format!("file://{}", cfg.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env_remove("OPENSIPS_LSP_BIN")
+        .env_remove("OPENSIPS_LSP_SRC")
+        .env("OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS", "10")
+        .env(
+            "OPENSIPS_LSP_CACHE_DIR",
+            base.join("cache").display().to_string(),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "capabilities":{},
+        "initializationOptions":{"opensipsPath":"","opensipsSrc": tree.display().to_string()}}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "init");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    wait_for(
+        &rx,
+        |v| {
+            v["method"] == "window/logMessage"
+                && v["params"]["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("ready")
+        },
+        "ready",
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":doc}}}),
+    );
+    // type an undocumented param: warning must arrive without a save
+    let broken =
+        "loadmodule \"mymod.so\"\nmodparam(\"mymod\", \"bad_param\", 1)\nroute {\n    exit;\n}\n";
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+        "textDocument":{"uri":uri,"version":2},
+        "contentChanges":[{"text":broken}]}}),
+    );
+    let diag = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "textDocument/publishDiagnostics"
+                && !v["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap_or(&vec![])
+                    .is_empty()
+        },
+        "catalog warning",
+    );
+    let ds = diag["params"]["diagnostics"].as_array().unwrap();
+    let m = ds[0]["message"].as_str().unwrap();
+    assert!(m.contains("bad_param") && m.contains("mymod"), "{m}");
+    assert_eq!(ds[0]["severity"], 2);
+    assert_eq!(ds[0]["range"]["start"]["line"], 1);
+    // a DOCUMENTED param clears it
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+        "textDocument":{"uri":uri,"version":3},
+        "contentChanges":[{"text": broken.replace("bad_param", "my_param")}]}}),
+    );
+    let clear = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["version"] == 3,
+        "clear",
+    );
+    assert!(
+        clear["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&base);
+}

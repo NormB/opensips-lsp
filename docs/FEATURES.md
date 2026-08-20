@@ -65,6 +65,39 @@ rewritten inside the quotes; illegal names are rejected); all
 occurrences of the route under the cursor are highlighted, the
 definition as a write.
 
+#### Workspace symbols, code lenses
+
+**Ctrl+T** searches route definitions across every open file and its
+includes. Named `route` blocks show a **reference count** code lens
+(counted across the include closure); disable with
+`opensipsLsp.codeLens.references`.
+
+#### Quick fixes
+
+The lightbulb offers: **Load module 'X'** when the parser reports
+`unknown command <f>` and the catalog knows which module exports
+`f` (inserted after the last `loadmodule`), and **Create route[x]**
+for an undefined `route(x)` target (a stub is appended).
+
+#### Catalog-pinned validation
+
+`modparam("m", "p", ...)` warns as you type when the configured
+source tree documents module `m` but no parameter `p` — version-exact
+by construction, since the catalog IS your pinned tree. Unknown
+modules stay silent.
+
+#### Semantic highlighting
+
+Route names (definitions and call sites) and pseudo-variables get
+semantic tokens, so themes color them consistently — including pvars
+inside double-quoted strings, where OpenSIPS interpolates them.
+
+#### CLI check mode
+
+`opensips-lsp check [--strict] [--bin <opensips>] <file>...` runs the
+same analyzer (plus the real `-C` when a binary is given) for CI
+pipelines and git hooks. Exit codes: 0 clean, 1 findings, 2 usage.
+
 #### Folding
 
 Every route-family block folds (`route`, `failure_route[x]`,
@@ -92,7 +125,8 @@ clients that can't pass options.
 | `opensipsLsp.opensipsSrc` | `opensipsSrc` | `OPENSIPS_LSP_SRC` | *(unset)* | Source tree for completion/hover docs. |
 | `opensipsLsp.diagnostics.enable` | *(maps to empty `opensipsPath`)* | — | `true` | Toggle diagnostics without losing the configured path. |
 | `opensipsLsp.diagnostics.maxProblems` | `maxDiagnostics` | — | `100` | Bound on published diagnostics per file. |
-| `opensipsLsp.diagnostics.analyzer` | `analyzerDiagnostics` | — | `true` | Fast analyzer warnings between saves (undefined `route()` targets, duplicate definitions). |
+| `opensipsLsp.diagnostics.analyzer` | `analyzerDiagnostics` | — | `true` | Fast analyzer warnings between saves (undefined `route()` targets, duplicate definitions, undocumented modparams). |
+| `opensipsLsp.codeLens.references` | `codeLensReferences` | — | `true` | Reference-count code lenses on route definitions. |
 | `opensipsLsp.checkTimeoutMs` | `checkTimeoutMs` | `OPENSIPS_LSP_CHECK_TIMEOUT_MS` | `10000` | Kill a `-C` run after this many ms. |
 | `opensipsLsp.completion.snippets` | `snippetCompletions` | — | `true` | Function completions as tabstop snippets. |
 | `opensipsLsp.cacheDir` | `cacheDir` | `OPENSIPS_LSP_CACHE_DIR` | platform cache dir | Documentation-catalog cache location. |

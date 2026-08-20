@@ -95,6 +95,19 @@ Example:
 { "analyzerDiagnostics": false }
 ```
 
+#### codeLensReferences (boolean)
+
+Show a reference-count code lens above every named `route` block
+(counted across the include closure).
+
+Default: `true`.
+
+Example:
+
+```json
+{ "codeLensReferences": false }
+```
+
 #### maxDiagnostics (integer)
 
 Bound on the diagnostics published per file.

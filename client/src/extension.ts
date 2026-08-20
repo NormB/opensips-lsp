@@ -53,6 +53,7 @@ function buildClient(context: vscode.ExtensionContext): LanguageClient {
             snippetCompletions: cfg.get<boolean>('completion.snippets', true),
             maxDiagnostics: cfg.get<number>('diagnostics.maxProblems', 100),
             analyzerDiagnostics: cfg.get<boolean>('diagnostics.analyzer', true),
+            codeLensReferences: cfg.get<boolean>('codeLens.references', true),
             cacheDir: cfg.get<string>('cacheDir', ''),
         },
     };

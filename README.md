@@ -15,6 +15,12 @@ script language (`opensips.cfg`).
 | **References / rename / highlights** | Every call site + definition of a route name; rename rewrites them all (charset-gated, quoted call sites handled). |
 | **Document symbols** | All route blocks (`route`, `failure_route`, `onreply_route`, …) with full block extents, nested outline. |
 | **Folding** | Route-family blocks fold; brace matching is string/comment-safe. |
+| **Workspace symbols** | Ctrl+T route search across open files and includes. |
+| **Code lenses** | Reference counts above route definitions (include-closure-wide). |
+| **Quick fixes** | Load the module exporting an unknown function; create a missing route stub. |
+| **Catalog-pinned validation** | Undocumented `modparam` parameters flagged against YOUR source tree's docs. |
+| **Semantic tokens** | Route names and pseudo-variables colored by analysis. |
+| **CLI** | `opensips-lsp check [--strict] [--bin <opensips>] <file>...` for CI/git hooks. |
 
 Positions are exchanged in UTF-16 units (the LSP default) and are
 correct on multibyte lines; doc harvests are cached per source tree
