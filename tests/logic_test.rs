@@ -711,3 +711,33 @@ fn semantic_tokens_range_encoding_edges() {
         let _ = encode_semantic_tokens_range(s, 0, 0, 9, 9);
     }
 }
+
+#[test]
+fn per_version_analysis_is_memoized() {
+    use opensips_lsp::memo::AnalysisCache;
+    let cache = AnalysisCache::default();
+    let text = "route[a] { exit; }\nroute {\n    route(a);\n}\n";
+    let a1 = cache.get_or_compute("file:///t.cfg", 1, text);
+    let a2 = cache.get_or_compute("file:///t.cfg", 1, text);
+    assert!(
+        std::sync::Arc::ptr_eq(&a1, &a2),
+        "same (uri, version) must reuse the computation"
+    );
+    assert_eq!(a1.blocks.len(), 2);
+    assert_eq!(a1.refs.len(), 1);
+    // a new version recomputes and evicts the old entry
+    let a3 = cache.get_or_compute("file:///t.cfg", 2, "route { exit; }\n");
+    assert!(!std::sync::Arc::ptr_eq(&a1, &a3));
+    assert_eq!(a3.blocks.len(), 1);
+    assert_eq!(cache.len(), 1, "one entry per document");
+    // distinct documents don't collide
+    let b = cache.get_or_compute("file:///u.cfg", 1, text);
+    assert_eq!(b.blocks.len(), 2);
+    assert_eq!(cache.len(), 2);
+    // eviction on close
+    cache.evict("file:///t.cfg");
+    assert_eq!(cache.len(), 1);
+    // adversarial: hostile text is just data
+    let c = cache.get_or_compute("file:///v.cfg", 1, "\0route[\\ {");
+    assert!(c.refs.is_empty());
+}
