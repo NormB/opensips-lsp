@@ -2,6 +2,17 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.7.1] — 2026-08-20
+
+- **Semantic-token fix**: comments are now excluded byte-by-byte
+  through the same classifier the analyzer uses. A `#` inside a
+  string no longer hides the pseudo-variables after it, and pvars
+  inside `/* ... */` block comments (same-line or multi-line) no
+  longer receive tokens.
+- Internal: drift gates for the release workflow; ground-truth
+  re-audit against current OpenSIPS master (no grammar drift, all
+  gates green).
+
 ## [0.7.0] — 2026-08-20
 
 - **Workspace symbols** (Ctrl+T): route definitions searchable across
