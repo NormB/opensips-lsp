@@ -135,7 +135,8 @@ jobs:
             print(json.loads(zipfile.ZipFile(sorted(glob.glob('*.vsix'))[0]).read('extension/package.json'))['publisher'])")
           npx --yes ovsx create-namespace "$NS" -p "$OVSX_PAT" || true
           for f in *.vsix; do
-            out=$(npx --yes ovsx publish "$f" -p "$OVSX_PAT" 2>&1); rc=$?
+            rc=0
+            out=$(npx --yes ovsx publish "$f" -p "$OVSX_PAT" 2>&1) || rc=$?
             echo "$out"
             if [ $rc -ne 0 ]; then
               # a rerun of an already-accepted publish is not a failure
