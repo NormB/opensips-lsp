@@ -1,7 +1,7 @@
 //! Drift gates for the GitHub workflows: fence the release traps that
-//! past reruns proved real.  MS Marketplace publishing is deliberately
-//! MANUAL (a vsce PAT would require an Azure DevOps account) — vsix
-//! files are staged from the GitHub release instead.
+//! past reruns proved real.  Distribution targets are GitHub releases
+//! and Open VSX only — the Microsoft VS Code Marketplace is not a
+//! target and no publish logic for it may be added here.
 
 fn workflow(name: &str) -> Option<String> {
     std::fs::read_to_string(format!(
@@ -55,5 +55,20 @@ fn workflows_use_action_versions_that_exist() {
             !y.contains("upload-artifact@v8"),
             "{f}: actions/upload-artifact@v8 does not exist — use v7"
         );
+    }
+}
+
+#[test]
+fn no_ms_marketplace_publish_logic_exists() {
+    // decision 2026-08-20: GitHub releases + Open VSX are the only
+    // distribution targets — MS Marketplace logic must not come back
+    for f in ["release.yml", "ci.yml", "wiki-sync.yml"] {
+        let Some(y) = workflow(f) else { continue };
+        for needle in ["VSCE_PAT", "vsce publish"] {
+            assert!(
+                !y.contains(needle),
+                "{f}: '{needle}' found — MS Marketplace publishing is not a target"
+            );
+        }
     }
 }
