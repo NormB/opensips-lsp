@@ -49,10 +49,11 @@ fn classify(text: &str) -> Vec<Class> {
                     i += 2;
                 }
             }
-            b'"' => {
+            // OpenSIPS strings come double- OR single-quoted
+            q @ (b'"' | b'\'') => {
                 // opening quote counts as code; interior as string
                 i += 1;
-                while i < b.len() && b[i] != b'"' {
+                while i < b.len() && b[i] != q {
                     out[i] = Class::Str;
                     if b[i] == b'\\' && i + 1 < b.len() {
                         out[i + 1] = Class::Str;
@@ -99,11 +100,11 @@ macro_rules! static_regex {
 static_regex!(re_loadmodule, r#"loadmodule\s*"([^"\n]+)""#);
 static_regex!(
     re_route_def,
-    r#"(?s)(failure_route|onreply_route|branch_route|timer_route|event_route|error_route|local_route|startup_route|route)\s*(?:\[\s*"?([A-Za-z0-9_.:-]+)"?\s*\])?\s*\{"#
+    r#"(?s)(failure_route|onreply_route|branch_route|timer_route|event_route|error_route|local_route|startup_route|route)\s*(?:\[\s*["']?([A-Za-z0-9_.:-]+)["']?\s*(?:,\s*\d+\s*)?\])?\s*\{"#
 );
 static_regex!(
     re_route_ref,
-    r#"route\s*\(\s*"?([A-Za-z0-9_.:-]+)"?\s*[,)]"#
+    r#"route\s*\(\s*["']?([A-Za-z0-9_.:-]+)["']?\s*[,)]"#
 );
 static_regex!(
     re_modparam_ctx,
@@ -262,7 +263,10 @@ pub fn route_refs(text: &str) -> Vec<Located> {
     out
 }
 
-static_regex!(re_include, r#"(?:include_file|import_file)\s*"([^"\n]+)""#);
+static_regex!(
+    re_include,
+    r#"(?:include_file|import_file)\s*(?:"([^"\n]+)"|'([^'\n]+)')"#
+);
 
 /// Every `include_file "x"` / `import_file "x"` in code position;
 /// `name` is the quoted path verbatim.
@@ -280,7 +284,11 @@ pub fn includes(text: &str) -> Vec<Located> {
         if start > 0 && is_word(b[start - 1]) {
             continue;
         }
-        let path = c.get(1).unwrap().as_str();
+        let path = c
+            .get(1)
+            .or_else(|| c.get(2))
+            .map(|m| m.as_str())
+            .unwrap_or("");
         if path.is_empty() || path.contains('\0') {
             continue;
         }

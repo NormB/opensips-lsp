@@ -43,15 +43,13 @@ const CORE_KEYWORDS: &[&str] = &[
     "exit",
     "drop",
     "return",
+    "break",
     "route",
     "xlog",
-    "send_reply",
     "forward",
     "setflag",
     "resetflag",
     "isflagset",
-    "strlen",
-    "subst",
     "async",
     "launch",
 ];
@@ -323,11 +321,22 @@ pub fn route_occurrences(doc: &str, name: &str) -> Vec<(Located, bool)> {
     out
 }
 
-/// Is `s` a legal route name (`[A-Za-z0-9_.:-]+`)?  Gates rename.
+/// Is `s` legal as an UNQUOTED route name?  Gates rename, which
+/// splices the new name into unquoted positions: the cfg lexer only
+/// accepts `ID = [A-Za-z][A-Za-z0-9_]*` or a NUMBER there (dotted,
+/// dashed, and colon names exist but must be quoted).
 pub fn valid_route_name(s: &str) -> bool {
-    !s.is_empty()
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b':' | b'-'))
+    if s.is_empty() {
+        return false;
+    }
+    let b = s.as_bytes();
+    if b.iter().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+    b[0].is_ascii_alphabetic()
+        && b[1..]
+            .iter()
+            .all(|c| c.is_ascii_alphanumeric() || *c == b'_')
 }
 
 /// Transitive include limits: a hostile config must stay cheap.
@@ -437,44 +446,170 @@ pub fn analyzer_diagnostics(
     loader: &dyn Fn(&std::path::Path) -> Option<String>,
 ) -> Vec<AnalyzerDiag> {
     let files = include_closure(path, text, loader);
-    let defs = route_defs_multi(&files);
-    let defined: std::collections::HashSet<&str> = defs
+    let blocks: Vec<(std::path::PathBuf, analyze::Block)> = files
         .iter()
-        .filter(|(_, l)| !l.name.is_empty())
-        .map(|(_, l)| l.name.as_str())
+        .flat_map(|(p, t)| {
+            analyze::route_blocks(t)
+                .into_iter()
+                .map(move |b| (p.clone(), b))
+        })
         .collect();
+    // `route(x)` targets REQUEST routes only: failure_route[x] etc.
+    // live in separate namespaces and do not satisfy the call
+    let defined: std::collections::HashSet<&str> = blocks
+        .iter()
+        .filter(|(_, b)| b.kind == "route" && !b.name.is_empty())
+        .map(|(_, b)| b.name.as_str())
+        .collect();
+    // `route(0)` (any all-zero spelling) is the anonymous main route
+    let main_exists = blocks
+        .iter()
+        .any(|(_, b)| b.kind == "route" && b.name.is_empty());
+    let is_main_ref = |name: &str| !name.is_empty() && name.bytes().all(|c| c == b'0');
     let mut out = Vec::new();
     for r in analyze::route_refs(text) {
-        if !r.name.is_empty() && !defined.contains(r.name.as_str()) {
-            out.push(AnalyzerDiag {
-                line: r.line,
-                col_start: r.col,
-                col_end: r.col + r.name.len() as u32,
-                message: format!(
-                    "route '{}' is not defined here or in included files",
-                    r.name
-                ),
-            });
-        }
-    }
-    // duplicate definitions across the closure; flag current-file ones
-    let mut counts: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
-    for (p, l) in &defs {
-        if l.name.is_empty() {
+        if r.name.is_empty() || defined.contains(r.name.as_str()) {
             continue;
         }
-        let n = counts.entry(l.name.as_str()).or_insert(0);
+        if is_main_ref(&r.name) && main_exists {
+            continue;
+        }
+        out.push(AnalyzerDiag {
+            line: r.line,
+            col_start: r.col,
+            col_end: r.col + r.name.len() as u32,
+            message: format!(
+                "route '{}' is not defined here or in included files",
+                r.name
+            ),
+        });
+    }
+    // duplicate definitions across the closure, per (kind, name);
+    // flag current-file ones
+    let mut counts: std::collections::HashMap<(&str, &str), u32> = std::collections::HashMap::new();
+    for (p, b) in &blocks {
+        if b.name.is_empty() {
+            continue;
+        }
+        let n = counts
+            .entry((b.kind.as_str(), b.name.as_str()))
+            .or_insert(0);
         *n += 1;
         if *n > 1 && p == path {
             out.push(AnalyzerDiag {
-                line: l.line,
-                col_start: l.col,
-                col_end: l.col + 1,
-                message: format!("route '{}' is defined more than once", l.name),
+                line: b.line,
+                col_start: b.col,
+                col_end: b.col + 1,
+                message: format!("route '{}' is defined more than once", b.name),
             });
         }
     }
     out.sort_by_key(|d| (d.line, d.col_start));
+    out
+}
+
+/// A diagnostic re-attributed from an included file to the root.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForeignDiag {
+    /// 0-based line in the ROOT file (the include directive, or 0).
+    pub line: u32,
+    /// 0-based start byte column.
+    pub col_start: u32,
+    /// 0-based end byte column (exclusive).
+    pub col_end: u32,
+    /// Message carrying the real file/line context.
+    pub message: String,
+}
+
+/// The parser attributes errors inside `include_file`s to the include's
+/// own path; dropping them would leave a broken config with zero
+/// diagnostics.  Map such a diagnostic onto the ROOT file: at the
+/// matching include directive when one resolves to `diag_file`, else
+/// at the top of the file.  `diag_line` is 0-based.
+pub fn attribute_foreign_diag(
+    root: &std::path::Path,
+    text: &str,
+    diag_file: &str,
+    diag_line: u32,
+    message: &str,
+) -> ForeignDiag {
+    let short = std::path::Path::new(diag_file)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_else(|| diag_file.to_string());
+    let message = format!(
+        "in included file {short}, line {}: {message}",
+        diag_line + 1
+    );
+    let target = std::path::Path::new(diag_file);
+    for inc in analyze::includes(text) {
+        let resolved = resolve_include(root, &inc.name);
+        let hit = resolved == target
+            || match (
+                std::fs::canonicalize(&resolved),
+                std::fs::canonicalize(target),
+            ) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => false,
+            };
+        if hit {
+            return ForeignDiag {
+                line: inc.line,
+                col_start: inc.col,
+                // span the directive keyword
+                col_end: inc.col + "include_file".len() as u32,
+                message,
+            };
+        }
+    }
+    ForeignDiag {
+        line: 0,
+        col_start: 0,
+        col_end: 1,
+        message,
+    }
+}
+
+/// Split a harvested signature's parameter list at TOP-LEVEL commas
+/// (nested parens/brackets and quoted strings do not split):
+/// `json_link($json(a), $json(b))` → two parameters, intact.
+pub fn split_params(sig: &str) -> Vec<String> {
+    let Some(open) = sig.find('(') else {
+        return Vec::new();
+    };
+    let Some(close) = sig.rfind(')') else {
+        return Vec::new();
+    };
+    if open + 1 >= close {
+        return Vec::new();
+    }
+    let inner = &sig[open + 1..close];
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut in_str: Option<u8> = None;
+    let mut start = 0usize;
+    let b = inner.as_bytes();
+    for (i, &c) in b.iter().enumerate() {
+        match in_str {
+            Some(q) => {
+                if c == q {
+                    in_str = None;
+                }
+            }
+            None => match c {
+                b'"' | b'\'' => in_str = Some(c),
+                b'(' | b'[' => depth += 1,
+                b')' | b']' => depth -= 1,
+                b',' if depth == 0 => {
+                    out.push(inner[start..i].trim().to_string());
+                    start = i + 1;
+                }
+                _ => {}
+            },
+        }
+    }
+    out.push(inner[start..].trim().to_string());
+    out.retain(|p| !p.is_empty());
     out
 }
 

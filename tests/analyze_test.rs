@@ -188,3 +188,42 @@ fn includes_adversarial_do_not_panic() {
     // an identifier tail must not match (reinclude_file)
     assert!(includes("reinclude_file \"x.cfg\"").is_empty());
 }
+
+#[test]
+fn timer_route_with_interval_is_recognized() {
+    // OpenSIPS grammar REQUIRES the interval: timer_route[name, N] { }
+    let text = "timer_route[gw_update, 30] {\n    exit;\n}\n";
+    let defs = route_defs(text);
+    assert_eq!(defs.len(), 1, "{defs:?}");
+    assert_eq!(defs[0].name, "gw_update");
+    let blocks = route_blocks(text);
+    assert_eq!(blocks[0].kind, "timer_route");
+    assert_eq!(blocks[0].end_line, 2);
+    // space-free variant
+    assert_eq!(route_defs("timer_route[t,30]{exit;}\n").len(), 1);
+    // interval must not leak into the name
+    assert!(route_defs(text).iter().all(|d| !d.name.contains("30")));
+}
+
+#[test]
+fn single_quoted_strings_are_strings() {
+    // OpenSIPS accepts single-quoted strings; '#', '{', '}' inside
+    // them must not derail comment detection or brace matching
+    let text = "route {\n    xlog('hello # } {');\n    exit;\n}\nroute[sq] { exit; }\n";
+    let blocks = route_blocks(text);
+    assert_eq!(blocks.len(), 2, "{blocks:?}");
+    assert_eq!(blocks[0].end_line, 3);
+    // single-quoted route names in defs and refs
+    let text = "route['sq'] { exit; }\nroute {\n    route('sq');\n}\n";
+    assert!(route_defs(text).iter().any(|d| d.name == "sq"));
+    assert!(route_refs(text).iter().any(|r| r.name == "sq"));
+    // and single-quoted includes
+    let inc = includes("include_file 'a.cfg'\n");
+    assert_eq!(inc.len(), 1);
+    assert_eq!(inc[0].name, "a.cfg");
+    // adversarial: unterminated single quote
+    for s in ["'", "x'", "route['", "xlog('a\\'b');"] {
+        let _ = route_blocks(s);
+        let _ = includes(s);
+    }
+}
