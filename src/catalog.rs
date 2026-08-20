@@ -456,7 +456,8 @@ pub fn save_cache(
     core: &CoreDocs,
 ) -> Result<(), String> {
     std::fs::create_dir_all(cache_dir).map_err(|e| e.to_string())?;
-    let f = cache_dir.join(format!("{}.json", tree_fingerprint(tree_root)));
+    let fp = tree_fingerprint(tree_root);
+    let f = cache_dir.join(format!("{fp}.json"));
     let c = CacheFile {
         modules: modules.to_vec(),
         core: core.clone(),
@@ -464,11 +465,7 @@ pub fn save_cache(
     let bytes = serde_json::to_vec(&c).map_err(|e| e.to_string())?;
     // atomic publish: concurrent servers may write the same file, and
     // readers must never see a torn cache — write-then-rename
-    let tmp = cache_dir.join(format!(
-        ".{}.{}.tmp",
-        tree_fingerprint(tree_root),
-        std::process::id()
-    ));
+    let tmp = cache_dir.join(format!(".{fp}.{}.tmp", std::process::id()));
     std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, &f).map_err(|e| e.to_string())
 }

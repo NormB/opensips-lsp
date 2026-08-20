@@ -87,7 +87,7 @@ This needs OpenSIPS itself installed on the same machine.
 
 Mistakes now get **red squiggles** at the exact spot — hover one to
 read the message (it is the real OpenSIPS parser talking, e.g.
-`Parameter <fr_timeot> not found in module <tm>`). Squiggles refresh
+`Parameter <fr_timeot> not found in module <tm> - can't set`). Squiggles refresh
 every time you save.
 
 ### Autocomplete

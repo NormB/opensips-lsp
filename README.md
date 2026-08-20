@@ -55,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/NormB/opensips-lsp/main/install.sh 
 ```
 
 
-Prebuilt server binaries (x86_64 and aarch64 Linux) and the VS Code
+Prebuilt server binaries (Linux, macOS, and Windows (x86_64 and arm64)) and the VS Code
 `.vsix` ship with every [GitHub release](https://github.com/NormB/opensips-lsp/releases):
 
 ```sh

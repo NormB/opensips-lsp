@@ -131,7 +131,8 @@
       "supported": "limited",
       "description": "In untrusted workspaces, diagnostics are disabled: running 'opensips -C' loads the modules the configuration references, which executes code. Completion, hover, and navigation stay available.",
       "restrictedConfigurations": [
-        "opensipsLsp.opensipsPath"
+        "opensipsLsp.opensipsPath",
+        "opensipsLsp.serverPath"
       ]
     }
   },

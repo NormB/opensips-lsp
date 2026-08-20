@@ -122,3 +122,15 @@ fn end_column_is_exclusive_in_opensips_output() {
     let ds = parse_check_output(out, 255);
     assert_eq!((ds[0].col_start, ds[0].col_end), (4, 5));
 }
+
+#[test]
+fn nonzero_rc_with_unparseable_output_still_yields_a_diag() {
+    // a crashed/garbled checker must still surface SOMETHING
+    for garbage in ["", "segfault\n", "\0\0\0\n", "not a real line"] {
+        let ds = parse_check_output(garbage, 255);
+        assert_eq!(ds.len(), 1, "input {garbage:?}");
+        assert!(ds[0].message.contains("rc=255") || !ds[0].message.is_empty());
+    }
+    // rc=0 with garbage stays clean
+    assert!(parse_check_output("noise\n", 0).is_empty());
+}

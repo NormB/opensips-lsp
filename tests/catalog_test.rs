@@ -120,14 +120,39 @@ fn the_shipped_admin_doc_follows_the_opensips_readme_standard() {
         .expect("docs/ADMIN.md must exist");
     let m = opensips_lsp::catalog::parse_readme_md("opensips-lsp", &md).expect("must parse");
     let params: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
-    assert!(params.contains(&"opensipsPath"), "params: {params:?}");
-    assert!(params.contains(&"opensipsSrc"));
-    assert!(params.contains(&"checkTimeoutMs"));
+    // EVERY initialization option the server reads must be documented
+    // inside the Exported Parameters section (a misplaced heading
+    // silently ejects entries from the harvested section)
+    for opt in [
+        "opensipsPath",
+        "opensipsSrc",
+        "checkTimeoutMs",
+        "analyzerDiagnostics",
+        "maxDiagnostics",
+        "snippetCompletions",
+        "cacheDir",
+    ] {
+        assert!(
+            params.contains(&opt),
+            "{opt} missing from params: {params:?}"
+        );
+    }
     assert!(
         m.params
             .iter()
             .all(|p| !p.doc.is_empty() && !p.detail.is_empty())
     );
+    // ...and every env var must appear somewhere in the guide
+    for env in [
+        "OPENSIPS_LSP_BIN",
+        "OPENSIPS_LSP_SRC",
+        "OPENSIPS_LSP_CHECK_TIMEOUT_MS",
+        "OPENSIPS_LSP_CACHE_DIR",
+        "OPENSIPS_LSP_OUTPUT_CAP_BYTES",
+        "OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS",
+    ] {
+        assert!(md.contains(env), "{env} undocumented in ADMIN.md");
+    }
 }
 
 #[test]
@@ -161,5 +186,36 @@ Text with <img src=x onerror=alert(1)> raw html, a
     assert!(
         doc.contains("https://example.com/doc"),
         "http(s) links survive: {doc}"
+    );
+}
+
+#[test]
+fn missing_tree_harvests_empty() {
+    let modules =
+        opensips_lsp::catalog::harvest_tree(std::path::Path::new("/nonexistent/tree-xyz"));
+    assert!(modules.is_empty());
+    let core = opensips_lsp::catalog::harvest_core(std::path::Path::new("/nonexistent/tree-xyz"));
+    assert!(core.functions.is_empty() && core.params.is_empty() && core.pvars.is_empty());
+}
+
+#[test]
+fn readme_parser_survives_adversarial_input() {
+    for md in [
+        "",
+        "\0\0",
+        "### Exported Parameters\n#### \\\\ (string)\n\nback\\\\slash\n",
+        "### Exported Parameters\n####\n\n\n",
+        "#### orphan (int)\n\nno section\n",
+    ] {
+        let _ = opensips_lsp::catalog::parse_readme_md("m", md);
+    }
+    // a ToC line that MENTIONS a param heading is not an item
+    let md = "## Contents\n- [1.1 fr_timer (integer)](#x)\n\n### Exported Parameters\n\n#### real_param (string)\n\nDoc.\n";
+    let m = opensips_lsp::catalog::parse_readme_md("m", md).expect("parses");
+    let names: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
+    assert!(names.contains(&"real_param"));
+    assert!(
+        !names.contains(&"fr_timer"),
+        "ToC lines are not items: {names:?}"
     );
 }

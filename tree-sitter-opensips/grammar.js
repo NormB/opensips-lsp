@@ -44,7 +44,13 @@ module.exports = grammar({
 
     route_definition: $ => seq(
       field('kind', $.route_kind),
-      optional(seq('[', field('name', choice($.identifier, $.number, $.string)), ']')),
+      // timer_route carries a mandatory interval: [name, N]
+      optional(seq(
+        '[',
+        field('name', choice($.identifier, $.number, $.string)),
+        optional(seq(',', field('interval', $.number))),
+        ']',
+      )),
       field('body', $.block),
     ),
 
@@ -149,7 +155,10 @@ module.exports = grammar({
       ),
     )),
 
-    string: _ => token(seq('"', repeat(choice(/[^"\\\n]/, /\\./)), '"')),
+    string: _ => token(choice(
+      seq('"', repeat(choice(/[^"\\\n]/, /\\./)), '"'),
+      seq("'", repeat(choice(/[^'\\\n]/, /\\./)), "'"),
+    )),
 
     number: _ => /0[xX][0-9a-fA-F]+|[0-9]+/,
 

@@ -3,17 +3,56 @@
   "name": "OpenSIPS config",
   "scopeName": "source.opensips",
   "patterns": [
-    { "name": "comment.line.number-sign.opensips", "match": "#.*$" },
-    { "name": "comment.block.opensips", "begin": "/\\*", "end": "\\*/" },
-    { "name": "string.quoted.double.opensips", "begin": "\"", "end": "\"",
-      "patterns": [{ "name": "constant.character.escape.opensips", "match": "\\\\." }] },
-    { "name": "keyword.control.opensips",
-      "match": "\\b(if|else|switch|case|default|while|for|exit|drop|return|async|launch)\\b" },
-    { "name": "storage.type.function.opensips",
-      "match": "\\b((failure_|onreply_|branch_|timer_|event_|error_|local_|startup_)?route)\\b" },
-    { "name": "support.function.opensips",
-      "match": "\\b(loadmodule|modparam|xlog|send_reply|forward|setflag|resetflag|isflagset)\\b" },
-    { "name": "variable.other.opensips", "match": "\\$[A-Za-z_][A-Za-z0-9_()]*" },
-    { "name": "constant.numeric.opensips", "match": "\\b[0-9]+\\b" }
+    {
+      "name": "comment.line.number-sign.opensips",
+      "match": "#.*$"
+    },
+    {
+      "name": "comment.block.opensips",
+      "begin": "/\\*",
+      "end": "\\*/"
+    },
+    {
+      "name": "string.quoted.double.opensips",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.opensips",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "string.quoted.single.opensips",
+      "begin": "'",
+      "end": "'",
+      "patterns": [
+        {
+          "name": "constant.character.escape.opensips",
+          "match": "\\\\."
+        }
+      ]
+    },
+    {
+      "name": "keyword.control.opensips",
+      "match": "\\b(if|else|switch|case|default|while|for|exit|drop|return|async|launch)\\b"
+    },
+    {
+      "name": "storage.type.function.opensips",
+      "match": "\\b((failure_|onreply_|branch_|timer_|event_|error_|local_|startup_)?route)\\b"
+    },
+    {
+      "name": "support.function.opensips",
+      "match": "\\b(loadmodule|modparam|xlog|send_reply|forward|setflag|resetflag|isflagset)\\b"
+    },
+    {
+      "name": "variable.other.opensips",
+      "match": "\\$[A-Za-z_][A-Za-z0-9_()]*"
+    },
+    {
+      "name": "constant.numeric.opensips",
+      "match": "\\b[0-9]+\\b"
+    }
   ]
 }

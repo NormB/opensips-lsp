@@ -39,10 +39,10 @@ fn boot(
     let uri = format!("file://{}", cfg.display());
 
     let stub = base.join("stub.sh");
-    let mut lines = String::from("#!/bin/sh\n");
+    let mut lines = String::from("#!/bin/sh\nfor a in \"$@\"; do cfg=\"$a\"; done\n");
     for i in 0..stub_errors {
         lines.push_str(&format!(
-            "echo \"CRITICAL:core:yyerror: parse error in $3:1:{}-{}: planted {i}\" >&2\n",
+            "echo \"CRITICAL:core:yyerror: parse error in $cfg:1:{}-{}: planted {i}\" >&2\n",
             i + 1,
             i + 2
         ));

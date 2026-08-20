@@ -12,7 +12,7 @@ extension and it just works.
 - **Diagnostics you can trust** — every save runs `opensips -C`, so
   the squiggles are the *real* parser's verdict, at the exact line
   and column, for exactly your OpenSIPS version:
-  `Parameter <fr_timeot> not found in module <tm>`.
+  `Parameter <fr_timeot> not found in module <tm> - can't set`.
 - **Completion that knows context**
   - `loadmodule "` → every module in your source tree
   - `modparam("tm", "` → tm's parameters, with their documentation

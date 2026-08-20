@@ -36,7 +36,7 @@ jobs:
             runner: windows-11-arm
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target || '' }}
@@ -61,7 +61,7 @@ jobs:
               opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-${{ matrix.os }}.tar.gz \
               opensips-lsp
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v8
         with:
           name: server-${{ matrix.arch }}-${{ matrix.os }}
           path: |
@@ -73,11 +73,11 @@ jobs:
     needs: [server]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: server-*
           path: dist
@@ -108,7 +108,7 @@ jobs:
           rm -rf server
           npx --yes @vscode/vsce package --out \
             opensips-lsp-ext-${GITHUB_REF_NAME}.vsix
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v8
         with:
           name: vsix
           path: client/*.vsix
@@ -118,7 +118,7 @@ jobs:
     needs: [vsix]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: vsix
       - name: Publish to Open VSX
@@ -149,7 +149,7 @@ jobs:
     needs: [server, vsix]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
       - name: Create release

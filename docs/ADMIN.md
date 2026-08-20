@@ -79,16 +79,21 @@ exceeds it is killed and reported via a client log message.
 { "checkTimeoutMs": 3000 }
 ```
 
-### Caching
+#### analyzerDiagnostics (boolean)
 
-Harvest results are cached per source tree under
-`$XDG_CACHE_HOME/opensips-lsp` (or `~/.cache/opensips-lsp`), keyed by
-a fingerprint of the tree's path and the modification times of its
-`modules/` and `docs/manual/` directories — adding or removing a
-module or doc page invalidates the cache automatically. The readiness
-log message says `, cached` on a hit. Override the location with the
-`OPENSIPS_LSP_CACHE_DIR` environment variable (env-only knob); delete
-the directory to force a re-harvest.
+Enable the fast analyzer pass between saves: undefined `route()`
+targets and duplicate route definitions are flagged as you type
+(debounced; tune with `OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS`, default
+300 ms). These warnings are additive — `opensips -C` itself does not
+detect undefined route targets (they fail at runtime).
+
+Default: `true`.
+
+Example:
+
+```json
+{ "analyzerDiagnostics": false }
+```
 
 #### maxDiagnostics (integer)
 
@@ -121,14 +126,27 @@ Documentation-catalog cache directory.
 { "cacheDir": "/var/cache/opensips-lsp" }
 ```
 
+### Caching
+
+Harvest results are cached per source tree under
+`$XDG_CACHE_HOME/opensips-lsp` (or `~/.cache/opensips-lsp`), keyed by
+a fingerprint of the tree's path and the modification times of its
+`modules/` and `docs/manual/` directories — adding or removing a
+module or doc page invalidates the cache automatically. The readiness
+log message says `, cached` on a hit. Override the location with the
+`OPENSIPS_LSP_CACHE_DIR` environment variable (env-only knob); delete
+the directory to force a re-harvest.
+
 ### Security
 
 `opensips -C` **dlopens the modules the configuration loads**, so
 their constructors run: opening a configuration from an untrusted
 source executes code. Rely on your editor's workspace-trust
 mechanism, or set `opensipsPath` to the empty string for untrusted
-trees. `-C` runs are serialized (one at a time) and bounded by
-`checkTimeoutMs`.
+trees. `-C` runs are serialized (one at a time), bounded by
+`checkTimeoutMs`, and their captured output is capped at 1 MiB
+(override with the `OPENSIPS_LSP_OUTPUT_CAP_BYTES` environment
+variable) — a flooding checker is killed and its run discarded.
 
 ### Frequently Asked Questions
 
@@ -153,6 +171,5 @@ or touch `modules/` to force a re-harvest.
 
 ### License
 
-Dual-licensed under MIT or Apache-2.0, at your option — the same
-terms as sipnab. See `LICENSE-MIT` and `LICENSE-APACHE` in the
-repository root.
+Dual-licensed under MIT or Apache-2.0, at your option. See
+`LICENSE-MIT` and `LICENSE-APACHE` in the repository root.
