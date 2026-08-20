@@ -262,3 +262,85 @@ fn harvest_reports_progress_and_warns_on_an_empty_tree() {
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn runtime_settings_apply_without_a_server_restart() {
+    let base = std::env::temp_dir().join(format!("oslsp-set-dyn-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    let cfg = base.join("t.cfg");
+    let text = "route {\n    route(a);\n    route(b);\n}\n";
+    std::fs::write(&cfg, text).unwrap();
+    let uri = format!("file://{}", cfg.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env("OPENSIPS_LSP_BIN", "")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "init");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics",
+        "analyzer diags",
+    );
+    assert_eq!(
+        v["params"]["diagnostics"].as_array().unwrap().len(),
+        2,
+        "two undefined routes: {v}"
+    );
+    // flat settings shape: analyzer off → open docs republished clean
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{
+        "settings":{"analyzerDiagnostics":false}}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "textDocument/publishDiagnostics"
+                && v["params"]["diagnostics"].as_array().unwrap().is_empty()
+        },
+        "cleared after toggle-off",
+    );
+    assert_eq!(v["params"]["uri"].as_str().unwrap(), uri);
+    // nested (VS Code) shape: analyzer back on, capped to 1
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{
+        "settings":{"opensipsLsp":{"analyzerDiagnostics":true,"maxDiagnostics":1}}}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "textDocument/publishDiagnostics"
+                && v["params"]["diagnostics"].as_array().unwrap().len() == 1
+        },
+        "capped republish",
+    );
+    assert!(
+        v["params"]["diagnostics"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not defined"),
+        "{v}"
+    );
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&base);
+}

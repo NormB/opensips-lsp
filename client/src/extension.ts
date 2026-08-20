@@ -86,12 +86,37 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.workspace.onDidGrantWorkspaceTrust(() => void restart(context)),
     );
-    // settings changed: restart with the new configuration
+    // settings changed: paths and trust-gated settings need a fresh
+    // server; runtime toggles are pushed live over
+    // workspace/didChangeConfiguration
+    const restartSettings = [
+        'opensipsLsp.serverPath',
+        'opensipsLsp.opensipsPath',
+        'opensipsLsp.opensipsSrc',
+        'opensipsLsp.cacheDir',
+        'opensipsLsp.enable',
+        'opensipsLsp.diagnostics.enable',
+        'opensipsLsp.trace.server',
+    ];
     context.subscriptions.push(
         vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('opensipsLsp')) {
-                void restart(context);
+            if (!e.affectsConfiguration('opensipsLsp')) {
+                return;
             }
+            if (restartSettings.some((k) => e.affectsConfiguration(k))) {
+                void restart(context);
+                return;
+            }
+            const cfg = vscode.workspace.getConfiguration('opensipsLsp');
+            void client?.sendNotification('workspace/didChangeConfiguration', {
+                settings: {
+                    checkTimeoutMs: cfg.get<number>('checkTimeoutMs', 10000),
+                    snippetCompletions: cfg.get<boolean>('completion.snippets', true),
+                    maxDiagnostics: cfg.get<number>('diagnostics.maxProblems', 100),
+                    analyzerDiagnostics: cfg.get<boolean>('diagnostics.analyzer', true),
+                    codeLensReferences: cfg.get<boolean>('codeLens.references', true),
+                },
+            });
         }),
     );
 }
