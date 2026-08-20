@@ -49,9 +49,18 @@ fn cache_roundtrips_and_invalidates_on_tree_change() {
     assert_eq!(m2, mods);
     assert_eq!(c2.functions[0].name, "cache_store");
 
-    // change the tree: new module directory => new fingerprint => miss
-    std::thread::sleep(std::time::Duration::from_millis(1100));
+    // an EMPTY new module dir harvests nothing — still a valid cache
     std::fs::create_dir_all(tree.join("modules").join("new_mod")).unwrap();
+    assert!(
+        load_cached(&tree, &cache).is_some(),
+        "an empty module dir changes nothing harvestable"
+    );
+    // a new module WITH docs => new fingerprint => miss
+    std::fs::write(
+        tree.join("modules").join("new_mod").join("README.md"),
+        "### Exported Parameters\n\n#### x (string)\n\nDoc.\n",
+    )
+    .unwrap();
     assert!(
         load_cached(&tree, &cache).is_none(),
         "stale cache must miss after the tree changes"
@@ -118,6 +127,55 @@ fn cache_writes_are_atomic_and_leave_no_temp_files() {
     // a stray temp file from a crashed writer must be ignored by load
     std::fs::write(cache.join("deadbeef.json.tmp"), b"{torn").unwrap();
     assert!(load_cached(&tree, &cache).is_some());
+
+    let _ = std::fs::remove_dir_all(&tree);
+    let _ = std::fs::remove_dir_all(&cache);
+}
+
+#[test]
+fn editing_a_harvested_files_content_invalidates_the_cache() {
+    // directory mtimes do NOT change when an existing file is edited
+    // in place — the fingerprint must track the harvested files
+    // themselves
+    let tree = mk_tree("edit");
+    std::fs::write(
+        tree.join("modules").join("m").join("README.md"),
+        "### Exported Parameters\n\n#### p1 (string)\n\nOld doc.\n",
+    )
+    .unwrap();
+    let cache = std::env::temp_dir().join(format!("oslsp-cache-e-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cache);
+    let (mods, core) = sample();
+    save_cache(&tree, &cache, &mods, &core).expect("save");
+    assert!(load_cached(&tree, &cache).is_some(), "warm hit");
+
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(
+        tree.join("modules").join("m").join("README.md"),
+        "### Exported Parameters\n\n#### p2 (string)\n\nNew doc.\n",
+    )
+    .unwrap();
+    assert!(
+        load_cached(&tree, &cache).is_none(),
+        "in-place edit of a harvested file must miss"
+    );
+
+    // creating a previously-absent doc file invalidates too
+    save_cache(&tree, &cache, &mods, &core).expect("resave");
+    assert!(load_cached(&tree, &cache).is_some());
+    std::fs::create_dir_all(tree.join("modules").join("m").join("doc")).unwrap();
+    std::fs::write(
+        tree.join("modules")
+            .join("m")
+            .join("doc")
+            .join("m_admin.xml"),
+        "<chapter/>",
+    )
+    .unwrap();
+    assert!(
+        load_cached(&tree, &cache).is_none(),
+        "a new harvested file must miss"
+    );
 
     let _ = std::fs::remove_dir_all(&tree);
     let _ = std::fs::remove_dir_all(&cache);

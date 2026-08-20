@@ -143,12 +143,14 @@ Documentation-catalog cache directory.
 
 Harvest results are cached per source tree under
 `$XDG_CACHE_HOME/opensips-lsp` (or `~/.cache/opensips-lsp`), keyed by
-a fingerprint of the tree's path and the modification times of its
-`modules/` and `docs/manual/` directories — adding or removing a
-module or doc page invalidates the cache automatically. The readiness
-log message says `, cached` on a hit. Override the location with the
-`OPENSIPS_LSP_CACHE_DIR` environment variable (env-only knob); delete
-the directory to force a re-harvest.
+a fingerprint of the tree's path plus a manifest (path, size, mtime)
+of every file the harvest reads — module READMEs, docbook admin
+pages, and the core manual pages. Editing, adding, or removing any of
+them invalidates the cache automatically; a schema version folded
+into the key also invalidates caches written by older server builds.
+The readiness log message says `, cached` on a hit. Override the
+location with the `OPENSIPS_LSP_CACHE_DIR` environment variable
+(env-only knob); delete the directory to force a re-harvest.
 
 ### Security
 
@@ -178,9 +180,10 @@ modules. Core functions and parameters also come from the tree
 
 #### Completion looks stale after I updated the source tree
 
-Editing a file inside a module does not bump the directory mtimes the
-cache fingerprint watches. Delete the cache directory (see Caching)
-or touch `modules/` to force a re-harvest.
+Doc edits are picked up automatically (the fingerprint tracks the
+harvested files themselves) but only at server start — restart the
+server (in VS Code: reload the window) after changing the tree, or
+delete the cache directory (see Caching) to be certain.
 
 ### License
 

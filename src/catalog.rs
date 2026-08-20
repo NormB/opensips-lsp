@@ -404,26 +404,56 @@ pub fn harvest_core(tree_root: &Path) -> CoreDocs {
     }
 }
 
-/// A cheap change-detector for a source tree: canonical path plus the
-/// modification times of `modules/` and `docs/manual/` (module or doc
-/// additions/removals bump the directory mtimes).
+/// Cache format version: bump when `CacheFile` or the harvest
+/// semantics change, so caches written by older builds self-miss.
+const CACHE_SCHEMA_VERSION: u32 = 2;
+
+/// A content-aware change-detector for a source tree: canonical path,
+/// schema version, and a manifest of every file the harvest reads —
+/// `modules/*/README.md`, `modules/*/doc/*_admin.xml`, and the core
+/// manual pages — as (path, size, mtime).  In-place edits, additions,
+/// and removals of harvested files all change the fingerprint;
+/// directory mtimes are not consulted.
 pub fn tree_fingerprint(tree_root: &Path) -> String {
+    use std::fmt::Write;
     use std::time::UNIX_EPOCH;
-    let mtime = |p: &Path| -> u128 {
-        std::fs::metadata(p)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_millis())
-            .unwrap_or(0)
+    let stat = |p: &Path| -> Option<(u64, u128)> {
+        let m = std::fs::metadata(p).ok()?;
+        if !m.is_file() {
+            return None;
+        }
+        let t = m
+            .modified()
+            .ok()?
+            .duration_since(UNIX_EPOCH)
+            .ok()?
+            .as_nanos();
+        Some((m.len(), t))
     };
     let canon = std::fs::canonicalize(tree_root).unwrap_or_else(|_| tree_root.to_path_buf());
-    let raw = format!(
-        "{}|{}|{}",
-        canon.display(),
-        mtime(&canon.join("modules")),
-        mtime(&canon.join("docs").join("manual")),
-    );
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(canon.join("modules")) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            files.push(e.path().join("README.md"));
+            files.push(e.path().join("doc").join(format!("{name}_admin.xml")));
+        }
+    }
+    let manual = canon.join("docs").join("manual");
+    for f in [
+        "Script-CoreFunctions.md",
+        "Script-CoreParameters.md",
+        "Script-CoreVar.md",
+    ] {
+        files.push(manual.join(f));
+    }
+    files.sort();
+    let mut raw = format!("v{CACHE_SCHEMA_VERSION}|{}", canon.display());
+    for f in files {
+        if let Some((len, mt)) = stat(&f) {
+            let _ = write!(raw, "|{}:{len}:{mt}", f.display());
+        }
+    }
     // stable, filesystem-safe name
     let mut h: u64 = 0xcbf29ce484222325;
     for b in raw.bytes() {
