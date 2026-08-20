@@ -32,6 +32,9 @@ pub struct Backend {
     change_gen: std::sync::Arc<DashMap<Url, u64>>,
     /// Reference-count code lenses on route definitions (init option).
     code_lens_refs: std::sync::RwLock<bool>,
+    /// Per-document check generation: a newer check supersedes (and
+    /// kills) an older one still queued or running for the same URI.
+    check_super: std::sync::Arc<DashMap<Url, u64>>,
 }
 
 impl Backend {
@@ -56,6 +59,7 @@ impl Backend {
             analyzer_enabled: std::sync::RwLock::new(true),
             change_gen: std::sync::Arc::new(DashMap::new()),
             code_lens_refs: std::sync::RwLock::new(true),
+            check_super: std::sync::Arc::new(DashMap::new()),
         }
     }
 
@@ -231,9 +235,20 @@ impl Backend {
             .await;
             return;
         };
+        // latest-wins: this check supersedes any older one for the URI
+        let my_gen = {
+            let mut e = self.check_super.entry(uri.clone()).or_insert(0);
+            *e += 1;
+            *e
+        };
+        let superseded = |m: &DashMap<Url, u64>, u: &Url| m.get(u).map(|g| *g) != Some(my_gen);
         // one -C at a time; a burst of didOpen events must not fork a
         // process per file
         let _gate = self.check_gate.lock().await;
+        // a newer check arrived while this one queued: evaporate
+        if superseded(&self.check_super, uri) {
+            return;
+        }
         // test-only hook: slow the check down to make races observable
         if let Some(ms) = std::env::var("OPENSIPS_LSP_TEST_CHECK_DELAY_MS")
             .ok()
@@ -295,7 +310,21 @@ impl Backend {
             Ok((Some(status), o_buf, e_buf))
         };
         let check_timeout = *self.check_timeout.read().unwrap();
-        let out = match tokio::time::timeout(check_timeout, fut).await {
+        // watch for a newer check while the subprocess runs: dropping
+        // `fut` kills the child (kill_on_drop)
+        let super_watch = async {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                if superseded(&self.check_super, uri) {
+                    break;
+                }
+            }
+        };
+        let timed = tokio::select! {
+            r = tokio::time::timeout(check_timeout, fut) => r,
+            _ = super_watch => return,
+        };
+        let out = match timed {
             Ok(r) => r,
             Err(_) => {
                 self.client

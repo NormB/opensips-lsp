@@ -158,8 +158,9 @@ location with the `OPENSIPS_LSP_CACHE_DIR` environment variable
 their constructors run: opening a configuration from an untrusted
 source executes code. Rely on your editor's workspace-trust
 mechanism, or set `opensipsPath` to the empty string for untrusted
-trees. `-C` runs are serialized (one at a time), bounded by
-`checkTimeoutMs`, and their captured output is capped at 1 MiB
+trees. `-C` runs are serialized (one at a time) and latest-wins per
+document — a newer save kills a superseded run still queued or
+executing — bounded by `checkTimeoutMs`, with captured output capped at 1 MiB
 (override with the `OPENSIPS_LSP_OUTPUT_CAP_BYTES` environment
 variable) — a flooding checker is killed and its run discarded.
 

@@ -571,3 +571,90 @@ fn check_runs_in_the_configs_own_directory() {
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_newer_save_supersedes_a_slow_running_check() {
+    // latest-wins: the running -C for stale content is killed the
+    // moment a newer check for the same document arrives — the fresh
+    // result must not wait out the slow run (nor its timeout)
+    let dir = std::env::temp_dir().join(format!("oslsp-super-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stub = dir.join("slowfast.sh");
+    // SLOW content: hang far past every test budget; FAST: clean exit
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\nif grep -q SLOW \"$3\"; then sleep 30; echo \"CRITICAL:core:yyerror: parse error in $3:1:1-2: slow\" >&2; exit 255; fi\necho \"CRITICAL:core:yyerror: parse error in $3:1:1-2: fresh\" >&2\nexit 255\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perm = std::fs::metadata(&stub).unwrap().permissions();
+    perm.set_mode(0o755);
+    std::fs::set_permissions(&stub, perm).unwrap();
+    let cfg = dir.join("t.cfg");
+    let v1 = "# SLOW\nroute { exit; }\n";
+    let v2 = "route { exit; }\n";
+    std::fs::write(&cfg, v1).unwrap();
+    let uri = format!("file://{}", cfg.display());
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env("OPENSIPS_LSP_BIN", stub.display().to_string())
+        .env("OPENSIPS_LSP_CHECK_TIMEOUT_MS", "60000")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "init");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    let t0 = std::time::Instant::now();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":v1}}}),
+    );
+    // give the slow check time to actually spawn and hold the gate
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+        "textDocument":{"uri":uri,"version":2},
+        "contentChanges":[{"text":v2}]}}),
+    );
+    // the editor saves the new content to disk, then notifies
+    std::fs::write(&cfg, v2).unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didSave","params":{
+        "textDocument":{"uri":uri}}}),
+    );
+    // the -C result specifically (the debounced analyzer also
+    // publishes version 2, but with no checker diagnostics)
+    let v = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "textDocument/publishDiagnostics"
+                && v["params"]["version"] == 2
+                && !v["params"]["diagnostics"].as_array().unwrap().is_empty()
+        },
+        "fresh -C result",
+    );
+    assert!(
+        t0.elapsed() < std::time::Duration::from_secs(10),
+        "the superseded run must be killed, not awaited"
+    );
+    let msgs = v["params"]["diagnostics"].to_string();
+    assert!(msgs.contains("fresh"), "newest run's diagnostic: {msgs}");
+    assert!(!msgs.contains("slow"), "killed run must not leak: {msgs}");
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&dir);
+}
