@@ -758,10 +758,34 @@ pub fn semantic_spans(text: &str) -> Vec<SemSpan> {
 /// LSP semanticTokens/full data: delta-encoded quintuples with
 /// UTF-16 columns and lengths.
 pub fn encode_semantic_tokens(text: &str) -> Vec<u32> {
+    encode_span_list(text, semantic_spans(text))
+}
+
+/// [`encode_semantic_tokens`] restricted to an LSP range (UTF-16
+/// boundaries): only spans lying fully inside the range are encoded,
+/// with deltas restarting from the document origin per the LSP spec.
+pub fn encode_semantic_tokens_range(text: &str, sl: u32, sc: u32, el: u32, ec: u32) -> Vec<u32> {
+    let lines: Vec<&str> = text.lines().collect();
+    let spans = semantic_spans(text)
+        .into_iter()
+        .filter(|s| {
+            let Some(line) = lines.get(s.line as usize) else {
+                return false;
+            };
+            let start = analyze::byte_to_utf16(line, s.col as usize);
+            let end = analyze::byte_to_utf16(line, (s.col + s.len) as usize);
+            (s.line > sl || (s.line == sl && start >= sc))
+                && (s.line < el || (s.line == el && end <= ec))
+        })
+        .collect();
+    encode_span_list(text, spans)
+}
+
+fn encode_span_list(text: &str, spans: Vec<SemSpan>) -> Vec<u32> {
     let lines: Vec<&str> = text.lines().collect();
     let mut data = Vec::new();
     let (mut prev_line, mut prev_start) = (0u32, 0u32);
-    for s in semantic_spans(text) {
+    for s in spans {
         let Some(line) = lines.get(s.line as usize) else {
             continue;
         };

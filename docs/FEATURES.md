@@ -63,7 +63,10 @@ file; **Ctrl+Shift+O** lists every route block with its full extent
 name; **F2** renames a route everywhere (quoted call sites are
 rewritten inside the quotes; illegal names are rejected); all
 occurrences of the route under the cursor are highlighted, the
-definition as a write.
+definition as a write. **F2** first asks the server
+(`prepareRename`) whether the cursor is on a renameable route symbol,
+so off-symbol renames are blocked up front with the symbol
+pre-selected otherwise.
 
 Route families are separate namespaces, matching OpenSIPS: `route(x)`
 invokes only the main table (`route[x]`), so navigation, references,
@@ -91,6 +94,12 @@ source tree documents module `m` but no parameter `p` — version-exact
 by construction, since the catalog IS your pinned tree. Unknown
 modules stay silent.
 
+#### Include links
+
+`include_file`/`import_file` paths are document links: **Ctrl+Click**
+opens the included file (relative paths resolve against the including
+file's directory; links are produced even for not-yet-created files).
+
 #### Semantic highlighting
 
 Route names (definitions and call sites) and pseudo-variables get
@@ -100,6 +109,9 @@ them. Comments — line or block — are excluded byte-by-byte through
 the same classifier the analyzer uses, so a `#` inside a string does
 not hide the rest of the line and a `/* ... */` block hides all of
 its interior.
+
+Editors that ask for a range (large files, visible-viewport
+optimization) get exactly the tokens inside it.
 
 #### CLI check mode
 

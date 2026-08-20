@@ -531,7 +531,14 @@ impl LanguageServer for Backend {
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
-                rename_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                })),
+                document_link_provider: Some(DocumentLinkOptions {
+                    resolve_provider: Some(false),
+                    work_done_progress_options: Default::default(),
+                }),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 semantic_tokens_provider: Some(
@@ -545,7 +552,7 @@ impl LanguageServer for Backend {
                                 token_modifiers: vec![],
                             },
                             full: Some(SemanticTokensFullOptions::Bool(true)),
-                            range: None,
+                            range: Some(true),
                             work_done_progress_options: Default::default(),
                         },
                     ),
@@ -1048,6 +1055,104 @@ impl LanguageServer for Backend {
             }
         }
         Ok(Some(out))
+    }
+
+    async fn prepare_rename(
+        &self,
+        p: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let pos = p.position;
+        let Some((name, ns)) = Self::route_name_at(&text, pos) else {
+            return Ok(None);
+        };
+        // the exact occurrence span under the cursor becomes the edit
+        // range the editor pre-selects
+        let hit = logic::ns_occurrences(&text, &name, &ns)
+            .into_iter()
+            .map(|(l, _)| Self::occurrence_range(&text, &l))
+            .find(|r| {
+                r.start.line == pos.line
+                    && r.start.character <= pos.character
+                    && pos.character <= r.end.character
+            });
+        Ok(
+            hit.map(|range| PrepareRenameResponse::RangeWithPlaceholder {
+                range,
+                placeholder: name,
+            }),
+        )
+    }
+
+    async fn document_link(&self, p: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
+        let uri = p.text_document.uri;
+        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let Ok(path) = uri.to_file_path() else {
+            return Ok(None);
+        };
+        let base = path
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_path_buf();
+        let mut out = Vec::new();
+        for inc in analyze::includes(&text) {
+            let lt = Self::doc_line(&text, inc.line);
+            // locate the quoted path text after the directive keyword
+            let Some(rel) = lt
+                .get(inc.col as usize..)
+                .and_then(|s| s.find(inc.name.as_str()))
+                .map(|i| inc.col as usize + i)
+            else {
+                continue;
+            };
+            let Ok(target) = Url::from_file_path(base.join(&inc.name)) else {
+                continue;
+            };
+            out.push(DocumentLink {
+                range: Range {
+                    start: Position::new(inc.line, analyze::byte_to_utf16(&lt, rel)),
+                    end: Position::new(inc.line, analyze::byte_to_utf16(&lt, rel + inc.name.len())),
+                },
+                target: Some(target),
+                tooltip: None,
+                data: None,
+            });
+        }
+        Ok(Some(out))
+    }
+
+    async fn semantic_tokens_range(
+        &self,
+        p: SemanticTokensRangeParams,
+    ) -> Result<Option<SemanticTokensRangeResult>> {
+        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let r = p.range;
+        let data = logic::encode_semantic_tokens_range(
+            &text,
+            r.start.line,
+            r.start.character,
+            r.end.line,
+            r.end.character,
+        )
+        .chunks(5)
+        .map(|c| SemanticToken {
+            delta_line: c[0],
+            delta_start: c[1],
+            length: c[2],
+            token_type: c[3],
+            token_modifiers_bitset: c[4],
+        })
+        .collect();
+        Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
+            result_id: None,
+            data,
+        })))
     }
 
     async fn semantic_tokens_full(
