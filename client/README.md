@@ -30,8 +30,15 @@ extension and it just works.
   pops up with the active parameter highlighted.
 - **References & rename** — Shift+F12 lists every call site of a
   route; F2 renames it everywhere, quoted call sites included.
-- **Instant warnings** — undefined `route()` targets and duplicate
-  route definitions are flagged as you type, no save needed.
+- **Instant warnings** — undefined `route()` targets, duplicate
+  route definitions, and modparams your OpenSIPS version doesn't
+  document are flagged as you type, no save needed.
+- **Quick fixes** — the lightbulb loads the module that exports an
+  unknown function, or creates a missing route stub.
+- **Workspace symbols & code lenses** — Ctrl+T finds any route;
+  reference counts appear above route definitions.
+- **Semantic highlighting** — route names and pseudo-variables are
+  colored by real analysis, even inside strings.
 - **Snippets** — `route`, `failure_route`, `ifmethod`, `modparam`,
   `switch`, `xlog`, and more.
 - **Safe by default** — in untrusted workspaces diagnostics stay off
@@ -65,6 +72,7 @@ covers installation and usage click by click.
 | `opensipsLsp.diagnostics.enable` | `true` | Toggle checks without losing the path. |
 | `opensipsLsp.diagnostics.maxProblems` | `100` | Diagnostics cap per file. |
 | `opensipsLsp.diagnostics.analyzer` | `true` | As-you-type analyzer warnings. |
+| `opensipsLsp.codeLens.references` | `true` | Reference-count code lenses. |
 | `opensipsLsp.checkTimeoutMs` | `10000` | Bound on one `-C` run. |
 | `opensipsLsp.completion.snippets` | `true` | Function completions as snippets. |
 | `opensipsLsp.cacheDir` | platform | Documentation-cache location. |

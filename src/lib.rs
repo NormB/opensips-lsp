@@ -10,6 +10,7 @@
 pub mod analyze;
 /// Module documentation harvesting.
 pub mod catalog;
+pub mod cli;
 /// `opensips -C` diagnostics.
 pub mod diag;
 /// Completion/hover/definition assembly.

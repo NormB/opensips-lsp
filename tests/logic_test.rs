@@ -1,8 +1,9 @@
 use opensips_lsp::catalog::{Item, ModuleDoc};
 use opensips_lsp::logic::{
-    CompKind, analyzer_diagnostics, attribute_foreign_diag, completions, completions_with_core,
-    definition_of, hover_markdown, include_closure, loaded_modules_multi, pvar_tail,
-    route_defs_multi, route_occurrences, route_symbol_at, signature_at, split_params,
+    CompKind, SemKind, analyzer_diagnostics, attribute_foreign_diag, catalog_diagnostics,
+    completions, completions_with_core, definition_of, encode_semantic_tokens, hover_markdown,
+    include_closure, loaded_modules_multi, pvar_tail, quick_fixes, route_defs_multi,
+    route_occurrences, route_symbol_at, semantic_spans, signature_at, split_params,
     valid_route_name,
 };
 
@@ -505,4 +506,110 @@ fn foreign_diags_attach_to_the_include_directive() {
     for (df, t) in [("", ""), ("\0", "include_file \"\0\""), ("/x/a", "#")] {
         let _ = attribute_foreign_diag(Path::new("/x/m.cfg"), t, df, 0, "m");
     }
+}
+
+#[test]
+fn quick_fixes_offer_loadmodule_and_route_stub() {
+    // catalog: t_relay lives in tm
+    let cat = sig_catalog();
+    // unknown command → "load module tm" inserted after the last loadmodule
+    let doc = "loadmodule \"proto_udp.so\"\nroute {\n    t_relay();\n}\n";
+    let fixes = quick_fixes(&cat, doc, "unknown command <t_relay>, missing loadmodule?");
+    assert_eq!(fixes.len(), 1, "{fixes:?}");
+    assert!(fixes[0].title.contains("tm"));
+    assert_eq!(
+        (fixes[0].line, fixes[0].col),
+        (1, 0),
+        "after the last loadmodule"
+    );
+    assert_eq!(fixes[0].insert, "loadmodule \"tm.so\"\n");
+    // module already loaded → no fix
+    let doc2 = "loadmodule \"tm.so\"\nroute {\n    t_relay();\n}\n";
+    assert!(quick_fixes(&cat, doc2, "unknown command <t_relay>, missing loadmodule?").is_empty());
+    // no loadmodule lines at all → insert at the top
+    let fixes = quick_fixes(
+        &cat,
+        "route {\n    t_relay();\n}\n",
+        "unknown command <t_relay>, missing loadmodule?",
+    );
+    assert_eq!((fixes[0].line, fixes[0].col), (0, 0));
+    // unknown function nobody exports → no fix
+    assert!(quick_fixes(&cat, doc, "unknown command <nope_fn>, missing loadmodule?").is_empty());
+
+    // undefined route → create a stub at end of file
+    let doc3 = "route {\n    route(missing);\n}\n";
+    let fixes = quick_fixes(
+        &[],
+        doc3,
+        "route 'missing' is not defined here or in included files",
+    );
+    assert_eq!(fixes.len(), 1);
+    assert!(fixes[0].title.contains("missing"));
+    assert_eq!(fixes[0].line, 3, "appended at end of file");
+    assert!(fixes[0].insert.contains("route[missing]"));
+    assert!(fixes[0].insert.contains("exit;"));
+    // adversarial messages → no panic, no fix
+    for m in [
+        "",
+        "unknown command <>",
+        "route '' is not defined",
+        "unknown command <\0>",
+    ] {
+        let _ = quick_fixes(&cat, doc, m);
+    }
+}
+
+#[test]
+fn catalog_diagnostics_flag_undocumented_modparams() {
+    let cat = catalog(); // tm has fr_timeout; cachedb_nats has kv_bucket
+    // unknown param of a KNOWN module → warning at the param
+    let text = "modparam(\"tm\", \"fr_timeot\", 5)\n";
+    let ds = catalog_diagnostics(&cat, text);
+    assert_eq!(ds.len(), 1, "{ds:?}");
+    assert!(ds[0].message.contains("fr_timeot") && ds[0].message.contains("tm"));
+    assert_eq!(ds[0].line, 0);
+    assert!(ds[0].col_start < ds[0].col_end);
+    // documented param → clean
+    assert!(catalog_diagnostics(&cat, "modparam(\"tm\", \"fr_timeout\", 5)\n").is_empty());
+    // UNKNOWN module → silent (the catalog may simply not cover it)
+    assert!(catalog_diagnostics(&cat, "modparam(\"nope\", \"x\", 1)\n").is_empty());
+    // empty catalog → silent everywhere
+    assert!(catalog_diagnostics(&[], text).is_empty());
+}
+
+#[test]
+fn semantic_spans_cover_routes_and_pvars() {
+    let text = "route[relay] {\n    xlog(\"$ru\");\n    $var(x) = 1;\n    route(relay);\n}\n";
+    let spans = semantic_spans(text);
+    // route def name, pvar $ru is inside a STRING (still a pvar in
+    // opensips — interpolated), $var(x), route ref name
+    let routes: Vec<_> = spans
+        .iter()
+        .filter(|s| s.kind == SemKind::RouteName)
+        .collect();
+    assert_eq!(routes.len(), 2, "{spans:?}");
+    assert_eq!((routes[0].line, routes[0].col, routes[0].len), (0, 6, 5));
+    assert_eq!((routes[1].line, routes[1].col, routes[1].len), (3, 10, 5));
+    let pvars: Vec<_> = spans.iter().filter(|s| s.kind == SemKind::Pvar).collect();
+    assert!(pvars.iter().any(|p| p.line == 1), "$ru inside the string");
+    assert!(pvars.iter().any(|p| p.line == 2 && p.len == 7), "$var(x)");
+    // comments contribute nothing
+    assert!(semantic_spans("# $ru route(x)\n").is_empty());
+    // adversarial: no panic
+    for s in ["", "$", "$(", "route[", "\0$ru"] {
+        let _ = semantic_spans(s);
+    }
+}
+
+#[test]
+fn semantic_tokens_delta_encoding() {
+    let text = "route[ab] {\n    route(ab);\n}\n";
+    let data = encode_semantic_tokens(text);
+    // LSP quintuples: deltaLine, deltaStart, length, tokenType, mods
+    assert_eq!(data.len() % 5, 0);
+    assert!(!data.is_empty());
+    // first token: line 0, col 6, len 2, type 0 (route name)
+    assert_eq!(&data[..5], &[0, 6, 2, 0, 0]);
+    // second token on line 1 → deltaLine 1, absolute col 10
+    assert_eq!(&data[5..10], &[1, 10, 2, 0, 0]);
 }

@@ -2,7 +2,7 @@
   "name": "opensips-lsp",
   "displayName": "OpenSIPS Routing Script",
   "description": "Language support for opensips.cfg routing scripts (diagnostics via opensips -C, completion, hover, go-to-definition).",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "publisher": "NormB",
   "license": "(MIT OR Apache-2.0)",
   "engines": {
@@ -100,6 +100,11 @@
           "type": "string",
           "default": "",
           "description": "Documentation-catalog cache directory (empty = the platform cache dir)."
+        },
+        "opensipsLsp.codeLens.references": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show reference-count code lenses above route definitions."
         }
       }
     },

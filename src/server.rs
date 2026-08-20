@@ -12,7 +12,7 @@ pub struct Backend {
     client: Client,
     /// Open documents: (version, full text).
     docs: DashMap<Url, (i32, String)>,
-    catalog: std::sync::RwLock<Vec<catalog::ModuleDoc>>,
+    catalog: std::sync::Arc<std::sync::RwLock<Vec<catalog::ModuleDoc>>>,
     core: std::sync::RwLock<catalog::CoreDocs>,
     src: std::sync::RwLock<Option<String>>,
     opensips_bin: std::sync::RwLock<Option<String>>,
@@ -30,6 +30,8 @@ pub struct Backend {
     /// didChange generation per document: only the latest debounced
     /// analyzer task publishes.
     change_gen: std::sync::Arc<DashMap<Url, u64>>,
+    /// Reference-count code lenses on route definitions (init option).
+    code_lens_refs: std::sync::RwLock<bool>,
 }
 
 impl Backend {
@@ -38,7 +40,7 @@ impl Backend {
         Self {
             client,
             docs: DashMap::new(),
-            catalog: std::sync::RwLock::new(Vec::new()),
+            catalog: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
             core: std::sync::RwLock::new(catalog::CoreDocs::default()),
             src: std::sync::RwLock::new(None),
             opensips_bin: std::sync::RwLock::new(None),
@@ -53,6 +55,7 @@ impl Backend {
             check_diags: std::sync::Arc::new(DashMap::new()),
             analyzer_enabled: std::sync::RwLock::new(true),
             change_gen: std::sync::Arc::new(DashMap::new()),
+            code_lens_refs: std::sync::RwLock::new(true),
         }
     }
 
@@ -93,9 +96,11 @@ impl Backend {
         path: &std::path::Path,
         text: &str,
         loader: &dyn Fn(&std::path::Path) -> Option<String>,
+        cat: &[catalog::ModuleDoc],
     ) -> Vec<Diagnostic> {
-        logic::analyzer_diagnostics(path, text, loader)
-            .into_iter()
+        let mut all = logic::analyzer_diagnostics(path, text, loader);
+        all.extend(logic::catalog_diagnostics(cat, text));
+        all.into_iter()
             .map(|d| {
                 let lt = Self::doc_line(text, d.line);
                 Diagnostic {
@@ -127,12 +132,14 @@ impl Backend {
         version: i32,
         text: &str,
         open: std::collections::HashMap<std::path::PathBuf, String>,
+        cat: &std::sync::Arc<std::sync::RwLock<Vec<catalog::ModuleDoc>>>,
         skip_if_empty: bool,
     ) {
         let mut merged = check_map.get(uri).map(|v| v.clone()).unwrap_or_default();
         if analyzer_enabled && let Ok(path) = uri.to_file_path() {
             let loader = Self::make_loader(open);
-            merged.extend(Self::analyzer_lsp_diags(&path, text, &loader));
+            let cat = cat.read().unwrap().clone();
+            merged.extend(Self::analyzer_lsp_diags(&path, text, &loader, &cat));
         }
         if merged.is_empty() && skip_if_empty {
             return;
@@ -217,6 +224,7 @@ impl Backend {
                 snap_version,
                 &snap_text,
                 self.open_docs_snapshot(),
+                &self.catalog,
                 true,
             )
             .await;
@@ -301,6 +309,7 @@ impl Backend {
                     snap_version,
                     &snap_text,
                     self.open_docs_snapshot(),
+                    &self.catalog,
                     false,
                 )
                 .await;
@@ -324,6 +333,7 @@ impl Backend {
                 snap_version,
                 &snap_text,
                 self.open_docs_snapshot(),
+                &self.catalog,
                 false,
             )
             .await;
@@ -349,6 +359,7 @@ impl Backend {
                 snap_version,
                 &snap_text,
                 self.open_docs_snapshot(),
+                &self.catalog,
                 false,
             )
             .await;
@@ -430,6 +441,7 @@ impl Backend {
             snap_version,
             &snap_text,
             self.open_docs_snapshot(),
+            &self.catalog,
             false,
         )
         .await;
@@ -452,6 +464,9 @@ impl LanguageServer for Backend {
         }
         if let Some(b) = opts.get("analyzerDiagnostics").and_then(|v| v.as_bool()) {
             *self.analyzer_enabled.write().unwrap() = b;
+        }
+        if let Some(b) = opts.get("codeLensReferences").and_then(|v| v.as_bool()) {
+            *self.code_lens_refs.write().unwrap() = b;
         }
         if let Some(n) = opts.get("maxDiagnostics").and_then(|v| v.as_u64()) {
             *self.max_diagnostics.write().unwrap() = (n as usize).max(1);
@@ -508,6 +523,27 @@ impl LanguageServer for Backend {
                 references_provider: Some(OneOf::Left(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
+                code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: SemanticTokensLegend {
+                                token_types: vec![
+                                    SemanticTokenType::FUNCTION,
+                                    SemanticTokenType::VARIABLE,
+                                ],
+                                token_modifiers: vec![],
+                            },
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            range: None,
+                            work_done_progress_options: Default::default(),
+                        },
+                    ),
+                ),
+                code_lens_provider: Some(CodeLensOptions {
+                    resolve_provider: Some(false),
+                }),
                 ..Default::default()
             },
         })
@@ -598,6 +634,7 @@ impl LanguageServer for Backend {
         };
         let gen_map = self.change_gen.clone();
         let check_map = self.check_diags.clone();
+        let cat_arc = self.catalog.clone();
         let client = self.client.clone();
         let open = self.open_docs_snapshot();
         let cap = *self.max_diagnostics.read().unwrap();
@@ -613,7 +650,7 @@ impl LanguageServer for Backend {
                 return;
             }
             Backend::merge_and_publish(
-                &client, &check_map, true, cap, &uri, version, &text, open, false,
+                &client, &check_map, true, cap, &uri, version, &text, open, &cat_arc, false,
             )
             .await;
         });
@@ -946,6 +983,161 @@ impl LanguageServer for Backend {
             changes: Some(changes),
             ..Default::default()
         }))
+    }
+
+    async fn symbol(&self, p: WorkspaceSymbolParams) -> Result<Option<Vec<SymbolInformation>>> {
+        let query = p.query.to_lowercase();
+        let mut seen: std::collections::HashSet<std::path::PathBuf> =
+            std::collections::HashSet::new();
+        let mut out = Vec::new();
+        // every open document plus its include closure, deduplicated
+        let open: Vec<(Url, String)> = self
+            .docs
+            .iter()
+            .map(|e| (e.key().clone(), e.value().1.clone()))
+            .collect();
+        for (uri, text) in open {
+            for (path, ftext) in self.closure_for(&uri, &text) {
+                if !seen.insert(path.clone()) {
+                    continue;
+                }
+                let Ok(furi) = Url::from_file_path(&path) else {
+                    continue;
+                };
+                for b in analyze::route_blocks(&ftext) {
+                    if b.name.is_empty() || !b.name.to_lowercase().contains(&query) {
+                        continue;
+                    }
+                    let lt = Self::doc_line(&ftext, b.line);
+                    let c = analyze::byte_to_utf16(&lt, b.col as usize);
+                    #[allow(deprecated)]
+                    out.push(SymbolInformation {
+                        name: format!("{}[{}]", b.kind, b.name),
+                        kind: SymbolKind::FUNCTION,
+                        tags: None,
+                        deprecated: None,
+                        location: Location {
+                            uri: furi.clone(),
+                            range: Range {
+                                start: Position::new(b.line, c),
+                                end: Position::new(b.line, c),
+                            },
+                        },
+                        container_name: None,
+                    });
+                    if out.len() >= 256 {
+                        return Ok(Some(out));
+                    }
+                }
+            }
+        }
+        Ok(Some(out))
+    }
+
+    async fn semantic_tokens_full(
+        &self,
+        p: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let data = logic::encode_semantic_tokens(&text)
+            .chunks(5)
+            .map(|c| SemanticToken {
+                delta_line: c[0],
+                delta_start: c[1],
+                length: c[2],
+                token_type: c[3],
+                token_modifiers_bitset: c[4],
+            })
+            .collect();
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data,
+        })))
+    }
+
+    async fn code_action(&self, p: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = p.text_document.uri;
+        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let cat = self.catalog.read().unwrap();
+        let mut out: Vec<CodeActionOrCommand> = Vec::new();
+        for d in &p.context.diagnostics {
+            for f in logic::quick_fixes(&cat, &text, &d.message) {
+                let pos = Position::new(f.line, f.col);
+                let mut changes = std::collections::HashMap::new();
+                changes.insert(
+                    uri.clone(),
+                    vec![TextEdit {
+                        range: Range {
+                            start: pos,
+                            end: pos,
+                        },
+                        new_text: f.insert,
+                    }],
+                );
+                out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                    title: f.title,
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    diagnostics: Some(vec![d.clone()]),
+                    edit: Some(WorkspaceEdit {
+                        changes: Some(changes),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }));
+            }
+        }
+        Ok(Some(out))
+    }
+
+    async fn code_lens(&self, p: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
+        if !*self.code_lens_refs.read().unwrap() {
+            return Ok(None);
+        }
+        let uri = p.text_document.uri;
+        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let files = self.closure_for(&uri, &text);
+        let lenses = analyze::route_blocks(&text)
+            .into_iter()
+            // only request routes are route()-callable; other kinds'
+            // arming isn't tracked, so a count would mislead
+            .filter(|b| b.kind == "route" && !b.name.is_empty())
+            .map(|b| {
+                let n: usize = files
+                    .iter()
+                    .map(|(_, t)| {
+                        analyze::route_refs(t)
+                            .into_iter()
+                            .filter(|r| r.name == b.name)
+                            .count()
+                    })
+                    .sum();
+                let lt = Self::doc_line(&text, b.name_line);
+                let c = analyze::byte_to_utf16(&lt, b.name_col as usize);
+                CodeLens {
+                    range: Range {
+                        start: Position::new(b.name_line, c),
+                        end: Position::new(b.name_line, c),
+                    },
+                    command: Some(Command {
+                        title: if n == 1 {
+                            "1 reference".into()
+                        } else {
+                            format!("{n} references")
+                        },
+                        command: String::new(),
+                        arguments: None,
+                    }),
+                    data: None,
+                }
+            })
+            .collect();
+        Ok(Some(lenses))
     }
 
     async fn folding_range(&self, p: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {

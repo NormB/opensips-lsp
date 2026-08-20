@@ -613,6 +613,205 @@ pub fn split_params(sig: &str) -> Vec<String> {
     out
 }
 
+/// Catalog-pinned validation: flag `modparam("m", "p", ...)` where
+/// the configured source tree documents module `m` but no parameter
+/// `p`.  Version-exact by construction — the catalog IS the user's
+/// pinned tree; unknown modules stay silent (the catalog may simply
+/// not cover them).  Doc-derived, so kept separate from the
+/// grammar-derived [`analyzer_diagnostics`].
+pub fn catalog_diagnostics(catalog: &[ModuleDoc], text: &str) -> Vec<AnalyzerDiag> {
+    if catalog.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for call in analyze::modparam_calls(text) {
+        let Some(m) = catalog.iter().find(|m| m.name == call.module) else {
+            continue;
+        };
+        if m.params.iter().any(|p| p.name == call.param) {
+            continue;
+        }
+        out.push(AnalyzerDiag {
+            line: call.line,
+            col_start: call.col,
+            col_end: call.col + call.param.len() as u32,
+            message: format!(
+                "parameter '{}' is not documented for module '{}' in the configured source tree",
+                call.param, call.module
+            ),
+        });
+    }
+    out
+}
+
+/// Semantic-token categories the server emits.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SemKind {
+    /// A route name at a definition or call site (legend index 0).
+    RouteName,
+    /// A pseudo-variable (legend index 1).
+    Pvar,
+}
+
+/// One semantic span, in BYTE columns on its line.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SemSpan {
+    /// 0-based line.
+    pub line: u32,
+    /// 0-based start byte column.
+    pub col: u32,
+    /// Byte length.
+    pub len: u32,
+    /// Category.
+    pub kind: SemKind,
+}
+
+static_regex!(
+    re_pvar,
+    r"\$[A-Za-z][A-Za-z0-9_.]*(?:\([A-Za-z0-9_.:>=-]*\))?"
+);
+
+/// Semantic spans for a document: route names (definitions and call
+/// sites) and pseudo-variables.  Pvars inside double-quoted strings
+/// count — OpenSIPS interpolates them there; comments never do.
+pub fn semantic_spans(text: &str) -> Vec<SemSpan> {
+    let mut out = Vec::new();
+    for b in analyze::route_blocks(text) {
+        if !b.name.is_empty() {
+            out.push(SemSpan {
+                line: b.name_line,
+                col: b.name_col,
+                len: b.name.len() as u32,
+                kind: SemKind::RouteName,
+            });
+        }
+    }
+    for r in analyze::route_refs(text) {
+        out.push(SemSpan {
+            line: r.line,
+            col: r.col,
+            len: r.name.len() as u32,
+            kind: SemKind::RouteName,
+        });
+    }
+    // pvars: line-wise scan skipping comment lines (a `#` before the
+    // pvar on the same line comments it out; strings keep pvars)
+    for (li, line) in text.lines().enumerate() {
+        let comment_at = line.find('#');
+        for m in re_pvar().find_iter(line) {
+            if let Some(h) = comment_at
+                && m.start() > h
+            {
+                continue;
+            }
+            out.push(SemSpan {
+                line: li as u32,
+                col: m.start() as u32,
+                len: (m.end() - m.start()) as u32,
+                kind: SemKind::Pvar,
+            });
+        }
+    }
+    out.sort_by_key(|s| (s.line, s.col));
+    out.dedup_by_key(|s| (s.line, s.col));
+    out
+}
+
+/// LSP semanticTokens/full data: delta-encoded quintuples with
+/// UTF-16 columns and lengths.
+pub fn encode_semantic_tokens(text: &str) -> Vec<u32> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut data = Vec::new();
+    let (mut prev_line, mut prev_start) = (0u32, 0u32);
+    for s in semantic_spans(text) {
+        let Some(line) = lines.get(s.line as usize) else {
+            continue;
+        };
+        let start = analyze::byte_to_utf16(line, s.col as usize);
+        let end = analyze::byte_to_utf16(line, (s.col + s.len) as usize);
+        let delta_line = s.line - prev_line;
+        let delta_start = if delta_line == 0 {
+            start - prev_start
+        } else {
+            start
+        };
+        data.extend_from_slice(&[
+            delta_line,
+            delta_start,
+            end - start,
+            match s.kind {
+                SemKind::RouteName => 0,
+                SemKind::Pvar => 1,
+            },
+            0,
+        ]);
+        prev_line = s.line;
+        prev_start = start;
+    }
+    data
+}
+
+/// One quick-fix: a single text insertion with a title.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QuickFix {
+    /// Human-readable action title.
+    pub title: String,
+    /// 0-based insertion line.
+    pub line: u32,
+    /// 0-based insertion column.
+    pub col: u32,
+    /// Text to insert.
+    pub insert: String,
+}
+
+static_regex!(re_unknown_cmd, r"unknown command <([A-Za-z0-9_]+)>");
+static_regex!(
+    re_undefined_route,
+    r"route '([A-Za-z0-9_.:-]+)' is not defined"
+);
+
+/// Quick fixes for a diagnostic `message` on `doc`:
+/// - `unknown command <f>` → load the module that exports `f` (one
+///   action per exporting module, skipped when already loaded);
+/// - `route 'x' is not defined` → append a `route[x]` stub.
+pub fn quick_fixes(catalog: &[ModuleDoc], doc: &str, message: &str) -> Vec<QuickFix> {
+    let mut out = Vec::new();
+    if let Some(c) = re_unknown_cmd().captures(message) {
+        let f = &c[1];
+        let loaded: Vec<String> = analyze::loaded_modules(doc)
+            .into_iter()
+            .map(|m| m.name)
+            .collect();
+        // insertion point: right after the LAST loadmodule line
+        let insert_line = analyze::loaded_modules(doc)
+            .into_iter()
+            .map(|m| m.line + 1)
+            .max()
+            .unwrap_or(0);
+        for m in catalog {
+            if loaded.contains(&m.name) || !m.functions.iter().any(|x| x.name == f) {
+                continue;
+            }
+            out.push(QuickFix {
+                title: format!("Load module '{}' (exports {f})", m.name),
+                line: insert_line,
+                col: 0,
+                insert: format!("loadmodule \"{}.so\"\n", m.name),
+            });
+        }
+    }
+    if let Some(c) = re_undefined_route().captures(message) {
+        let name = &c[1];
+        out.push(QuickFix {
+            title: format!("Create route[{name}]"),
+            line: doc.lines().count() as u32,
+            col: 0,
+            insert: format!("\nroute[{name}] {{\n\texit;\n}}\n"),
+        });
+    }
+    out
+}
+
 /// Resolve the opensips binary used for `-C` diagnostics.
 ///
 /// Order: explicit initializationOption, then environment, then a

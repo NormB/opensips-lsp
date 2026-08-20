@@ -1,5 +1,6 @@
 use opensips_lsp::analyze::{
-    includes, loaded_modules, modparam_context, route_blocks, route_defs, route_refs, word_at,
+    includes, loaded_modules, modparam_calls, modparam_context, route_blocks, route_defs,
+    route_refs, word_at,
 };
 
 const CFG: &str = r#"# reachability-only config
@@ -243,5 +244,29 @@ fn kamailio_only_route_kinds_are_not_opensips_defs() {
             route_defs(cfg).is_empty(),
             "kamailio-only kind must not define a route: {cfg:?}"
         );
+    }
+}
+
+#[test]
+fn modparam_calls_are_extracted_with_param_positions() {
+    let text = "modparam(\"tm\", \"fr_timeout\", 5)\n# modparam(\"no\", \"x\", 1)\nmodparam('sq', 'p2', \"v\")\n";
+    let mp = modparam_calls(text);
+    assert_eq!(mp.len(), 2, "{mp:?}");
+    assert_eq!(
+        (mp[0].module.as_str(), mp[0].param.as_str()),
+        ("tm", "fr_timeout")
+    );
+    assert_eq!(mp[0].line, 0);
+    // col points at the PARAM name (inside its quotes)
+    assert_eq!(mp[0].col, 16);
+    assert_eq!((mp[1].module.as_str(), mp[1].param.as_str()), ("sq", "p2"));
+    // adversarial
+    for s in [
+        "",
+        "modparam(",
+        "modparam(\"a\"",
+        "modparam(\"a\",\"\0\",1)",
+    ] {
+        let _ = modparam_calls(s);
     }
 }

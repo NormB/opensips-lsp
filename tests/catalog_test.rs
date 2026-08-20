@@ -128,6 +128,7 @@ fn the_shipped_admin_doc_follows_the_opensips_readme_standard() {
         "opensipsSrc",
         "checkTimeoutMs",
         "analyzerDiagnostics",
+        "codeLensReferences",
         "maxDiagnostics",
         "snippetCompletions",
         "cacheDir",

@@ -2,6 +2,26 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.7.0] — 2026-08-20
+
+- **Workspace symbols** (Ctrl+T): route definitions searchable across
+  every open file and its includes.
+- **Code lenses**: reference counts above named `route` blocks,
+  counted across the include closure
+  (`opensipsLsp.codeLens.references`).
+- **Quick fixes**: load the module that exports an
+  `unknown command <f>` function; create a stub for an undefined
+  `route(x)` target.
+- **Catalog-pinned validation**: `modparam` parameters not documented
+  by YOUR configured source tree warn as you type — version-exact by
+  construction.
+- **Semantic highlighting**: route names and pseudo-variables
+  (including inside double-quoted strings, where OpenSIPS
+  interpolates them).
+- **CLI check mode**: `opensips-lsp check [--strict]
+  [--bin <opensips>] <file>...` — the same analyzer plus the real
+  parser, for CI pipelines and git hooks.
+
 ## [0.6.1] — 2026-08-20
 
 Deep-audit release: every claim was re-verified against the real
