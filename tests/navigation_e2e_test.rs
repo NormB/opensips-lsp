@@ -191,3 +191,93 @@ fn semantic_tokens_over_stdio() {
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn prepare_rename_gates_on_route_symbols() {
+    let (mut child, rx, mut stdin, uri, base) = boot("preprename", serde_json::json!({}), DOC);
+    // on the route(helper) call-site name (line 7, "helper" at col 10)
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":10,"method":"textDocument/prepareRename","params":{
+        "textDocument":{"uri":uri},"position":{"line":7,"character":11}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 10, "prepareRename on symbol");
+    let r = &v["result"];
+    assert!(
+        !r.is_null(),
+        "prepareRename must accept a route symbol: {v}"
+    );
+    let (range, ph) = (&r["range"], &r["placeholder"]);
+    assert_eq!(ph, "helper", "placeholder is the symbol: {r}");
+    assert_eq!(range["start"]["line"], 7);
+    assert_eq!(range["start"]["character"], 10);
+    assert_eq!(range["end"]["character"], 16);
+    // off-symbol (the 'route' keyword) → null, so editors block F2
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":11,"method":"textDocument/prepareRename","params":{
+        "textDocument":{"uri":uri},"position":{"line":7,"character":2}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 11, "prepareRename off symbol");
+    assert!(v["result"].is_null(), "off-symbol must be null: {v}");
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn document_links_cover_includes() {
+    let text = "include_file \"inc.cfg\"\nimport_file 'opt.cfg'\nroute { exit; }\n";
+    let (mut child, rx, mut stdin, uri, base) = boot("doclink", serde_json::json!({}), text);
+    std::fs::write(base.join("inc.cfg"), "route[a] { exit; }\n").unwrap();
+    // opt.cfg deliberately absent: import_file is optional — the link
+    // is still produced (targets need not exist)
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":20,"method":"textDocument/documentLink","params":{
+        "textDocument":{"uri":uri}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 20, "documentLink");
+    let links = v["result"].as_array().expect("links array").clone();
+    assert_eq!(links.len(), 2, "one link per include: {links:?}");
+    let t0 = links[0]["target"].as_str().unwrap();
+    assert!(
+        t0.starts_with("file://") && t0.ends_with("/inc.cfg"),
+        "relative include resolves against the doc dir: {t0}"
+    );
+    assert_eq!(links[0]["range"]["start"]["line"], 0);
+    assert!(
+        links[1]["target"].as_str().unwrap().ends_with("/opt.cfg"),
+        "missing targets still get links: {links:?}"
+    );
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn semantic_tokens_range_covers_only_the_slice() {
+    let (mut child, rx, mut stdin, uri, base) = boot("semrange", serde_json::json!({}), DOC);
+    // whole-doc tokens: 2 named defs + 2 refs (main route is unnamed)
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":30,"method":"textDocument/semanticTokens/full","params":{
+        "textDocument":{"uri":uri}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 30, "full tokens");
+    assert_eq!(v["result"]["data"].as_array().unwrap().len(), 4 * 5);
+    // range over lines 6..9 (the main route with the two call sites)
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":31,"method":"textDocument/semanticTokens/range","params":{
+        "textDocument":{"uri":uri},
+        "range":{"start":{"line":6,"character":0},"end":{"line":9,"character":0}}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 31, "range tokens");
+    let data = v["result"]["data"].as_array().expect("data").clone();
+    assert_eq!(data.len(), 2 * 5, "only the two call sites: {data:?}");
+    // first token is delta-encoded from the document origin per LSP
+    assert_eq!(data[0], 7, "absolute line of the first in-range token");
+    assert_eq!(data[1], 10);
+    assert_eq!(data[2], 6);
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&base);
+}

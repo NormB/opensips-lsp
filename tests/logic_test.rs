@@ -689,3 +689,25 @@ fn route_families_are_separate_namespaces_for_navigation() {
         let _ = ns_occurrences(s, "x", &RouteNs::Main);
     }
 }
+
+#[test]
+fn semantic_tokens_range_encoding_edges() {
+    use opensips_lsp::logic::encode_semantic_tokens_range;
+    let text = "route[ab] {\n    route(ab);\n}\n";
+    // whole-doc range == full encoding
+    assert_eq!(
+        encode_semantic_tokens_range(text, 0, 0, 99, 0),
+        opensips_lsp::logic::encode_semantic_tokens(text)
+    );
+    // slice covering only line 1
+    let d = encode_semantic_tokens_range(text, 1, 0, 2, 0);
+    assert_eq!(d, vec![1, 10, 2, 0, 0]);
+    // inverted / empty ranges yield nothing, no panic
+    assert!(encode_semantic_tokens_range(text, 2, 0, 1, 0).is_empty());
+    assert!(encode_semantic_tokens_range(text, 0, 0, 0, 0).is_empty());
+    // boundary: span must lie FULLY inside (cut mid-name → excluded)
+    assert!(encode_semantic_tokens_range(text, 1, 0, 1, 11).is_empty());
+    for s in ["", "\0", "route["] {
+        let _ = encode_semantic_tokens_range(s, 0, 0, 9, 9);
+    }
+}
