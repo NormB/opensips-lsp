@@ -90,7 +90,11 @@ modules stay silent.
 
 Route names (definitions and call sites) and pseudo-variables get
 semantic tokens, so themes color them consistently — including pvars
-inside double-quoted strings, where OpenSIPS interpolates them.
+inside strings (either quote style), where OpenSIPS interpolates
+them. Comments — line or block — are excluded byte-by-byte through
+the same classifier the analyzer uses, so a `#` inside a string does
+not hide the rest of the line and a `/* ... */` block hides all of
+its interior.
 
 #### CLI check mode
 

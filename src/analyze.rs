@@ -351,6 +351,28 @@ pub fn modparam_calls(text: &str) -> Vec<ModparamCall> {
     out
 }
 
+static_regex!(
+    re_pvar_tok,
+    r"\$[A-Za-z][A-Za-z0-9_.]*(?:\([A-Za-z0-9_.:>=-]*\))?"
+);
+
+/// Every pseudo-variable occurrence as (line, col, byte length).
+/// Pvars inside strings COUNT — OpenSIPS interpolates them there;
+/// comments (line or block) never contribute.
+pub fn pvars(text: &str) -> Vec<(u32, u32, u32)> {
+    let classes = classify(text);
+    let mut out = Vec::new();
+    for m in re_pvar_tok().find_iter(text) {
+        match classes.get(m.start()) {
+            Some(&Class::Code) | Some(&Class::Str) => {}
+            _ => continue,
+        }
+        let (line, col) = line_col(text, m.start());
+        out.push((line, col, (m.end() - m.start()) as u32));
+    }
+    out
+}
+
 /// If the cursor (end of `line_prefix`) sits inside the *second*
 /// string argument of a `modparam(...)`, return the module name from
 /// the first argument.
