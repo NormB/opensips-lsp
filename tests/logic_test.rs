@@ -648,3 +648,44 @@ fn semantic_tokens_delta_encoding() {
     // second token on line 1 → deltaLine 1, absolute col 10
     assert_eq!(&data[5..10], &[1, 10, 2, 0, 0]);
 }
+
+#[test]
+fn route_families_are_separate_namespaces_for_navigation() {
+    use opensips_lsp::logic::{RouteNs, ns_occurrences, route_symbol_ns_at};
+    // failure_route[x] does NOT define a route() target: route(x)
+    // invokes only the main table (route[x]); failure routes are
+    // armed via t_on_failure("x")
+    let doc = "failure_route[x] {\n    exit;\n}\nroute {\n    route(x);\n}\n";
+    assert!(
+        definition_of(doc, 4, 10).is_none(),
+        "route(x) must not resolve to failure_route[x]"
+    );
+    // occurrences of main-ns "x" exclude the failure_route def
+    let occ = route_occurrences(doc, "x");
+    assert_eq!(occ.len(), 1, "call site only: {occ:?}");
+    assert!(!occ[0].1, "no definition in the main namespace");
+    // with a real route[x] present, both resolve within their tables
+    let doc2 =
+        "failure_route[x] {\n    exit;\n}\nroute[x] {\n    exit;\n}\nroute {\n    route(x);\n}\n";
+    let d = definition_of(doc2, 7, 10).expect("resolves to route[x]");
+    assert_eq!(d.line, 3, "route[x], not failure_route[x]");
+    let occ = route_occurrences(doc2, "x");
+    assert_eq!(occ.len(), 2, "call + main def only: {occ:?}");
+    assert!(occ.iter().all(|(l, _)| l.line != 0), "failure def excluded");
+    // the failure_route name is its own namespace
+    let (n, ns) = route_symbol_ns_at(doc2, 0, 14).expect("symbol at failure name");
+    assert_eq!(n, "x");
+    assert_eq!(ns, RouteNs::Kind("failure_route".into()));
+    let kocc = ns_occurrences(doc2, "x", &RouteNs::Kind("failure_route".into()));
+    assert_eq!(kocc.len(), 1, "just the failure def: {kocc:?}");
+    assert!(kocc[0].1);
+    assert_eq!(kocc[0].0.line, 0);
+    // main ns from a call site
+    let (n, ns) = route_symbol_ns_at(doc2, 7, 10).expect("symbol at call");
+    assert_eq!((n.as_str(), ns), ("x", RouteNs::Main));
+    // adversarial: no panic
+    for s in ["", "\0failure_route[x]{", "route("] {
+        let _ = route_symbol_ns_at(s, 0, 0);
+        let _ = ns_occurrences(s, "x", &RouteNs::Main);
+    }
+}

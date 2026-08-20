@@ -510,3 +510,64 @@ fn check_invocation_carries_the_opensips_flags() {
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn check_runs_in_the_configs_own_directory() {
+    // relative include_file / module paths resolve against the
+    // checker's cwd — the server must run it from the cfg's dir,
+    // exactly like the CLI does
+    let dir = std::env::temp_dir().join(format!("oslsp-cwd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let conf = dir.join("conf");
+    std::fs::create_dir_all(&conf).unwrap();
+    let log = dir.join("pwd.log");
+    let stub = dir.join("rec-pwd.sh");
+    std::fs::write(
+        &stub,
+        format!("#!/bin/sh\npwd >> {}\nexit 0\n", log.display()),
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perm = std::fs::metadata(&stub).unwrap().permissions();
+    perm.set_mode(0o755);
+    std::fs::set_permissions(&stub, perm).unwrap();
+    let cfg = conf.join("t.cfg");
+    std::fs::write(&cfg, "route { exit; }\n").unwrap();
+    let uri = format!("file://{}", cfg.display());
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env("OPENSIPS_LSP_BIN", stub.display().to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "init");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":"route { exit; }\n"}}}),
+    );
+    wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics",
+        "publish after check",
+    );
+    let pwd = std::fs::read_to_string(&log).expect("stub ran");
+    // canonicalize both sides: macOS tempdirs live under /private
+    let got = std::fs::canonicalize(pwd.trim()).unwrap();
+    let want = std::fs::canonicalize(&conf).unwrap();
+    assert_eq!(got, want, "checker must run from the cfg's directory");
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&dir);
+}

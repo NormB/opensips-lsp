@@ -266,20 +266,44 @@ pub fn definition_of(doc: &str, line: u32, col: u32) -> Option<Located> {
         .into_iter()
         .find(|r| in_span(r, &r.name, line, col))?
         .name;
-    analyze::route_defs(doc)
+    // only main-table blocks are route() targets: failure_route[x]
+    // and friends are armed via module functions (t_on_failure)
+    analyze::route_blocks(doc)
         .into_iter()
+        .filter(|b| b.kind == "route")
+        .map(|b| Located {
+            name: b.name,
+            line: b.line,
+            col: b.col,
+        })
         .find(|d| d.name == name)
 }
 
-/// The route name whose span covers byte position (line, col) — at a
-/// `route(name)` call site or at the NAME inside a `route[name]`
-/// definition.  The anonymous main route has no symbol.
-pub fn route_symbol_at(doc: &str, line: u32, col: u32) -> Option<String> {
+/// The namespace a route-name symbol lives in.  OpenSIPS keeps one
+/// route table per block kind: `route(NAME)` invokes only the main
+/// table (`route[NAME]` blocks); `failure_route[NAME]` and friends
+/// are armed through module functions (`t_on_failure("NAME")`) and
+/// share nothing with the main table — same-name cross-kind configs
+/// are legal.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RouteNs {
+    /// The main route table: `route[NAME]` defs + `route(NAME)` calls.
+    Main,
+    /// A per-kind table (`failure_route`, `event_route`, ...): just
+    /// that kind's bracket names.
+    Kind(String),
+}
+
+/// The route-name symbol whose span covers byte position (line, col)
+/// — at a `route(name)` call site or at the NAME inside any named
+/// block — together with its namespace.  Unnamed blocks have no
+/// symbol.
+pub fn route_symbol_ns_at(doc: &str, line: u32, col: u32) -> Option<(String, RouteNs)> {
     if let Some(r) = analyze::route_refs(doc)
         .into_iter()
         .find(|r| in_span(r, &r.name, line, col))
     {
-        return Some(r.name);
+        return Some((r.name, RouteNs::Main));
     }
     analyze::route_blocks(doc)
         .into_iter()
@@ -292,22 +316,40 @@ pub fn route_symbol_at(doc: &str, line: u32, col: u32) -> Option<String> {
             };
             in_span(&at, &b.name, line, col)
         })
-        .map(|b| b.name)
+        .map(|b| {
+            let ns = if b.kind == "route" {
+                RouteNs::Main
+            } else {
+                RouteNs::Kind(b.kind.clone())
+            };
+            (b.name, ns)
+        })
 }
 
-/// Every occurrence of route `name` in `doc`: call sites and the
-/// definition's name span.  The bool is `true` for the definition.
-pub fn route_occurrences(doc: &str, name: &str) -> Vec<(Located, bool)> {
+/// Every occurrence of `name` within its namespace in `doc`.  The
+/// bool is `true` for definitions.  Main-namespace occurrences are
+/// `route(NAME)` call sites plus `route[NAME]` definitions; per-kind
+/// namespaces list only that kind's definition name spans (their call
+/// sites are strings inside module functions like `t_on_failure`).
+pub fn ns_occurrences(doc: &str, name: &str, ns: &RouteNs) -> Vec<(Located, bool)> {
     if name.is_empty() {
         return Vec::new();
     }
-    let mut out: Vec<(Located, bool)> = analyze::route_refs(doc)
-        .into_iter()
-        .filter(|r| r.name == name)
-        .map(|r| (r, false))
-        .collect();
+    let mut out: Vec<(Located, bool)> = Vec::new();
+    if *ns == RouteNs::Main {
+        out.extend(
+            analyze::route_refs(doc)
+                .into_iter()
+                .filter(|r| r.name == name)
+                .map(|r| (r, false)),
+        );
+    }
+    let want_kind = match ns {
+        RouteNs::Main => "route",
+        RouteNs::Kind(k) => k.as_str(),
+    };
     for b in analyze::route_blocks(doc) {
-        if b.name == name {
+        if b.name == name && b.kind == want_kind {
             out.push((
                 Located {
                     name: b.name,
@@ -319,6 +361,16 @@ pub fn route_occurrences(doc: &str, name: &str) -> Vec<(Located, bool)> {
         }
     }
     out
+}
+
+/// [`route_symbol_ns_at`], name only.
+pub fn route_symbol_at(doc: &str, line: u32, col: u32) -> Option<String> {
+    route_symbol_ns_at(doc, line, col).map(|(n, _)| n)
+}
+
+/// Main-namespace occurrences of route `name` in `doc`.
+pub fn route_occurrences(doc: &str, name: &str) -> Vec<(Located, bool)> {
+    ns_occurrences(doc, name, &RouteNs::Main)
 }
 
 /// Is `s` legal as an UNQUOTED route name?  Gates rename, which
