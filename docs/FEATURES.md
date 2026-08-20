@@ -106,7 +106,15 @@ clients that can't pass options.
   changes, so edits take effect immediately.
 - Snippet completions and static snippets compose: static snippets
   scaffold blocks, completion snippets fill in calls.
-- Include handling is capped for safety: depth 8, 64 files, 1 MiB per
-  file; relative paths resolve against the including file's
-  directory. `OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS` tunes the analyzer
-  debounce (default 300).
+- Include handling is capped for safety: depth 8, 64 files, 1 MiB
+  per file (OpenSIPS itself allows depth 50). The LSP resolves
+  relative include paths against the including file's directory;
+  note that at runtime OpenSIPS tries the process working directory
+  FIRST and only then the including file's directory — a same-named
+  file in the daemon's CWD can differ from what the editor analyzed.
+  `OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS` tunes the analyzer debounce
+  (default 300).
+- The analyzer's undefined-route warnings are ADDITIVE to
+  `opensips -C`: the parser accepts a config whose `route(x)` target
+  does not exist (the failure happens at runtime), so only the
+  analyzer catches it while editing.

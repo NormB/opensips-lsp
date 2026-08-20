@@ -2,7 +2,7 @@
 
 Install the server first — either grab a prebuilt binary from the
 [releases page](https://github.com/NormB/opensips-lsp/releases)
-(x86_64/aarch64 Linux tarballs), or `cargo build --release` and put
+(Linux/macOS tarballs and Windows zips, x86_64 and aarch64/arm64), or `cargo build --release` and put
 `target/release/opensips-lsp` on PATH.
 All examples pass the same three `initializationOptions` documented
 in `docs/ADMIN.md`.

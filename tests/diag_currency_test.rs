@@ -12,9 +12,10 @@ use std::process::{Command, Stdio};
 /// Stub opensips: behavior keyed by a mode file next to the cfg.
 ///   error -> one positioned error;  hang -> sleep past the timeout
 const STUB: &str = r#"#!/bin/sh
-mode=$(cat "$(dirname "$3")/mode")
+for a in "$@"; do cfg="$a"; done
+mode=$(cat "$(dirname "$cfg")/mode")
 if [ "$mode" = hang ]; then sleep 30; fi
-echo "CRITICAL:core:yyerror: parse error in $3:1:2-3: planted" >&2
+echo "CRITICAL:core:yyerror: parse error in $cfg:1:2-3: planted" >&2
 exit 255
 "#;
 
@@ -171,7 +172,7 @@ fn output_flood_is_capped_and_clears_diagnostics() {
     // ~8 MiB of noise, then a "valid" error line that must never be seen
     std::fs::write(
         &stub,
-        "#!/bin/sh\nhead -c 8388608 /dev/zero | tr '\\0' 'A' >&2\necho \"CRITICAL:core:yyerror: parse error in $3:1:1-2: after flood\" >&2\nexit 255\n",
+        "#!/bin/sh\nfor a in \"$@\"; do cfg=\"$a\"; done\nhead -c 8388608 /dev/zero | tr '\\0' 'A' >&2\necho \"CRITICAL:core:yyerror: parse error in $cfg:1:1-2: after flood\" >&2\nexit 255\n",
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;

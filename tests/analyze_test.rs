@@ -227,3 +227,21 @@ fn single_quoted_strings_are_strings() {
         let _ = includes(s);
     }
 }
+
+#[test]
+fn kamailio_only_route_kinds_are_not_opensips_defs() {
+    // request_route / reply_route / onsend_route are Kamailio blocks;
+    // in OpenSIPS they must not register as route definitions (the
+    // word-boundary guard must also keep `request_route {` from
+    // matching its `route` suffix)
+    for cfg in [
+        "request_route {\n    exit;\n}\n",
+        "reply_route {\n    exit;\n}\n",
+        "onsend_route {\n    exit;\n}\n",
+    ] {
+        assert!(
+            route_defs(cfg).is_empty(),
+            "kamailio-only kind must not define a route: {cfg:?}"
+        );
+    }
+}

@@ -7,7 +7,7 @@
 //!   - the analyzer never panics on any corpus file
 //!   - with OPENSIPS_LSP_TEST_BIN set: every file the real parser
 //!     rejects yields at least one diagnostic (no silent failures),
-//!     and every accepted file yields none
+//!     and every accepted file yields no Error-severity ones
 
 use opensips_lsp::{analyze, diag};
 
@@ -82,9 +82,15 @@ fn corpus_sweep_no_panics_and_no_silent_failures() {
             let diags = diag::parse_check_output(&all, rc);
             if rc == 0 {
                 ok += 1;
+                // warnings are legitimate on an accepted config; only
+                // ERROR-severity diagnostics are forbidden here
+                let errors: Vec<_> = diags
+                    .iter()
+                    .filter(|d| d.severity == diag::Severity::Error)
+                    .collect();
                 assert!(
-                    diags.is_empty(),
-                    "{}: accepted by -C but diagnostics produced: {diags:?}",
+                    errors.is_empty(),
+                    "{}: accepted by -C but Error diagnostics produced: {errors:?}",
                     f.display()
                 );
             } else {

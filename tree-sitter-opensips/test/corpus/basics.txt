@@ -203,3 +203,40 @@ route {
             (call_expression
               function: (identifier)
               (string))))))))
+
+================================================================================
+timer route with interval
+================================================================================
+
+timer_route[gw_update, 30] {
+    exit;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (route_definition
+    kind: (route_kind)
+    name: (identifier)
+    interval: (number)
+    body: (block
+      (keyword_statement))))
+
+================================================================================
+single-quoted string
+================================================================================
+
+route {
+    xlog('hello # } {');
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (route_definition
+    kind: (route_kind)
+    body: (block
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (string))))))
