@@ -666,14 +666,10 @@ pub struct SemSpan {
     pub kind: SemKind,
 }
 
-static_regex!(
-    re_pvar,
-    r"\$[A-Za-z][A-Za-z0-9_.]*(?:\([A-Za-z0-9_.:>=-]*\))?"
-);
-
 /// Semantic spans for a document: route names (definitions and call
-/// sites) and pseudo-variables.  Pvars inside double-quoted strings
-/// count — OpenSIPS interpolates them there; comments never do.
+/// sites) and pseudo-variables.  Pvars inside strings count —
+/// OpenSIPS interpolates them there; comments (line or block,
+/// classified byte-by-byte) never do.
 pub fn semantic_spans(text: &str) -> Vec<SemSpan> {
     let mut out = Vec::new();
     for b in analyze::route_blocks(text) {
@@ -694,23 +690,13 @@ pub fn semantic_spans(text: &str) -> Vec<SemSpan> {
             kind: SemKind::RouteName,
         });
     }
-    // pvars: line-wise scan skipping comment lines (a `#` before the
-    // pvar on the same line comments it out; strings keep pvars)
-    for (li, line) in text.lines().enumerate() {
-        let comment_at = line.find('#');
-        for m in re_pvar().find_iter(line) {
-            if let Some(h) = comment_at
-                && m.start() > h
-            {
-                continue;
-            }
-            out.push(SemSpan {
-                line: li as u32,
-                col: m.start() as u32,
-                len: (m.end() - m.start()) as u32,
-                kind: SemKind::Pvar,
-            });
-        }
+    for (line, col, len) in analyze::pvars(text) {
+        out.push(SemSpan {
+            line,
+            col,
+            len,
+            kind: SemKind::Pvar,
+        });
     }
     out.sort_by_key(|s| (s.line, s.col));
     out.dedup_by_key(|s| (s.line, s.col));

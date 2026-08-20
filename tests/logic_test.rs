@@ -602,6 +602,41 @@ fn semantic_spans_cover_routes_and_pvars() {
 }
 
 #[test]
+fn semantic_spans_exclude_comments_via_classifier() {
+    // a '#' INSIDE a string does not comment out the rest of the line
+    let spans = semantic_spans("xlog(\"call #1: $ru\");\n");
+    assert!(
+        spans.iter().any(|s| s.kind == SemKind::Pvar),
+        "pvar after an in-string '#' must be tokenized: {spans:?}"
+    );
+    // same rule for single-quoted strings
+    let spans = semantic_spans("xlog('#: $ru');\n");
+    assert!(spans.iter().any(|s| s.kind == SemKind::Pvar), "{spans:?}");
+    // block comments hide pvars — on one line...
+    assert!(semantic_spans("/* $ru */\n").is_empty());
+    // ...and across lines (no '#' anywhere near the pvar)
+    assert!(semantic_spans("/*\n  $ru\n*/\n").is_empty());
+    // code resumes after the block comment ends
+    let spans = semantic_spans("/* x */ $rd;\n");
+    assert_eq!(spans.len(), 1, "{spans:?}");
+    assert_eq!((spans[0].line, spans[0].col, spans[0].len), (0, 8, 3));
+    // line comments still hide pvars; a pvar BEFORE the '#' stays
+    let spans = semantic_spans("$ru; # $rd\n");
+    assert_eq!(spans.len(), 1, "{spans:?}");
+    assert_eq!(spans[0].col, 0);
+    // adversarial: NUL, backslashes, unterminated constructs — no panic
+    for s in [
+        "\0/* $ru",
+        "\"\\\\\" $ru # $rd",
+        "'#' $ru",
+        "/* $ru",
+        "\"$ru",
+    ] {
+        let _ = semantic_spans(s);
+    }
+}
+
+#[test]
 fn semantic_tokens_delta_encoding() {
     let text = "route[ab] {\n    route(ab);\n}\n";
     let data = encode_semantic_tokens(text);

@@ -1,5 +1,5 @@
 use opensips_lsp::analyze::{
-    includes, loaded_modules, modparam_calls, modparam_context, route_blocks, route_defs,
+    includes, loaded_modules, modparam_calls, modparam_context, pvars, route_blocks, route_defs,
     route_refs, word_at,
 };
 
@@ -268,5 +268,33 @@ fn modparam_calls_are_extracted_with_param_positions() {
         "modparam(\"a\",\"\0\",1)",
     ] {
         let _ = modparam_calls(s);
+    }
+}
+
+#[test]
+fn pvars_are_classifier_scoped() {
+    // strings (both quote styles) keep pvars; comments drop them
+    let text =
+        "xlog(\"call #1: $ru\");\nxlog('#: $rd');\n# $avp(x)\n/* $var(y) */ $rU;\n/*\n $si\n*/\n";
+    let got = pvars(text);
+    assert_eq!(
+        got,
+        vec![(0, 15, 3), (1, 9, 3), (3, 14, 3)],
+        "in-string pvars stay, commented pvars go: {got:?}"
+    );
+    // multibyte before the pvar: col is a BYTE column
+    let got = pvars("xlog(\"héllo $ru\");\n");
+    assert_eq!(got, vec![(0, 13, 3)]);
+    // adversarial: NUL, backslash escapes, unterminated — no panic
+    for s in [
+        "",
+        "$",
+        "\0$ru",
+        "\"\\\\$ru",
+        "/* $ru",
+        "'$ru",
+        "$ru\u{7f}$rd",
+    ] {
+        let _ = pvars(s);
     }
 }
