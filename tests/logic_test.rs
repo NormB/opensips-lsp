@@ -1,8 +1,9 @@
 use opensips_lsp::catalog::{Item, ModuleDoc};
 use opensips_lsp::logic::{
-    CompKind, analyzer_diagnostics, completions, completions_with_core, definition_of,
-    hover_markdown, include_closure, loaded_modules_multi, pvar_tail, route_defs_multi,
-    route_occurrences, route_symbol_at, signature_at, valid_route_name,
+    CompKind, analyzer_diagnostics, attribute_foreign_diag, completions, completions_with_core,
+    definition_of, hover_markdown, include_closure, loaded_modules_multi, pvar_tail,
+    route_defs_multi, route_occurrences, route_symbol_at, signature_at, split_params,
+    valid_route_name,
 };
 
 fn catalog() -> Vec<ModuleDoc> {
@@ -204,8 +205,18 @@ fn definition_resolves_dotted_route_names() {
 
 #[test]
 fn valid_route_name_gate() {
+    // rename writes names UNQUOTED, so the gate must match the
+    // unquoted grammar: ID = [A-Za-z][A-Za-z0-9_]* or NUMBER
     assert!(valid_route_name("relay"));
-    assert!(valid_route_name("to.b_1:x-y"));
+    assert!(valid_route_name("Relay_2"));
+    assert!(valid_route_name("42")); // numeric route names are legal
+    // legal only QUOTED in the cfg → renaming to them breaks configs
+    assert!(!valid_route_name("to.b_1:x-y"));
+    assert!(!valid_route_name("a.b"));
+    assert!(!valid_route_name("a-b"));
+    assert!(!valid_route_name("a:b"));
+    assert!(!valid_route_name("1foo"));
+    assert!(!valid_route_name("_lead")); // ID starts with a letter
     assert!(!valid_route_name(""));
     assert!(!valid_route_name("has space"));
     assert!(!valid_route_name("quote\""));
@@ -393,5 +404,105 @@ fn analyzer_diagnostics_flag_undefined_and_duplicate_routes() {
         "route(x) route[x]{}",
     ] {
         let _ = analyzer_diagnostics(Path::new("/x/t.cfg"), s, &loader);
+    }
+}
+
+#[test]
+fn analyzer_understands_route_zero_and_kind_namespaces() {
+    use std::path::Path;
+    let loader = |_: &Path| -> Option<String> { None };
+    // route(0) targets the anonymous main route — no warning
+    let text = "route {\n    route(0);\n}\n";
+    assert!(
+        analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader).is_empty(),
+        "route(0) is the main route"
+    );
+    // ...but with NO main route it is undefined
+    let text = "failure_route[f] {\n    route(0);\n}\n";
+    assert_eq!(
+        analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader).len(),
+        1
+    );
+    // a failure_route[x] does NOT satisfy route(x): separate namespace
+    let text = "failure_route[x] {\n    exit;\n}\nroute {\n    route(x);\n}\n";
+    let ds = analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader);
+    assert_eq!(ds.len(), 1, "{ds:?}");
+    // a route[x] does
+    let text = "route[x] {\n    exit;\n}\nroute {\n    route(x);\n}\n";
+    assert!(analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader).is_empty());
+}
+
+#[test]
+fn core_keyword_seed_matches_opensips() {
+    let out = completions(&[], "route {\n}\n", "    ");
+    let labels: Vec<&str> = out.iter().map(|c| c.label.as_str()).collect();
+    // real core tokens
+    for kw in ["break", "exit", "drop", "async", "launch", "xlog"] {
+        assert!(labels.contains(&kw), "core token {kw} missing");
+    }
+    // module functions must not be seeded as keywords: strlen does not
+    // exist in OpenSIPS at all; send_reply is signaling's export;
+    // subst is textops'
+    for kw in ["strlen", "send_reply", "subst"] {
+        assert!(!labels.contains(&kw), "{kw} wrongly seeded as core");
+    }
+}
+
+#[test]
+fn signature_params_split_is_depth_aware() {
+    // real harvested signature from the json module
+    let parts = split_params("json_link($json(dest_id), $json(source_id))");
+    assert_eq!(parts, vec!["$json(dest_id)", "$json(source_id)"]);
+    // plain
+    assert_eq!(
+        split_params("t_relay([flags], [next_hop])"),
+        vec!["[flags]", "[next_hop]"]
+    );
+    // no params
+    assert!(split_params("fix_nated_contact()").is_empty());
+    // commas inside quotes stay put
+    assert_eq!(split_params(r#"f("a,b", c)"#), vec![r#""a,b""#, "c"]);
+    // adversarial: no panic
+    for s in ["", "(", ")", "f(((", "f\0(a,b)"] {
+        let _ = split_params(s);
+    }
+}
+
+#[test]
+fn foreign_diags_attach_to_the_include_directive() {
+    use std::path::Path;
+    let text = "include_file \"sub_bad.cfg\"\nroute {\n    exit;\n}\n";
+    // error attributed to the include's (absolute) path → maps to the
+    // include_file directive's line in the root
+    let f = attribute_foreign_diag(
+        Path::new("/x/main.cfg"),
+        text,
+        "/x/sub_bad.cfg",
+        1,
+        "syntax error",
+    );
+    assert_eq!(f.line, 0, "the include_file directive is on line 0");
+    assert!(f.col_end > f.col_start);
+    assert!(f.message.contains("sub_bad.cfg"), "{}", f.message);
+    assert!(
+        f.message.contains("line 2"),
+        "1-based line in msg: {}",
+        f.message
+    );
+    assert!(f.message.contains("syntax error"));
+    // an error in a TRANSITIVE include (no matching directive here)
+    // still lands visibly at the top of the root
+    let f = attribute_foreign_diag(
+        Path::new("/x/main.cfg"),
+        text,
+        "/x/deeper.cfg",
+        4,
+        "bad thing",
+    );
+    assert_eq!((f.line, f.col_start), (0, 0));
+    assert!(f.message.contains("deeper.cfg") && f.message.contains("bad thing"));
+    // adversarial: no panic
+    for (df, t) in [("", ""), ("\0", "include_file \"\0\""), ("/x/a", "#")] {
+        let _ = attribute_foreign_diag(Path::new("/x/m.cfg"), t, df, 0, "m");
     }
 }

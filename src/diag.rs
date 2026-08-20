@@ -30,7 +30,8 @@ pub struct Diag {
 /// Parse the stderr of `opensips -C -f <file>` into diagnostics.
 ///
 /// Positioned `yyerror` lines carry `file:line:colstart-colend`
-/// (1-based, inclusive); everything else is noise except as a
+/// (1-based; the end column is EXCLUSIVE — cfg.lex's `count()`
+/// reports start..start+len); everything else is noise except as a
 /// fallback when the check failed without any positioned error.
 pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
     let positioned = regex::Regex::new(
@@ -55,7 +56,9 @@ pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
             _ => Severity::Error,
         };
         let col_start = cs.saturating_sub(1);
-        let col_end = ce.max(cs).max(1); // inclusive 1-based end == exclusive 0-based
+        // 1-based exclusive end → 0-based exclusive end is ce-1;
+        // clamp so a degenerate report still renders one character
+        let col_end = ce.saturating_sub(1).max(col_start + 1);
         let msg = truncate_message(c[6].trim());
         out.push(Diag {
             file: c[2].to_string(),

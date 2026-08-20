@@ -71,7 +71,7 @@ fn diagnostics_flow_over_stdio() {
     assert_eq!(ds[0]["message"], "stub says no");
     assert_eq!(ds[0]["range"]["start"]["line"], 1);
     assert_eq!(ds[0]["range"]["start"]["character"], 4);
-    assert_eq!(ds[0]["range"]["end"]["character"], 7);
+    assert_eq!(ds[0]["range"]["end"]["character"], 6);
 
     write_msg(
         &mut stdin,
@@ -419,12 +419,12 @@ fn references_rename_highlight_over_stdio() {
     write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":5,"method":"textDocument/rename","params":{
-        "textDocument":{"uri":uri},"position":{"line":1,"character":11},"newName":"fwd.1"}}),
+        "textDocument":{"uri":uri},"position":{"line":1,"character":11},"newName":"fwd_1"}}),
     );
     let v = wait_for(&rx, |v| v["id"] == 5, "rename");
     let edits = v["result"]["changes"][&uri].as_array().expect("edits");
     assert_eq!(edits.len(), 3);
-    assert!(edits.iter().all(|e| e["newText"] == "fwd.1"));
+    assert!(edits.iter().all(|e| e["newText"] == "fwd_1"));
     // the quoted ref's edit replaces only the name inside the quotes
     let quoted = edits
         .iter()

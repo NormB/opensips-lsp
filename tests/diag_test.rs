@@ -22,7 +22,7 @@ fn parses_positioned_yyerror() {
     assert_eq!(d.file, "/tmp/outage_matrix.Vx9OYq/test.cfg");
     assert_eq!(d.line, 25); // 1-based 26 -> 0-based 25
     assert_eq!(d.col_start, 18); // 1-based 19 -> 18
-    assert_eq!(d.col_end, 20); // exclusive end covering col 20
+    assert_eq!(d.col_end, 19); // exclusive: the token occupies col 19 only
     assert_eq!(d.severity, Severity::Error);
     assert!(d.message.contains("enable_search_index"));
     assert!(!d.message.contains("yyerror")); // internal tag stripped
@@ -103,4 +103,22 @@ fn absurdly_long_messages_are_truncated() {
         ds[0].message.len()
     );
     assert!(ds[0].message.ends_with('…'), "truncation must be visible");
+}
+
+#[test]
+fn end_column_is_exclusive_in_opensips_output() {
+    // real binary evidence: the 6-char token `listen` at 1-based
+    // columns 1-6 is reported as `1-7` — the end is EXCLUSIVE
+    let out = "CRITICAL:core:yyerror: parse error in t.cfg:2:1-7: syntax error\n";
+    let ds = parse_check_output(out, 255);
+    assert_eq!(ds.len(), 1);
+    assert_eq!(ds[0].col_start, 0);
+    assert_eq!(
+        ds[0].col_end, 6,
+        "0-based exclusive end must cover exactly the 6-char token"
+    );
+    // degenerate zero-width report still yields a visible 1-char range
+    let out = "CRITICAL:core:yyerror: parse error in t.cfg:2:5-5: x\n";
+    let ds = parse_check_output(out, 255);
+    assert_eq!((ds[0].col_start, ds[0].col_end), (4, 5));
 }

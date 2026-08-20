@@ -376,25 +376,35 @@ impl Backend {
         let doc_text = snap_text.clone();
         let diags: Vec<Diagnostic> = diag::parse_check_output(&text, rc)
             .into_iter()
-            .filter(|d| logic::diag_matches_file(&d.file, &path))
-            .map(|d| Diagnostic {
-                range: {
-                    let lt = Self::doc_line(&doc_text, d.line);
-                    Range {
-                        start: Position::new(
-                            d.line,
-                            analyze::byte_to_utf16(&lt, d.col_start as usize),
-                        ),
-                        end: Position::new(d.line, analyze::byte_to_utf16(&lt, d.col_end as usize)),
-                    }
-                },
-                severity: Some(match d.severity {
-                    diag::Severity::Error => DiagnosticSeverity::ERROR,
-                    diag::Severity::Warning => DiagnosticSeverity::WARNING,
-                }),
-                source: Some("opensips -C".into()),
-                message: d.message,
-                ..Default::default()
+            .map(|d| {
+                // errors inside include_file targets are re-attributed
+                // to the root (at the include directive) instead of
+                // being dropped: a broken config must never render as
+                // clean
+                let (line, c0, c1, message) = if logic::diag_matches_file(&d.file, &path) {
+                    (d.line, d.col_start, d.col_end, d.message)
+                } else {
+                    let f = logic::attribute_foreign_diag(
+                        &path, &doc_text, &d.file, d.line, &d.message,
+                    );
+                    (f.line, f.col_start, f.col_end, f.message)
+                };
+                Diagnostic {
+                    range: {
+                        let lt = Self::doc_line(&doc_text, line);
+                        Range {
+                            start: Position::new(line, analyze::byte_to_utf16(&lt, c0 as usize)),
+                            end: Position::new(line, analyze::byte_to_utf16(&lt, c1 as usize)),
+                        }
+                    },
+                    severity: Some(match d.severity {
+                        diag::Severity::Error => DiagnosticSeverity::ERROR,
+                        diag::Severity::Warning => DiagnosticSeverity::WARNING,
+                    }),
+                    source: Some("opensips -C".into()),
+                    message,
+                    ..Default::default()
+                }
             })
             .collect();
         let mut diags = diags;
@@ -814,22 +824,15 @@ impl LanguageServer for Backend {
         let core = self.core.read().unwrap();
         Ok(
             logic::signature_at(&cat, &core, &text, &prefix).map(|(sig, doc, active)| {
-                // parameter labels: the signature's top-level
-                // comma-separated pieces between the outer parens
-                let params: Vec<ParameterInformation> = sig
-                    .find('(')
-                    .zip(sig.rfind(')'))
-                    .filter(|(o, c)| o + 1 < *c)
-                    .map(|(o, c)| {
-                        sig[o + 1..c]
-                            .split(',')
-                            .map(|s| ParameterInformation {
-                                label: ParameterLabel::Simple(s.trim().to_string()),
-                                documentation: None,
-                            })
-                            .collect()
+                // parameter labels: TOP-LEVEL comma-separated pieces
+                // (nested parens like `$json(a)` stay intact)
+                let params: Vec<ParameterInformation> = logic::split_params(&sig)
+                    .into_iter()
+                    .map(|s| ParameterInformation {
+                        label: ParameterLabel::Simple(s),
+                        documentation: None,
                     })
-                    .unwrap_or_default();
+                    .collect();
                 SignatureHelp {
                     signatures: vec![SignatureInformation {
                         label: sig,
@@ -859,14 +862,23 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let include_decl = p.context.include_declaration;
-        let locs = logic::route_occurrences(&text, &name)
-            .into_iter()
-            .filter(|(_, is_def)| include_decl || !is_def)
-            .map(|(l, _)| Location {
-                uri: uri.clone(),
-                range: Self::occurrence_range(&text, &l),
-            })
-            .collect();
+        // occurrences across the whole include closure, not just the
+        // current buffer
+        let files = self.closure_for(&uri, &text);
+        let mut locs = Vec::new();
+        for (path, ftext) in &files {
+            let Ok(furi) = Url::from_file_path(path) else {
+                continue;
+            };
+            for (l, is_def) in logic::route_occurrences(ftext, &name) {
+                if include_decl || !is_def {
+                    locs.push(Location {
+                        uri: furi.clone(),
+                        range: Self::occurrence_range(ftext, &l),
+                    });
+                }
+            }
+        }
         Ok(Some(locs))
     }
 
@@ -911,15 +923,25 @@ impl LanguageServer for Backend {
         let Some(name) = Self::route_name_at(&text, pos) else {
             return Ok(None);
         };
-        let edits: Vec<TextEdit> = logic::route_occurrences(&text, &name)
-            .into_iter()
-            .map(|(l, _)| TextEdit {
-                range: Self::occurrence_range(&text, &l),
-                new_text: new_name.clone(),
-            })
-            .collect();
-        let mut changes = std::collections::HashMap::new();
-        changes.insert(uri, edits);
+        // rewrite every occurrence in the whole include closure
+        let files = self.closure_for(&uri, &text);
+        let mut changes: std::collections::HashMap<Url, Vec<TextEdit>> =
+            std::collections::HashMap::new();
+        for (path, ftext) in &files {
+            let Ok(furi) = Url::from_file_path(path) else {
+                continue;
+            };
+            let edits: Vec<TextEdit> = logic::route_occurrences(ftext, &name)
+                .into_iter()
+                .map(|(l, _)| TextEdit {
+                    range: Self::occurrence_range(ftext, &l),
+                    new_text: new_name.clone(),
+                })
+                .collect();
+            if !edits.is_empty() {
+                changes.insert(furi, edits);
+            }
+        }
         Ok(Some(WorkspaceEdit {
             changes: Some(changes),
             ..Default::default()
