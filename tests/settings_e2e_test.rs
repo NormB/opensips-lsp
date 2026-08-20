@@ -184,3 +184,81 @@ fn cache_dir_option_is_honored() {
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn harvest_reports_progress_and_warns_on_an_empty_tree() {
+    let base = std::env::temp_dir().join(format!("oslsp-set-prog-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    // a CONFIGURED tree that yields no documentation at all
+    let tree = base.join("empty-tree");
+    std::fs::create_dir_all(tree.join("modules")).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .env("OPENSIPS_LSP_BIN", "")
+        .env(
+            "OPENSIPS_LSP_CACHE_DIR",
+            base.join("cache").display().to_string(),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+        "capabilities":{"window":{"workDoneProgress":true}},
+        "initializationOptions":{"opensipsSrc": tree.display().to_string()}}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "init");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    // the server asks to create a progress token; answer it
+    let create = wait_for(
+        &rx,
+        |v| v["method"] == "window/workDoneProgress/create",
+        "progress create",
+    );
+    let token = create["params"]["token"].clone();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":create["id"],"result":null}),
+    );
+    // begin ... end on that token
+    let begin = wait_for(
+        &rx,
+        |v| v["method"] == "$/progress" && v["params"]["value"]["kind"] == "begin",
+        "progress begin",
+    );
+    assert_eq!(begin["params"]["token"], token);
+    assert!(
+        begin["params"]["value"]["title"]
+            .as_str()
+            .unwrap()
+            .to_lowercase()
+            .contains("harvest"),
+        "{begin}"
+    );
+    let end = wait_for(
+        &rx,
+        |v| v["method"] == "$/progress" && v["params"]["value"]["kind"] == "end",
+        "progress end",
+    );
+    assert_eq!(end["params"]["token"], token);
+    // an explicitly configured tree with zero symbols warns the user
+    let warn = wait_for(
+        &rx,
+        |v| v["method"] == "window/showMessage" && v["params"]["type"] == 2,
+        "zero-symbol warning",
+    );
+    let m = warn["params"]["message"].as_str().unwrap();
+    assert!(
+        m.contains("empty-tree") && m.to_lowercase().contains("no module"),
+        "warning names the path and the problem: {m}"
+    );
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&base);
+}
