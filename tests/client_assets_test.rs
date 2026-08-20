@@ -45,3 +45,37 @@ fn binary_path_settings_are_restricted_in_untrusted_workspaces() {
         "limited"
     );
 }
+
+#[test]
+fn file_association_does_not_claim_every_cfg_file() {
+    // ".cfg" is a generic extension (wpa_supplicant.cfg, mpv.cfg,
+    // build tool configs...) — claiming it globally steals unrelated
+    // files.  The extension associates opensips.cfg by filename and a
+    // documented glob; anything else is the user's files.associations
+    // call.
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/client/package.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let lang = &manifest["contributes"]["languages"][0];
+    let exts = lang["extensions"].as_array().cloned().unwrap_or_default();
+    assert!(
+        !exts.iter().any(|e| e == ".cfg"),
+        "must not claim the generic .cfg extension: {exts:?}"
+    );
+    let filenames = lang["filenames"].as_array().expect("filenames").clone();
+    assert!(
+        filenames.iter().any(|f| f == "opensips.cfg"),
+        "opensips.cfg stays associated: {filenames:?}"
+    );
+    // split configs: *.opensips.cfg patterns keep working
+    let patterns = lang["filenamePatterns"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        patterns.iter().any(|p| p == "*.opensips.cfg"),
+        "a dedicated pattern for split configs: {patterns:?}"
+    );
+}

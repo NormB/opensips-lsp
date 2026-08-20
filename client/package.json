@@ -25,8 +25,8 @@
         "filenames": [
           "opensips.cfg"
         ],
-        "extensions": [
-          ".cfg"
+        "filenamePatterns": [
+          "*.opensips.cfg"
         ],
         "configuration": "./language-configuration.json"
       }

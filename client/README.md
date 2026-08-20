@@ -50,7 +50,13 @@ extension and it just works.
 1. Install this extension (the platform packages bundle the server —
    Linux, macOS, and Windows, x64 and arm64).
 2. Open a folder containing an `opensips.cfg` — syntax colors,
-   completion, and navigation work immediately.
+   completion, and navigation work immediately. Files named
+   `opensips.cfg` or `*.opensips.cfg` are recognized automatically;
+   for other names (split configs, includes) add a
+   [`files.associations`](https://code.visualstudio.com/docs/languages/identifiers)
+   entry mapping them to `opensips-cfg` — the generic `.cfg`
+   extension is deliberately not claimed, so unrelated tools' config
+   files are left alone.
 3. For live error checking, point
    **Settings → Opensips Lsp: Opensips Path** at your `opensips`
    binary and save the file.
