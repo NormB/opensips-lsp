@@ -23,6 +23,7 @@ script language (`opensips.cfg`).
 | **Include links** | `include_file`/`import_file` paths are Ctrl+Click document links. |
 | **Formatting** | Whole-document and range formatting re-indents by brace depth and strips trailing whitespace, honouring the editor's tab settings. Line-preserving: it never joins, splits or reorders lines, and never touches a string or comment body. |
 | **Semantic tokens** | Route names and pseudo-variables colored by analysis; editors that ask for a `semanticTokens/range` get exactly the tokens in view. |
+| **Inlay hints** | Parameter names from the documentation drawn at module-function call sites, for the visible range only. |
 | **Live settings** | Runtime toggles (analyzer, snippets, code lens, max diagnostics, check timeout) apply over `workspace/didChangeConfiguration` without a server restart. |
 | **CLI** | `opensips-lsp check [--strict] [--bin <opensips>] <file>...` for CI/git hooks. |
 

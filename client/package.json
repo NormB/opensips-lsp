@@ -105,6 +105,11 @@
           "type": "boolean",
           "default": true,
           "description": "Show reference-count code lenses above route definitions."
+        },
+        "opensipsLsp.inlayHints.parameterNames": {
+          "type": "boolean",
+          "default": true,
+          "description": "Draw parameter names from the documentation at module-function call sites."
         }
       }
     },

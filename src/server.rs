@@ -35,6 +35,8 @@ pub struct Backend {
     /// Per-document check generation: a newer check supersedes (and
     /// kills) an older one still queued or running for the same URI.
     check_super: std::sync::Arc<DashMap<Uri, u64>>,
+    /// Draw parameter names at documented call sites.
+    inlay_parameter_names: std::sync::Arc<std::sync::RwLock<bool>>,
     /// Per-(document, version) scanner memoization for hot handlers.
     memo: memo::AnalysisCache,
 }
@@ -51,6 +53,7 @@ impl Backend {
             opensips_bin: std::sync::RwLock::new(None),
             check_gate: tokio::sync::Mutex::new(()),
             snippet_completions: std::sync::RwLock::new(true),
+            inlay_parameter_names: std::sync::Arc::new(std::sync::RwLock::new(true)),
             max_diagnostics: std::sync::RwLock::new(100),
             cache_dir_opt: std::sync::RwLock::new(None),
             check_timeout: std::sync::RwLock::new(logic::resolve_timeout(
@@ -162,6 +165,12 @@ impl Backend {
     /// workspace/didChangeConfiguration).  Binary/tree/cache paths are
     /// deliberately excluded: those need a restart.
     fn apply_runtime_opts(&self, opts: &serde_json::Value) {
+        if let Some(b) = opts
+            .get("inlayHintParameterNames")
+            .and_then(|v| v.as_bool())
+        {
+            *self.inlay_parameter_names.write().unwrap() = b;
+        }
         if let Some(b) = opts.get("snippetCompletions").and_then(|v| v.as_bool()) {
             *self.snippet_completions.write().unwrap() = b;
         }
@@ -674,6 +683,7 @@ impl LanguageServer for Backend {
                     work_done_progress_options: Default::default(),
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 document_range_formatting_provider: Some(OneOf::Left(true)),
@@ -1502,6 +1512,37 @@ impl LanguageServer for Backend {
             })
             .collect();
         Ok(Some(lenses))
+    }
+
+    async fn inlay_hint(&self, p: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        if !*self.inlay_parameter_names.read().unwrap() {
+            return Ok(Some(Vec::new()));
+        }
+        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let cat = self.catalog.read().unwrap();
+        let core = self.core.read().unwrap();
+        // the client asks for a viewport, so only pay for what is on
+        // screen
+        let hints = logic::parameter_hints(&cat, &core, &text)
+            .into_iter()
+            .filter(|h| h.line >= p.range.start.line && h.line <= p.range.end.line)
+            .map(|h| {
+                let lt = Self::doc_line(&text, h.line);
+                InlayHint {
+                    position: Position::new(h.line, analyze::byte_to_utf16(&lt, h.col as usize)),
+                    label: InlayHintLabel::String(h.label),
+                    kind: Some(InlayHintKind::PARAMETER),
+                    text_edits: None,
+                    tooltip: None,
+                    padding_left: None,
+                    padding_right: Some(true),
+                    data: None,
+                }
+            })
+            .collect();
+        Ok(Some(hints))
     }
 
     async fn prepare_call_hierarchy(

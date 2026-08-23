@@ -80,6 +80,28 @@ includes. Named `route` blocks show a **reference count** code lens
 (counted across the include closure); disable with
 `opensipsLsp.codeLens.references`.
 
+#### Inlay hints
+
+Arguments at a documented call site are labelled with the parameter
+name the module's own documentation gives them, so
+`t_relay("udp", 1)` reads as `t_relay(flags: "udp", outbound_proxy: 1)`
+without the document changing.
+
+Only calls the catalogue knows are hinted. That is what keeps `if`,
+`while` and `route` out of it without special-casing them: they are
+not documented functions. A call carrying more arguments than the
+signature documents is hinted as far as the signature goes and no
+further — guessing past the end would be inventing names.
+
+Signatures are written for humans (`[flags]`, `[outbound_proxy]`), so
+the bracket markers, defaults and leading types are stripped down to
+the name; a parameter that reduces to nothing is skipped rather than
+drawn as an empty chip.
+
+The editor asks for the visible range and only that range is
+computed. Turn them off with `opensipsLsp.inlayHints.parameterNames`,
+which applies live.
+
 #### Call hierarchy
 
 **Shift+Alt+H** on a route name — at a `route(NAME)` call or on the
@@ -204,6 +226,7 @@ clients that can't pass options.
 | `opensipsLsp.diagnostics.maxProblems` | `maxDiagnostics` | — | `100` | Bound on published diagnostics per file. |
 | `opensipsLsp.diagnostics.analyzer` | `analyzerDiagnostics` | — | `true` | Fast analyzer warnings between saves (undefined `route()` targets, duplicate definitions, undocumented modparams). |
 | `opensipsLsp.codeLens.references` | `codeLensReferences` | — | `true` | Reference-count code lenses on route definitions. |
+| `opensipsLsp.inlayHints.parameterNames` | `inlayHintParameterNames` | — | `true` | Draw parameter names at documented call sites. |
 | `opensipsLsp.checkTimeoutMs` | `checkTimeoutMs` | `OPENSIPS_LSP_CHECK_TIMEOUT_MS` | `10000` | Kill a `-C` run after this many ms. |
 | `opensipsLsp.completion.snippets` | `snippetCompletions` | — | `true` | Function completions as tabstop snippets. |
 | `opensipsLsp.cacheDir` | `cacheDir` | `OPENSIPS_LSP_CACHE_DIR` | platform cache dir | Documentation-catalog cache location. |
@@ -213,7 +236,8 @@ clients that can't pass options.
 ## Notes
 
 - Runtime toggles (`diagnostics.analyzer`, `completion.snippets`,
-  `codeLens.references`, `diagnostics.maxProblems`, `checkTimeoutMs`)
+  `codeLens.references`, `inlayHints.parameterNames`,
+  `diagnostics.maxProblems`, `checkTimeoutMs`)
   apply **live**: the client pushes them to the running server over
   `workspace/didChangeConfiguration` and open documents republish
   immediately — no restart. Settings that shape initialization

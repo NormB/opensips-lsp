@@ -217,6 +217,98 @@ pub fn completions_with_core_files(
     complete_files(catalog, core, files, line_prefix)
 }
 
+/// One inlay hint: a label the editor draws at a position, without
+/// changing the document.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hint {
+    /// 0-based line.
+    pub line: u32,
+    /// 0-based byte column the label is drawn before.
+    pub col: u32,
+    /// The label as drawn, already punctuated.
+    pub label: String,
+}
+
+/// The parameter name to draw for one signature parameter.
+///
+/// Signatures are written for humans — `[flags]`, `[outbound_proxy]`,
+/// sometimes with a type in front — so the bracket markers and any
+/// leading type are stripped down to the name itself.  A parameter
+/// that reduces to nothing gets no hint at all rather than an empty
+/// chip.
+fn hint_name(param: &str) -> Option<String> {
+    let p = param.trim().trim_matches(['[', ']']).trim();
+    let p = p.split('=').next().unwrap_or(p).trim();
+    let p = p.split_whitespace().last().unwrap_or(p);
+    let p = p.trim_matches(['[', ']', '"', '\'']);
+    (!p.is_empty() && p.chars().all(|c| c.is_alphanumeric() || c == '_')).then(|| p.to_string())
+}
+
+/// The signature of `name`, preferring the modules the document
+/// actually loads, then any module, then the core functions — the
+/// same order hover resolves in.
+fn signature_of(
+    catalog: &[ModuleDoc],
+    core: &crate::catalog::CoreDocs,
+    doc: &str,
+    name: &str,
+) -> Option<String> {
+    let loaded: Vec<String> = analyze::loaded_modules(doc)
+        .into_iter()
+        .map(|m| m.name)
+        .collect();
+    catalog
+        .iter()
+        .filter(|m| loaded.contains(&m.name))
+        .chain(catalog.iter().filter(|m| !loaded.contains(&m.name)))
+        .find_map(|m| {
+            m.functions
+                .iter()
+                .find(|f| f.name == name)
+                .map(|f| f.detail.clone())
+        })
+        .or_else(|| {
+            core.functions
+                .iter()
+                .find(|f| f.name == name)
+                .map(|f| f.detail.clone())
+        })
+}
+
+/// Parameter-name hints for every documented call in `doc`.
+///
+/// Only calls the catalogue knows get hints, which is what keeps
+/// keywords (`if`, `while`, `route`) out without special-casing them.
+/// A call with more arguments than the signature documents is hinted
+/// as far as the signature goes and no further — guessing past the
+/// end would be inventing names.
+pub fn parameter_hints(
+    catalog: &[ModuleDoc],
+    core: &crate::catalog::CoreDocs,
+    doc: &str,
+) -> Vec<Hint> {
+    let mut out = Vec::new();
+    for call in analyze::calls(doc) {
+        if call.args.is_empty() {
+            continue;
+        }
+        let Some(sig) = signature_of(catalog, core, doc, &call.name) else {
+            continue;
+        };
+        let params = split_params(&sig);
+        for (param, (line, col)) in params.iter().zip(call.args.iter()) {
+            if let Some(name) = hint_name(param) {
+                out.push(Hint {
+                    line: *line,
+                    col: *col,
+                    label: format!("{name}:"),
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Markdown hover for `word`: loaded-module symbols win, then any
 /// module's symbols, then module names themselves.
 pub fn hover_markdown(catalog: &[ModuleDoc], doc: &str, word: &str) -> Option<String> {

@@ -51,6 +51,7 @@ const DOC_TOKENS: &[(&str, &str)] = &[
     ("document_symbol_provider", "document symbol"),
     ("folding_range_provider", "fold"),
     ("hover_provider", "hover"),
+    ("inlay_hint_provider", "inlay hint"),
     ("references_provider", "reference"),
     ("rename_provider", "rename"),
     ("semantic_tokens_provider", "semantic"),

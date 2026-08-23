@@ -111,6 +111,120 @@ static_regex!(
     r#"modparam\s*\(\s*"([^"\n]+)"\s*,\s*("[^"\n]*)?$"#
 );
 
+/// A function call found in code position, with where each of its
+/// top-level arguments begins.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Call {
+    /// The called name as written.
+    pub name: String,
+    /// 0-based line of the name.
+    pub line: u32,
+    /// 0-based start column of the name.
+    pub col: u32,
+    /// 0-based (line, col) of the first real character of each
+    /// top-level argument.  Empty for a call with no arguments.
+    pub args: Vec<(u32, u32)>,
+}
+
+/// Every `name(...)` call in code position, with its argument
+/// positions.
+///
+/// This is a scan, not a parse: it exists so inlay hints know where an
+/// argument starts.  Commas inside strings or nested parentheses do
+/// not split arguments, and a call written inside a string or a
+/// comment is not a call.  Keywords like `if` and `route` come back
+/// too — the catalogue lookup that consumes this simply will not know
+/// them.
+pub fn calls(text: &str) -> Vec<Call> {
+    let class = classify(text);
+    let b = text.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if !is_word(b[i]) || class[i] != Class::Code {
+            i += 1;
+            continue;
+        }
+        // a name is only a name when nothing wordy precedes it
+        if i > 0 && is_word(b[i - 1]) {
+            while i < b.len() && is_word(b[i]) {
+                i += 1;
+            }
+            continue;
+        }
+        let name_start = i;
+        while i < b.len() && is_word(b[i]) {
+            i += 1;
+        }
+        let name_end = i;
+        let mut j = i;
+        while j < b.len() && (b[j] == b' ' || b[j] == b'\t') {
+            j += 1;
+        }
+        if j >= b.len() || b[j] != b'(' || class[j] != Class::Code {
+            continue;
+        }
+        // walk the argument list, tracking nesting and quotes so a
+        // comma inside either is not a separator
+        let mut depth = 0i32;
+        let mut quote: Option<u8> = None;
+        let mut seg_start = j + 1;
+        let mut args: Vec<(u32, u32)> = Vec::new();
+        let mut k = j;
+        let mut closed = false;
+        while k < b.len() {
+            let c = b[k];
+            match quote {
+                Some(q) => {
+                    if c == b'\\' {
+                        k += 2;
+                        continue;
+                    }
+                    if c == q {
+                        quote = None;
+                    }
+                }
+                None => match c {
+                    b'"' | b'\'' => quote = Some(c),
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            push_arg(text, seg_start, k, &mut args);
+                            closed = true;
+                            break;
+                        }
+                    }
+                    b',' if depth == 1 => {
+                        push_arg(text, seg_start, k, &mut args);
+                        seg_start = k + 1;
+                    }
+                    _ => {}
+                },
+            }
+            k += 1;
+        }
+        let (line, col) = line_col(text, name_start);
+        out.push(Call {
+            name: text[name_start..name_end].to_string(),
+            line,
+            col,
+            args: if closed { args } else { Vec::new() },
+        });
+        i = name_end;
+    }
+    out
+}
+
+/// Record `text[from..to]` as an argument, unless it is blank.
+fn push_arg(text: &str, from: usize, to: usize, out: &mut Vec<(u32, u32)>) {
+    let seg = &text[from..to.min(text.len())];
+    let Some(off) = seg.find(|c: char| !c.is_whitespace()) else {
+        return;
+    };
+    out.push(line_col(text, from + off));
+}
+
 /// Every `loadmodule "x.so"` in code position, as bare module names.
 pub fn loaded_modules(text: &str) -> Vec<Located> {
     let classes = classify(text);
