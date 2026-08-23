@@ -2,6 +2,20 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.15.1] — 2026-08-23
+
+- **Formatter: continuation lines keep their own indentation.** Run
+  against a real 993-line production config the formatter wanted to
+  change 25 lines, and every one was wrong — hanging argument indents,
+  conditions broken across lines, and the body of a braceless `if`.
+  Dedenting a braceless `if` body was the worst of it: the parse does
+  not change, but the body reads as though it runs unconditionally.
+  A line is now re-indented only when the previous code line actually
+  ended a statement. The same config now wants one change, and that
+  one is a genuine repair.
+- The corpus sweep now checks the formatter too: every real config in
+  the source tree must format idempotently and preserve its content.
+
 ## [0.15.0] — 2026-08-23
 
 - **Extract into a route**: select whole lines inside a route body and
