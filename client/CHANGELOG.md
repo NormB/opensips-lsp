@@ -2,6 +2,18 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.13.0] — 2026-08-23
+
+- **Watched files**: an include or the OpenSIPS documentation tree
+  changing on disk — a git checkout, a rebuild, another tool — now
+  re-checks and re-harvests without the buffer being touched. Until
+  now the server kept answering from a stale read until you happened
+  to edit the file.
+- A re-check driven by a watched file publishes even when the result
+  is clean, which differs from opening a file on purpose: if the
+  warning on screen is no longer true, saying nothing would leave it
+  there.
+
 ## [0.12.0] — 2026-08-23
 
 - **Inlay hints**: arguments at a documented call site are labelled
