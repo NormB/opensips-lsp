@@ -2,6 +2,21 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.15.0] — 2026-08-23
+
+- **Extract into a route**: select whole lines inside a route body and
+  the lightbulb lifts them into a `route[EXTRACTED]` of their own,
+  leaving a `route(EXTRACTED);` call behind at the same indentation.
+  It refuses a selection whose braces do not balance, one covering the
+  block's own braces, and — deliberately — **one containing `return`**:
+  `return` leaves the route it is written in, so moving it into a new
+  route would make the statements after the extracted call start
+  running when they did not before.
+- **Remove duplicate `loadmodule` lines**: a second load of the same
+  module is a hard parse error, not untidiness. Every occurrence after
+  the first is removed, and nothing is reordered — load order decides
+  module initialisation order.
+
 ## [0.14.0] — 2026-08-23
 
 - **Pull diagnostics**: `textDocument/diagnostic` and
