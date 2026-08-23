@@ -49,7 +49,7 @@ Type `(` or `,` inside a call and the function's signature pops up
 with the active parameter highlighted — module exports first, then
 core functions. Commas inside strings don't advance the parameter.
 
-#### Hover, navigation, outline
+#### Hover, go to definition, document symbols
 
 Hover any function/parameter/module/`$variable` for its
 documentation; **Ctrl+Click** a `route(name)` reference to jump to
@@ -110,8 +110,8 @@ the same classifier the analyzer uses, so a `#` inside a string does
 not hide the rest of the line and a `/* ... */` block hides all of
 its interior.
 
-Editors that ask for a range (large files, visible-viewport
-optimization) get exactly the tokens inside it.
+Editors that issue a `semanticTokens/range` request (large files,
+visible-viewport optimization) get exactly the tokens inside it.
 
 #### CLI check mode
 
@@ -148,12 +148,6 @@ clients that can't pass options.
 | `opensipsLsp.diagnostics.maxProblems` | `maxDiagnostics` | — | `100` | Bound on published diagnostics per file. |
 | `opensipsLsp.diagnostics.analyzer` | `analyzerDiagnostics` | — | `true` | Fast analyzer warnings between saves (undefined `route()` targets, duplicate definitions, undocumented modparams). |
 | `opensipsLsp.codeLens.references` | `codeLensReferences` | — | `true` | Reference-count code lenses on route definitions. |
-
-Runtime toggles (timeouts, caps, analyzer/snippets/code-lens
-switches) apply live — the client pushes them over
-`workspace/didChangeConfiguration` without restarting the server;
-only path settings (server binary, `opensips` binary, source tree,
-cache dir) trigger a restart.
 | `opensipsLsp.checkTimeoutMs` | `checkTimeoutMs` | `OPENSIPS_LSP_CHECK_TIMEOUT_MS` | `10000` | Kill a `-C` run after this many ms. |
 | `opensipsLsp.completion.snippets` | `snippetCompletions` | — | `true` | Function completions as tabstop snippets. |
 | `opensipsLsp.cacheDir` | `cacheDir` | `OPENSIPS_LSP_CACHE_DIR` | platform cache dir | Documentation-catalog cache location. |
@@ -162,9 +156,13 @@ cache dir) trigger a restart.
 
 ## Notes
 
-- Server-backed options apply at initialization; the VS Code client
-  restarts the server automatically when any `opensipsLsp.*` setting
-  changes, so edits take effect immediately.
+- Runtime toggles (`diagnostics.analyzer`, `completion.snippets`,
+  `codeLens.references`, `diagnostics.maxProblems`, `checkTimeoutMs`)
+  apply **live**: the client pushes them to the running server over
+  `workspace/didChangeConfiguration` and open documents republish
+  immediately — no restart. Settings that shape initialization
+  (`serverPath`, `opensipsPath`, `opensipsSrc`, `cacheDir`, `enable`,
+  `diagnostics.enable`) still restart the server automatically.
 - Snippet completions and static snippets compose: static snippets
   scaffold blocks, completion snippets fill in calls.
 - Include handling is capped for safety: depth 8, 64 files, 1 MiB

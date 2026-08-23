@@ -12,14 +12,16 @@ script language (`opensips.cfg`).
 | **Hover** | Documentation for module functions, parameters, and modules, harvested from the OpenSIPS docs. |
 | **Signature help** | The innermost unclosed call's signature with the active parameter, on `(` and `,`. |
 | **Go to definition** | `route(name)` references resolve to their `route[name]` block — in this file or any included file. |
-| **References / rename / highlights** | Every call site + definition of a route name; rename rewrites them all (charset-gated, quoted call sites handled). |
+| **References / rename / highlights** | Every call site + definition of a route name; rename rewrites them all (charset-gated, quoted call sites handled). `prepareRename` blocks F2 off-symbol and pre-selects the name. |
 | **Document symbols** | All route blocks (`route`, `failure_route`, `onreply_route`, …) with full block extents, nested outline. |
 | **Folding** | Route-family blocks fold; brace matching is string/comment-safe. |
 | **Workspace symbols** | Ctrl+T route search across open files and includes. |
 | **Code lenses** | Reference counts above route definitions (include-closure-wide). |
 | **Quick fixes** | Load the module exporting an unknown function; create a missing route stub. |
 | **Catalog-pinned validation** | Undocumented `modparam` parameters flagged against YOUR source tree's docs. |
-| **Semantic tokens** | Route names and pseudo-variables colored by analysis. |
+| **Include links** | `include_file`/`import_file` paths are Ctrl+Click document links. |
+| **Semantic tokens** | Route names and pseudo-variables colored by analysis; editors that ask for a `semanticTokens/range` get exactly the tokens in view. |
+| **Live settings** | Runtime toggles (analyzer, snippets, code lens, max diagnostics, check timeout) apply over `workspace/didChangeConfiguration` without a server restart. |
 | **CLI** | `opensips-lsp check [--strict] [--bin <opensips>] <file>...` for CI/git hooks. |
 
 Positions are exchanged in UTF-16 units (the LSP default) and are

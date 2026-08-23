@@ -2,6 +2,25 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.9.1] — 2026-08-23
+
+- **Documentation drift gate**: the README and the features page are
+  now checked against the server itself — every capability advertised
+  in `initialize`, every initialization option and environment
+  variable the server reads, and every VS Code setting the client
+  contributes must appear in the docs, or the build fails.
+- Fixes the drift that gate found: the README never mentioned include
+  links (Ctrl+Click on `include_file`/`import_file`), `prepareRename`,
+  `semanticTokens/range`, or live reconfiguration — all shipped
+  earlier and all invisible to anyone reading the front page.
+- The settings table in the features page was split in two by a
+  paragraph wedged between its rows, so five settings rendered outside
+  the table on GitHub and on the extension listing. The paragraph
+  moved to the notes and the table is whole; the gate now fails if a
+  stray line ever splits it again.
+- Corrects a stale note claiming every setting change restarts the
+  server — runtime toggles have applied live since 0.8.0.
+
 ## [0.9.0] — 2026-08-23
 
 - **Language-server stack moved to `tower-lsp-server`**: `tower-lsp`
