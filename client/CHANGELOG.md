@@ -2,6 +2,24 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.9.0] — 2026-08-23
+
+- **Language-server stack moved to `tower-lsp-server`**: `tower-lsp`
+  has had no release since 0.20.0 (August 2023); the maintained
+  community fork replaces it. No behaviour changes — the protocol
+  suite (raw JSON-RPC over stdio) passes unchanged, and
+  `workspace/symbol` still answers with the same array on the wire.
+  Dropping the `url` crate takes its whole ICU/idna tree with it: the
+  server now builds from 67 dependencies instead of 96.
+- **Version-proven against OpenSIPS 4.0.1**: the proof suite now runs
+  against tag-built trees and binaries for both 4.0.1 and 3.6.8,
+  rather than against a moving master branch.
+- A verbatim 4.0.1 `-C` capture joins the 3.6.8 one in the
+  diagnostics tests. 4.x wraps its positioned errors in a traceback
+  header, a caret marker, and an echo of the offending config lines;
+  all of it is proven to stay noise, so one bad `modparam` still
+  raises exactly one diagnostic.
+
 ## [0.8.0] — 2026-08-20
 
 - **Route-family namespaces**: `route(x)` resolves only against the
