@@ -32,9 +32,12 @@ most current and win; docbook (`modules/*/doc/*_admin.xml`) is the
 fallback for older trees or placeholder READMEs. Core-language docs
 (functions, parameters, pseudo-variables) come from `docs/manual/`.
 
-Supported and version-proven: **OpenSIPS 4.x** (master) and
+Supported and version-proven: **OpenSIPS 4.0.x** (4.0.1) and
 **3.6.x** (3.6.8) — the proof suite runs against a real tree and
-binary of each (`OPENSIPS_LSP_TEST_TREE`/`OPENSIPS_LSP_TEST_BIN`).
+binary of each (`OPENSIPS_LSP_TEST_TREE`/`OPENSIPS_LSP_TEST_BIN`),
+built from the tag rather than from a moving branch.  Nothing pins a
+version: module and core docs come from the tree you point at, and
+diagnostics from your own binary.
 
 ## Configuration
 

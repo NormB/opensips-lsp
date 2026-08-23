@@ -23,7 +23,7 @@ configured tree yielding no documentation raises a visible warning;
 results are cached — see Caching) — the 4.x markdown docs (`modules/*/README.md`) are
 the most current and win; docbook (`modules/*/doc/*_admin.xml`) is
 the fallback for older trees. Supported and version-proven: OpenSIPS
-4.x (master) and 3.6.x (3.6.8).
+4.0.x (binary and tree at tag 4.0.1) and 3.6.x (3.6.8).
 
 ### Dependencies
 

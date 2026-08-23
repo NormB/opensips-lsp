@@ -76,8 +76,9 @@ fn column_range_never_reversed() {
     }
 }
 
-// Verbatim opensips 3.6.8 -C output (captured 2026-08-19): the format
-// is identical to 4.x, and the parser must keep handling it.
+// Verbatim opensips 3.6.8 -C output (captured 2026-08-19).  The
+// positioned-error format is identical to 4.x — see REAL_401 below,
+// captured from 4.0.1 — and the parser must keep handling both.
 const REAL_368: &str = r#"Aug 19 14:20:53 [2737664] CRITICAL:core:yyerror: parse error in /tmp/x/proof36.cfg:2:13-14: failed to load module tm.so
 Aug 19 14:20:53 [2737664] CRITICAL:core:yyerror: parse error in /tmp/x/proof36.cfg:3:19-20: Parameter <no_such_param_xyz> not found in module <tm> - can't set
 Aug 19 14:20:53 [2737664] ERROR:core:parse_opensips_cfg: bad config file (2 errors)
@@ -89,6 +90,43 @@ fn parses_368_output_identically() {
     assert_eq!(ds.len(), 2);
     assert_eq!(ds[0].line, 1);
     assert!(ds[1].message.contains("no_such_param_xyz"));
+}
+
+// Verbatim opensips 4.0.1 -C output (captured 2026-08-23), with the
+// module actually loaded so the modparam failure is the real one.
+// 4.x wraps the positioned error in context 3.6 never printed: a
+// traceback header, an include-depth line, a caret marker, and an
+// echo of the offending config LINES.  All of it is noise the parser
+// has to walk past — the echoed config text especially, since it is
+// arbitrary user input sitting behind a `CRITICAL:` prefix.
+const REAL_401: &str = r#"Aug 23 11:22:12 [2299450] ERROR:core:set_mod_param_regex: parameter <no_such_param_xyz> not found in module <tm>
+Aug 23 11:22:12 [2299450] CRITICAL:Traceback (last included file at the bottom):
+Aug 23 11:22:12 [2299450] CRITICAL: 0. /tmp/ostest/proof40.cfg
+Aug 23 11:22:12 [2299450] CRITICAL:core:yyerror: parse error in /tmp/ostest/proof40.cfg:4:19-20: Parameter <no_such_param_xyz> not found in module <tm> - can't set
+Aug 23 11:22:12 [2299450] CRITICAL:mpath="/tmp/ostest/mods/"
+Aug 23 11:22:12 [2299450] CRITICAL:loadmodule "tm.so"
+Aug 23 11:22:12 [2299450] CRITICAL:modparam("tm", "no_such_param_xyz", 1)
+Aug 23 11:22:12 [2299450] CRITICAL:^~
+Aug 23 11:22:12 [2299450] CRITICAL:route { exit; }
+Aug 23 11:22:12 [2299450] ERROR:core:parse_opensips_cfg: bad config file (1 errors)
+Aug 23 11:22:12 [2299450] ERROR:core:main: failed to parse config file /tmp/ostest/proof40.cfg
+Aug 23 11:22:12 [2299450] NOTICE:core:main: Exiting....
+"#;
+
+#[test]
+fn parses_401_output_and_ignores_the_4x_context_block() {
+    let ds = parse_check_output(REAL_401, 255);
+    assert_eq!(
+        ds.len(),
+        1,
+        "the traceback, caret and config echo are not diagnostics: {ds:?}"
+    );
+    let d = &ds[0];
+    assert_eq!(d.file, "/tmp/ostest/proof40.cfg");
+    assert_eq!(d.line, 3); // 1-based 4 -> 0-based 3
+    assert_eq!(d.col_start, 18); // 1-based 19 -> 18
+    assert_eq!(d.col_end, 19); // end is EXCLUSIVE, as in 3.6
+    assert!(d.message.contains("no_such_param_xyz"));
 }
 
 #[test]

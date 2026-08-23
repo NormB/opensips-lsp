@@ -91,7 +91,7 @@ Full reference:
 
 None to start — the server is bundled. Optional, for the full
 experience: an `opensips` binary (diagnostics) and an OpenSIPS source
-tree (documentation). Supports OpenSIPS 4.x and 3.6.x.
+tree (documentation). Supports OpenSIPS 4.0.x and 3.6.x.
 
 ## Links
 

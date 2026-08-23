@@ -1,7 +1,8 @@
-//! Proof suite: the server, spoken to over real LSP stdio, handles
-//! the OpenSIPS 4.x master tree — module docs, core functions, core
+//! Proof suite: the server, spoken to over real LSP stdio, handles a
+//! real OpenSIPS 4.x tree — module docs, core functions, core
 //! parameters, pseudo-variables, and (with a real binary) `-C`
-//! diagnostics.
+//! diagnostics.  Last run against the 4.0.1 tag, tree and binary
+//! both.
 //!
 //! Gated: set OPENSIPS_LSP_TEST_TREE to a 4.x source tree; set
 //! OPENSIPS_LSP_TEST_BIN to a matching opensips binary to also prove
