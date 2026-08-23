@@ -1,3 +1,5 @@
+mod common;
+
 use opensips_lsp::catalog::parse_admin_xml;
 
 const FIXTURE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -85,15 +87,14 @@ fn unknown_entities_do_not_kill_the_parse() {
 #[test]
 fn harvests_the_real_opensips_tree_when_present() {
     // point OPENSIPS_LSP_TEST_TREE at an OpenSIPS source tree to run
-    let Ok(tree) = std::env::var("OPENSIPS_LSP_TEST_TREE") else {
-        eprintln!("SKIP: OPENSIPS_LSP_TEST_TREE not set");
-        return;
-    };
+    let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
     let root = std::path::Path::new(&tree);
-    if !root.join("modules").is_dir() {
-        eprintln!("SKIP: no opensips tree at {}", root.display());
-        return;
-    }
+    assert!(
+        root.join("modules").is_dir(),
+        "OPENSIPS_LSP_TEST_TREE points at {}, which is not an OpenSIPS \
+         source tree",
+        root.display()
+    );
     let mods = opensips_lsp::catalog::harvest_tree(root);
     assert!(
         mods.len() > 100,

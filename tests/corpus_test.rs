@@ -9,6 +9,8 @@
 //!     rejects yields at least one diagnostic (no silent failures),
 //!     and every accepted file yields no Error-severity ones
 
+mod common;
+
 use opensips_lsp::{analyze, diag};
 
 fn corpus(tree: &std::path::Path) -> Vec<std::path::PathBuf> {
@@ -42,10 +44,7 @@ fn corpus(tree: &std::path::Path) -> Vec<std::path::PathBuf> {
 
 #[test]
 fn corpus_sweep_no_panics_and_no_silent_failures() {
-    let Ok(tree) = std::env::var("OPENSIPS_LSP_TEST_TREE") else {
-        eprintln!("SKIP: OPENSIPS_LSP_TEST_TREE not set");
-        return;
-    };
+    let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
     let tree = std::path::PathBuf::from(tree);
     let files = corpus(&tree);
     assert!(
@@ -54,7 +53,7 @@ fn corpus_sweep_no_panics_and_no_silent_failures() {
         files.len()
     );
 
-    let bin = std::env::var("OPENSIPS_LSP_TEST_BIN").ok();
+    let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
     let (mut ok, mut broken, mut mods_total, mut routes_total) = (0usize, 0usize, 0usize, 0usize);
 
     for f in &files {
@@ -67,7 +66,8 @@ fn corpus_sweep_no_panics_and_no_silent_failures() {
         routes_total += defs.len();
 
         // invariant 2: real-parser rejection is never silent
-        if let Some(bin) = &bin {
+        {
+            let bin = &bin;
             let out = std::process::Command::new(bin)
                 .args(["-C", "-f"])
                 .arg(f)
@@ -105,14 +105,10 @@ fn corpus_sweep_no_panics_and_no_silent_failures() {
         }
     }
     eprintln!(
-        "corpus: {} files, {} loadmodules, {} route blocks{}",
+        "corpus: {} files, {} loadmodules, {} route blocks, \
+         -C: {ok} accepted / {broken} rejected (older examples are known-broken)",
         files.len(),
         mods_total,
-        routes_total,
-        if bin.is_some() {
-            format!(", -C: {ok} accepted / {broken} rejected (older examples are known-broken)")
-        } else {
-            String::new()
-        }
+        routes_total
     );
 }

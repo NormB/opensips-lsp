@@ -22,7 +22,16 @@ jobs:
         run: cargo fmt --check
       - name: clippy (warnings are errors)
         run: cargo clippy --all-targets -- -D warnings
-      - name: tests (unit + integration + stdio e2e)
+      - name: build deps for the proof environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bison flex libssl-dev pkg-config
+      - name: provision the real OpenSIPS tree and binary
+        # a skipped test is a failed test here, so the suite refuses to
+        # run without this; the same script is what a human runs
+        run: scripts/proof-env.sh
+      - name: tests (unit + integration + stdio e2e + proofs)
         run: cargo test --all-targets
       - name: rustdoc (missing docs are errors)
         run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps

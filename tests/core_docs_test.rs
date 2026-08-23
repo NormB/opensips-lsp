@@ -1,3 +1,5 @@
+mod common;
+
 use opensips_lsp::catalog::{parse_core_functions_md, parse_core_params_md, parse_core_vars_md};
 
 const FUNCS: &str = r#"# Core functions
@@ -95,10 +97,7 @@ fn adversarial_core_docs_do_not_panic() {
 
 #[test]
 fn harvests_core_docs_from_a_real_4x_tree_when_present() {
-    let Ok(tree) = std::env::var("OPENSIPS_LSP_TEST_TREE") else {
-        eprintln!("SKIP: OPENSIPS_LSP_TEST_TREE not set");
-        return;
-    };
+    let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
     let core = opensips_lsp::catalog::harvest_core(std::path::Path::new(&tree));
     assert!(
         core.functions.len() > 40,

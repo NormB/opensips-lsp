@@ -64,3 +64,23 @@ pub fn wait_for<F: Fn(&serde_json::Value) -> bool>(
         }
     }
 }
+
+/// The proof environment is REQUIRED, not optional: under this
+/// project's rule a skipped test IS a failed test.  A suite that
+/// quietly opts out on a machine without a real tree or binary is a
+/// suite that reports green while proving nothing.
+///
+/// `scripts/proof-env.sh` provisions what these tests need, and CI
+/// runs that same script — the gate and its fixer derive from one
+/// rule, so a green CI means the proofs actually ran.
+pub fn required_env(var: &str) -> String {
+    match std::env::var(var) {
+        Ok(v) if !v.is_empty() => v,
+        _ => panic!(
+            "{var} is unset or empty.  These tests run against a real \
+             tree and binary and are never skipped: run \
+             `scripts/proof-env.sh` and export what it prints (CI runs \
+             the same script)."
+        ),
+    }
+}

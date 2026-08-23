@@ -8,6 +8,8 @@
 //!
 //! Both are env-gated: OPENSIPS_LSP_TEST_TREE / OPENSIPS_LSP_TEST_BIN.
 
+mod common;
+
 use opensips_lsp::logic;
 
 /// Same enumeration as the corpus sweep: shipped example configs.
@@ -54,13 +56,10 @@ fn disk_loader(p: &std::path::Path) -> Option<String> {
 
 #[test]
 fn analyzer_is_silent_on_binary_accepted_configs() {
-    let (Ok(tree), Ok(bin)) = (
-        std::env::var("OPENSIPS_LSP_TEST_TREE"),
-        std::env::var("OPENSIPS_LSP_TEST_BIN"),
-    ) else {
-        eprintln!("SKIP: OPENSIPS_LSP_TEST_TREE / OPENSIPS_LSP_TEST_BIN not set");
-        return;
-    };
+    let (tree, bin) = (
+        common::required_env("OPENSIPS_LSP_TEST_TREE"),
+        common::required_env("OPENSIPS_LSP_TEST_BIN"),
+    );
     let mut files = corpus(std::path::Path::new(&tree));
     assert!(!files.is_empty(), "no corpus configs under {tree}");
     // the shipped examples may all be rejected on a box with a partial
@@ -123,10 +122,7 @@ fn analyzer_is_silent_on_binary_accepted_configs() {
 
 #[test]
 fn rename_round_trip_survives_the_real_parser() {
-    let Ok(bin) = std::env::var("OPENSIPS_LSP_TEST_BIN") else {
-        eprintln!("SKIP: OPENSIPS_LSP_TEST_BIN not set");
-        return;
-    };
+    let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
     let dir = std::env::temp_dir().join(format!("oslsp-rt-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -143,11 +139,13 @@ fn rename_round_trip_survives_the_real_parser() {
             .map(|o| o.status.code() == Some(0))
             .unwrap_or(false)
     };
-    if !check(&cfg) {
-        eprintln!("SKIP: this binary rejects the baseline config");
-        let _ = std::fs::remove_dir_all(&dir);
-        return;
-    }
+    // a binary that rejects the baseline makes the round-trip prove
+    // nothing, so it is a failure rather than a reason to opt out
+    assert!(
+        check(&cfg),
+        "the test binary rejects the baseline config, so the rename \
+         round-trip would prove nothing"
+    );
     // rename through the REAL logic path: gate + occurrences
     let new_name = "relay_v2";
     assert!(logic::valid_route_name(new_name));

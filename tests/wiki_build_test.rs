@@ -15,10 +15,10 @@ fn wiki_tree_is_generated_from_docs() {
         .arg(&out)
         .current_dir(root)
         .status();
-    let Ok(status) = status else {
-        eprintln!("SKIP: python3 not available");
-        return;
-    };
+    let status = status.expect(
+        "python3 must be available: the wiki build is part of the suite \
+         and a skipped test is a failed test",
+    );
     assert!(status.success(), "build-wiki.py must succeed");
 
     for page in [

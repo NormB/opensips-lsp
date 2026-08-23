@@ -79,8 +79,17 @@ install -m755 opensips-lsp ~/.local/bin/
 
 ```sh
 cargo build --release        # server binary: target/release/opensips-lsp
+eval "$(scripts/proof-env.sh)"   # real OpenSIPS tree + binary, once
 cargo test                   # full suite, includes a stdio LSP e2e test
 ```
+
+**A skipped test is a failed test here.** Parts of the suite prove
+behaviour against a real OpenSIPS tree and a real `opensips` binary, and
+they refuse to run without one rather than reporting green while
+proving nothing. `scripts/proof-env.sh` provisions both into
+`.proof/` (gitignored) and prints the environment to export; CI runs
+that same script, so a green CI means the proofs actually ran. A gate
+in the suite fails if any test ever announces a skip again.
 
 ## Tree-sitter grammar
 

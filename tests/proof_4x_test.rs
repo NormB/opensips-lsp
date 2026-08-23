@@ -12,7 +12,11 @@ mod common;
 use common::*;
 use std::process::{Command, Stdio};
 
-const CFG: &str = "log_level=2\nloadmodule \"proto_udp.so\"\nloadmodule \"tm.so\"\nmodparam(\"tm\", \"fr_timeout\", 3)\nroute { exit; }\n";
+// `proto_udp` has not existed as a module since 3.x — UDP is core —
+// so loading it only ever produced a spurious module-load error the
+// assertions had to look past.  tm alone is what the fixture needs.
+const CFG: &str =
+    "log_level=2\nloadmodule \"tm.so\"\nmodparam(\"tm\", \"fr_timeout\", 3)\nroute { exit; }\n";
 
 fn labels(v: &serde_json::Value) -> Vec<String> {
     v["result"]
@@ -26,11 +30,8 @@ fn labels(v: &serde_json::Value) -> Vec<String> {
 
 #[test]
 fn full_stack_against_a_real_4x_tree() {
-    let Ok(tree) = std::env::var("OPENSIPS_LSP_TEST_TREE") else {
-        eprintln!("SKIP: OPENSIPS_LSP_TEST_TREE not set");
-        return;
-    };
-    let bin = std::env::var("OPENSIPS_LSP_TEST_BIN").unwrap_or_default();
+    let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
+    let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
 
     let dir = std::env::temp_dir().join(format!("oslsp-proof-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -108,7 +109,7 @@ fn full_stack_against_a_real_4x_tree() {
     write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{
-            "textDocument":{"uri":uri},"position":{"line":3,"character":16}}}),
+            "textDocument":{"uri":uri},"position":{"line":2,"character":16}}}),
     );
     let l = labels(&wait_for(&rx, |v| v["id"] == 2, "tm param completion"));
     assert!(l.contains(&"fr_timeout".to_string()), "tm params: {l:?}");
@@ -117,7 +118,7 @@ fn full_stack_against_a_real_4x_tree() {
     write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{
-            "textDocument":{"uri":uri},"position":{"line":4,"character":8}}}),
+            "textDocument":{"uri":uri},"position":{"line":3,"character":8}}}),
     );
     let l = labels(&wait_for(&rx, |v| v["id"] == 3, "code completion"));
     assert!(l.contains(&"t_relay".to_string()), "module fn: {l:?}");
@@ -132,7 +133,7 @@ fn full_stack_against_a_real_4x_tree() {
     write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{
-            "textDocument":{"uri":uri},"position":{"line":3,"character":18}}}),
+            "textDocument":{"uri":uri},"position":{"line":2,"character":18}}}),
     );
     let h = wait_for(&rx, |v| v["id"] == 4, "hover");
     let hover = h["result"]["contents"]["value"].as_str().unwrap_or("");
@@ -155,11 +156,8 @@ fn full_stack_against_a_real_4x_tree() {
 /// config can resolve the module it loads.
 #[test]
 fn formatting_never_changes_what_the_real_parser_accepts() {
-    let Ok(bin) = std::env::var("OPENSIPS_LSP_TEST_BIN") else {
-        eprintln!("SKIP: OPENSIPS_LSP_TEST_BIN not set");
-        return;
-    };
-    let mpath = std::env::var("OPENSIPS_LSP_TEST_MPATH").unwrap_or_default();
+    let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
+    let mpath = common::required_env("OPENSIPS_LSP_TEST_MPATH");
     let mline = if mpath.is_empty() {
         String::new()
     } else {
