@@ -191,6 +191,31 @@ stripped from every line; formatting must be idempotent; and, against
 a real binary, the positioned parse errors `opensips -C` reports must
 be unchanged by formatting.
 
+#### Pull diagnostics
+
+`textDocument/diagnostic` answers for one document; `workspace/diagnostic`
+sweeps the workspace without opening anything. A report carries a
+result id, so asking again for something that has not moved comes back
+`unchanged` instead of resending the same list.
+
+**Only root configs are reported by the workspace sweep.** A config
+that another config includes is a fragment, not a program: checked on
+its own it would flag every route its parent defines as undefined and
+every construct it continues as a syntax error. Roots are the files
+nothing else includes, and their closures already cover the fragments,
+so nothing is lost by leaving fragments out — and a great deal of
+noise is avoided. The sweep is bounded at 500 configs and says so in
+the log when it stops early; a truncated sweep that looks complete
+would be worse than one that admits it.
+
+**Pushing stops when the client pulls.** The two are separate channels
+and a client that does both shows every problem twice, so the server
+picks one based on what the client declared. Because the `-C` check is
+asynchronous, a pulling client is answered from the previous checker
+result and then sent `workspace/diagnostic/refresh` when the new one
+lands — an invitation to ask again, which is how the protocol expects
+an async server to behave.
+
 #### Watched files
 
 Two things the server derives answers from can change without ever

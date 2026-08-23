@@ -44,6 +44,7 @@ const DOC_TOKENS: &[(&str, &str)] = &[
     ("code_lens_provider", "code lens"),
     ("completion_provider", "completion"),
     ("definition_provider", "go to definition"),
+    ("diagnostic_provider", "pull diagnostic"),
     ("document_formatting_provider", "format"),
     ("document_highlight_provider", "highlight"),
     ("document_range_formatting_provider", "range formatting"),
