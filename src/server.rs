@@ -37,6 +37,8 @@ pub struct Backend {
     check_super: std::sync::Arc<DashMap<Uri, u64>>,
     /// Draw parameter names at documented call sites.
     inlay_parameter_names: std::sync::Arc<std::sync::RwLock<bool>>,
+    /// The client accepts dynamic `didChangeWatchedFiles` registration.
+    watched_files_dynamic: std::sync::RwLock<bool>,
     /// Per-(document, version) scanner memoization for hot handlers.
     memo: memo::AnalysisCache,
 }
@@ -54,6 +56,7 @@ impl Backend {
             check_gate: tokio::sync::Mutex::new(()),
             snippet_completions: std::sync::RwLock::new(true),
             inlay_parameter_names: std::sync::Arc::new(std::sync::RwLock::new(true)),
+            watched_files_dynamic: std::sync::RwLock::new(false),
             max_diagnostics: std::sync::RwLock::new(100),
             cache_dir_opt: std::sync::RwLock::new(None),
             check_timeout: std::sync::RwLock::new(logic::resolve_timeout(
@@ -303,6 +306,174 @@ impl Backend {
         None
     }
 
+    /// Ask the client to watch the files whose contents this server
+    /// derives answers from.
+    ///
+    /// Two kinds matter and neither arrives as a document edit: a
+    /// config included by an open file, changed by another tool or a
+    /// git checkout, and the documentation tree itself, changed by
+    /// rebuilding or switching branches.  Without this the server
+    /// keeps answering from a stale read until the buffer happens to
+    /// be touched.
+    ///
+    /// Registration is dynamic because the tree lives wherever the
+    /// user put it — usually outside the workspace — so the tree
+    /// watcher is a relative pattern rooted at the tree itself.
+    async fn register_watchers(&self) {
+        // registering against a client that never declared support is
+        // a request that may never be answered
+        if !*self.watched_files_dynamic.read().unwrap() {
+            return;
+        }
+        let mut watchers = vec![FileSystemWatcher {
+            glob_pattern: GlobPattern::String("**/*.cfg".into()),
+            kind: None,
+        }];
+        if let Some(src) = self.src.read().unwrap().clone()
+            && let Some(base) = Uri::from_file_path(&src)
+        {
+            for pat in [
+                "modules/*/README.md",
+                "modules/*/doc/*.xml",
+                "docs/manual/*.md",
+            ] {
+                watchers.push(FileSystemWatcher {
+                    glob_pattern: GlobPattern::Relative(RelativePattern {
+                        base_uri: OneOf::Right(base.clone()),
+                        pattern: pat.into(),
+                    }),
+                    kind: None,
+                });
+            }
+        }
+        let reg = Registration {
+            id: "opensips-lsp/watched-files".into(),
+            method: "workspace/didChangeWatchedFiles".into(),
+            register_options: serde_json::to_value(DidChangeWatchedFilesRegistrationOptions {
+                watchers,
+            })
+            .ok(),
+        };
+        // time-bounded like the progress round-trip: a client that
+        // declares support but never answers must not stall startup,
+        // and a decline is not an error worth surfacing
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_millis(500),
+            self.client.register_capability(vec![reg]),
+        )
+        .await;
+    }
+
+    /// Harvest the documentation catalogue from the configured source
+    /// tree, replacing what is loaded, and report whether the cache
+    /// answered.
+    ///
+    /// Startup and the file watcher share this: a doc tree that
+    /// changes on disk has to be re-read, and the cache fingerprint is
+    /// content-aware, so a changed file misses it by construction
+    /// rather than by any special casing here.
+    async fn harvest(&self, with_progress: bool) -> bool {
+        let src = self.src.read().unwrap().clone();
+        let mut cached = false;
+        if let Some(src) = src {
+            // editors showing workDoneProgress see the harvest as a
+            // background job; the create round-trip is time-bounded so
+            // clients that never answer cannot stall startup
+            let token = NumberOrString::String("opensips-lsp/harvest".into());
+            let progress = with_progress
+                && tokio::time::timeout(
+                    std::time::Duration::from_millis(500),
+                    self.client.send_request::<request::WorkDoneProgressCreate>(
+                        WorkDoneProgressCreateParams {
+                            token: token.clone(),
+                        },
+                    ),
+                )
+                .await
+                .map(|r| r.is_ok())
+                .unwrap_or(false);
+            if progress {
+                self.client
+                    .send_notification::<notification::Progress>(ProgressParams {
+                        token: token.clone(),
+                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                            WorkDoneProgressBegin {
+                                title: "Harvesting OpenSIPS documentation".into(),
+                                cancellable: Some(false),
+                                message: Some(src.clone()),
+                                percentage: None,
+                            },
+                        )),
+                    })
+                    .await;
+            }
+            // the harvest runs off the executor thread and outside the
+            // handshake; results are cached per tree fingerprint
+            let cache_opt = self.cache_dir_opt.read().unwrap().clone();
+            let src_tree = src.clone();
+            let (harvested, core, hit) = tokio::task::spawn_blocking(move || {
+                let p = std::path::Path::new(&src_tree);
+                let cache_dir = cache_opt
+                    .map(std::path::PathBuf::from)
+                    .or_else(|| {
+                        std::env::var("OPENSIPS_LSP_CACHE_DIR")
+                            .map(std::path::PathBuf::from)
+                            .ok()
+                    })
+                    .or_else(|| {
+                        std::env::var("XDG_CACHE_HOME")
+                            .map(std::path::PathBuf::from)
+                            .ok()
+                            .or_else(|| {
+                                std::env::var("HOME")
+                                    .map(|h| std::path::PathBuf::from(h).join(".cache"))
+                                    .ok()
+                            })
+                            .map(|c| c.join("opensips-lsp"))
+                    });
+                if let Some(dir) = &cache_dir
+                    && let Some((m, c)) = catalog::load_cached(p, dir)
+                {
+                    return (m, c, true);
+                }
+                let out = (catalog::harvest_tree(p), catalog::harvest_core(p));
+                if let Some(dir) = &cache_dir {
+                    let _ = catalog::save_cache(p, dir, &out.0, &out.1);
+                }
+                (out.0, out.1, false)
+            })
+            .await
+            .unwrap_or_default();
+            let empty = harvested.is_empty();
+            *self.catalog.write().unwrap() = harvested;
+            *self.core.write().unwrap() = core;
+            cached = hit;
+            if progress {
+                self.client
+                    .send_notification::<notification::Progress>(ProgressParams {
+                        token,
+                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
+                            WorkDoneProgressEnd { message: None },
+                        )),
+                    })
+                    .await;
+            }
+            // a tree the user explicitly configured that documents
+            // nothing is a misconfiguration, not a quiet default
+            if empty {
+                self.client
+                    .show_message(
+                        MessageType::WARNING,
+                        format!(
+                            "opensips-lsp: '{src}' yields no module documentation —                              check that opensipsSrc points at an OpenSIPS source tree"
+                        ),
+                    )
+                    .await;
+            }
+        }
+        cached
+    }
+
     /// The include closure rooted at an open document: the document
     /// itself plus transitively included files (open buffers first,
     /// disk fallback).  Non-file documents get a single-entry closure.
@@ -343,7 +514,20 @@ impl Backend {
             .unwrap_or_default()
     }
 
+    /// The ordinary check: quiet for a clean document.
     async fn check(&self, uri: &Uri) {
+        self.check_publishing(uri, true).await;
+    }
+
+    /// Run the checker for `uri` and publish the result.
+    ///
+    /// `quiet_when_clean` suppresses the empty publish a clean
+    /// document would otherwise get in analyzer-only mode — the
+    /// no-checks contract for a freshly opened file.  A re-check driven
+    /// by something the user did NOT type, such as a watched include
+    /// changing under them, must not be quiet: if the warning on
+    /// screen is no longer true, the editor has to be told.
+    async fn check_publishing(&self, uri: &Uri, quiet_when_clean: bool) {
         if uri.scheme().as_str() != "file" {
             return;
         }
@@ -362,8 +546,7 @@ impl Backend {
         let analyzer_enabled = *self.analyzer_enabled.read().unwrap();
         let cap = *self.max_diagnostics.read().unwrap();
         let Some(bin) = self.opensips_bin.read().unwrap().clone() else {
-            // -C disabled: analyzer-only pass.  skip_if_empty keeps the
-            // no-checks contract quiet for clean documents.
+            // -C disabled: analyzer-only pass
             self.check_diags.insert(uri.clone(), Vec::new());
             Self::merge_and_publish(
                 &self.client,
@@ -375,7 +558,7 @@ impl Backend {
                 &snap_text,
                 self.open_docs_snapshot(),
                 &self.catalog,
-                true,
+                quiet_when_clean,
             )
             .await;
             return;
@@ -634,6 +817,13 @@ impl Backend {
 impl LanguageServer for Backend {
     async fn initialize(&self, p: InitializeParams) -> Result<InitializeResult> {
         // Resolution order: initializationOptions, then environment.
+        *self.watched_files_dynamic.write().unwrap() = p
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|w| w.did_change_watched_files.as_ref())
+            .and_then(|d| d.dynamic_registration)
+            .unwrap_or(false);
         let opts = p.initialization_options.unwrap_or_default();
         let bin = logic::resolve_bin(
             opts.get("opensipsPath").and_then(|v| v.as_str()),
@@ -727,103 +917,8 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        let src = self.src.read().unwrap().clone();
-        let mut cached = false;
-        if let Some(src) = src {
-            // editors showing workDoneProgress see the harvest as a
-            // background job; the create round-trip is time-bounded so
-            // clients that never answer cannot stall startup
-            let token = NumberOrString::String("opensips-lsp/harvest".into());
-            let progress = tokio::time::timeout(
-                std::time::Duration::from_millis(500),
-                self.client.send_request::<request::WorkDoneProgressCreate>(
-                    WorkDoneProgressCreateParams {
-                        token: token.clone(),
-                    },
-                ),
-            )
-            .await
-            .map(|r| r.is_ok())
-            .unwrap_or(false);
-            if progress {
-                self.client
-                    .send_notification::<notification::Progress>(ProgressParams {
-                        token: token.clone(),
-                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
-                            WorkDoneProgressBegin {
-                                title: "Harvesting OpenSIPS documentation".into(),
-                                cancellable: Some(false),
-                                message: Some(src.clone()),
-                                percentage: None,
-                            },
-                        )),
-                    })
-                    .await;
-            }
-            // the harvest runs off the executor thread and outside the
-            // handshake; results are cached per tree fingerprint
-            let cache_opt = self.cache_dir_opt.read().unwrap().clone();
-            let src_tree = src.clone();
-            let (harvested, core, hit) = tokio::task::spawn_blocking(move || {
-                let p = std::path::Path::new(&src_tree);
-                let cache_dir = cache_opt
-                    .map(std::path::PathBuf::from)
-                    .or_else(|| {
-                        std::env::var("OPENSIPS_LSP_CACHE_DIR")
-                            .map(std::path::PathBuf::from)
-                            .ok()
-                    })
-                    .or_else(|| {
-                        std::env::var("XDG_CACHE_HOME")
-                            .map(std::path::PathBuf::from)
-                            .ok()
-                            .or_else(|| {
-                                std::env::var("HOME")
-                                    .map(|h| std::path::PathBuf::from(h).join(".cache"))
-                                    .ok()
-                            })
-                            .map(|c| c.join("opensips-lsp"))
-                    });
-                if let Some(dir) = &cache_dir
-                    && let Some((m, c)) = catalog::load_cached(p, dir)
-                {
-                    return (m, c, true);
-                }
-                let out = (catalog::harvest_tree(p), catalog::harvest_core(p));
-                if let Some(dir) = &cache_dir {
-                    let _ = catalog::save_cache(p, dir, &out.0, &out.1);
-                }
-                (out.0, out.1, false)
-            })
-            .await
-            .unwrap_or_default();
-            let empty = harvested.is_empty();
-            *self.catalog.write().unwrap() = harvested;
-            *self.core.write().unwrap() = core;
-            cached = hit;
-            if progress {
-                self.client
-                    .send_notification::<notification::Progress>(ProgressParams {
-                        token,
-                        value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                            WorkDoneProgressEnd { message: None },
-                        )),
-                    })
-                    .await;
-            }
-            // a tree the user explicitly configured that documents
-            // nothing is a misconfiguration, not a quiet default
-            if empty {
-                self.client
-                    .show_message(
-                        MessageType::WARNING,
-                        format!(
-                            "opensips-lsp: '{src}' yields no module documentation —                              check that opensipsSrc points at an OpenSIPS source tree"
-                        ),
-                    )
-                    .await;
-            }
-        }
+        let cached = self.harvest(true).await;
+        self.register_watchers().await;
         let n = self.catalog.read().unwrap().len();
         let c = self.core.read().unwrap().functions.len();
         let tag = if cached { ", cached" } else { "" };
@@ -916,6 +1011,54 @@ impl LanguageServer for Backend {
             )
             .await;
         });
+    }
+
+    async fn did_change_watched_files(&self, p: DidChangeWatchedFilesParams) {
+        let src = self.src.read().unwrap().clone();
+        let mut doc_tree_changed = false;
+        let mut changed: Vec<std::path::PathBuf> = Vec::new();
+        for ev in &p.changes {
+            let Some(path) = ev.uri.to_file_path() else {
+                continue;
+            };
+            if src
+                .as_ref()
+                .is_some_and(|s| path.starts_with(std::path::Path::new(s)))
+            {
+                doc_tree_changed = true;
+            } else {
+                changed.push(path.into_owned());
+            }
+        }
+
+        if doc_tree_changed {
+            // the fingerprint is content-aware, so this re-reads rather
+            // than serving the stale cache entry
+            self.harvest(false).await;
+        }
+
+        if changed.is_empty() {
+            return;
+        }
+        // an open document whose include closure contains a changed
+        // file is answering from a stale read: re-check it
+        let open: Vec<(Uri, String)> = self
+            .docs
+            .iter()
+            .map(|e| (e.key().clone(), e.value().1.clone()))
+            .collect();
+        for (uri, text) in open {
+            let closure = self.closure_for(&uri, &text);
+            let own = uri.to_file_path().map(|p| p.into_owned());
+            if closure
+                .iter()
+                .any(|(p, _)| changed.contains(p) && Some(p) != own.as_ref())
+            {
+                // not something the user typed: if the warning on
+                // screen is no longer true, say so explicitly
+                self.check_publishing(&uri, false).await;
+            }
+        }
     }
 
     async fn did_save(&self, p: DidSaveTextDocumentParams) {

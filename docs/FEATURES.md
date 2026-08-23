@@ -191,6 +191,34 @@ stripped from every line; formatting must be idempotent; and, against
 a real binary, the positioned parse errors `opensips -C` reports must
 be unchanged by formatting.
 
+#### Watched files
+
+Two things the server derives answers from can change without ever
+arriving as a document edit: a config included by an open file, and
+the documentation tree itself. A git checkout, a rebuild, or another
+tool editing an include all leave the server answering from a stale
+read until the buffer happens to be touched.
+
+The server registers for `workspace/didChangeWatchedFiles` on the
+configs and on the tree, and reacts to each:
+
+- **An include changed** — every open document whose include closure
+  contains that file is re-checked and republished.
+- **The tree changed** — the catalogue is re-harvested. The cache
+  fingerprint is content-aware, so a changed file misses the cache by
+  construction rather than by special casing.
+
+A re-check driven by a watched file publishes even when the result is
+clean. That is deliberate and differs from opening a file: if the
+warning on screen is no longer true, saying nothing would leave it
+there.
+
+Registration is dynamic, so it only happens when the client declares
+support, and the request is time-bounded — a client that declares
+support and then never answers cannot stall startup. The tree usually
+lives outside the workspace, so its watcher is a relative pattern
+rooted at the tree.
+
 #### CLI check mode
 
 `opensips-lsp check [--strict] [--bin <opensips>] <file>...` runs the
