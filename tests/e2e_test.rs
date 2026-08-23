@@ -82,7 +82,7 @@ fn diagnostics_flow_over_stdio() {
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"exit"}),
     );
-    // real clients close the pipe after `exit`; tower-lsp's serve loop
+    // real clients close the pipe after `exit`; tower-lsp-server's serve loop
     // terminates on stdin EOF
     drop(stdin);
     // bounded wait: a server that ignores `exit` must fail the test,
