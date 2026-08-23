@@ -2,6 +2,27 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.10.0] — 2026-08-23
+
+- **Formatting**: `textDocument/formatting` and
+  `textDocument/rangeFormatting`. Shift+Alt+F and format-on-save now
+  re-indent an `opensips.cfg` by brace depth and strip trailing
+  whitespace, following the editor's tab settings.
+  The formatter is deliberately line-preserving — it rewrites the
+  leading and trailing whitespace of a line and nothing else, never
+  joins, splits or reorders lines, never touches a string or comment
+  body, and never emits an edit for a line that is already correct, so
+  folding and cursor position survive. Braces inside strings and
+  comments do not move the indent depth; `#!` directives keep their
+  column. Proven against a real 4.0.1 binary: the positioned parse
+  errors `opensips -C` reports are unchanged by formatting.
+- **A skipped test is now a failed test.** Ten tests used to opt out
+  silently when no OpenSIPS tree or binary was present, so CI reported
+  green while the proofs behind this extension's version claims never
+  ran. They are hard failures now, `scripts/proof-env.sh` provisions
+  what they need, and CI runs that same script — a green build means
+  the proofs really ran, against a real 4.0.1 tree and binary.
+
 ## [0.9.1] — 2026-08-23
 
 - **Documentation drift gate**: the README and the features page are
