@@ -16,14 +16,14 @@ pub struct Located {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Class {
+pub(crate) enum Class {
     Code,
     Str,
     Comment,
 }
 
 /// Per-byte classification: code, string interior, or comment.
-fn classify(text: &str) -> Vec<Class> {
+pub(crate) fn classify(text: &str) -> Vec<Class> {
     let b = text.as_bytes();
     let mut out = vec![Class::Code; b.len()];
     let mut i = 0;

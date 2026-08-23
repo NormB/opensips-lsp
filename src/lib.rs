@@ -13,6 +13,8 @@ pub mod catalog;
 pub mod cli;
 /// `opensips -C` diagnostics.
 pub mod diag;
+/// Whitespace formatting for cfg documents.
+pub mod format;
 /// Completion/hover/definition assembly.
 pub mod logic;
 pub mod memo;

@@ -186,6 +186,26 @@ impl Backend {
         text.lines().nth(line as usize).unwrap_or("").to_string()
     }
 
+    /// Whole-line rewrites as LSP edits.  Each edit replaces exactly
+    /// one line's content and never its newline, so an edit list can
+    /// be applied in any order and the document's line structure is
+    /// untouched.
+    fn line_edits(text: &str, edits: Vec<crate::format::LineEdit>) -> Vec<TextEdit> {
+        edits
+            .into_iter()
+            .map(|e| {
+                let old = Self::doc_line(text, e.line);
+                TextEdit {
+                    range: Range {
+                        start: Position::new(e.line, 0),
+                        end: Position::new(e.line, analyze::byte_to_utf16(&old, old.len())),
+                    },
+                    new_text: e.text,
+                }
+            })
+            .collect()
+    }
+
     /// The include closure rooted at an open document: the document
     /// itself plus transitively included files (open buffers first,
     /// disk fallback).  Non-file documents get a single-entry closure.
@@ -567,6 +587,8 @@ impl LanguageServer for Backend {
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
+                document_formatting_provider: Some(OneOf::Left(true)),
+                document_range_formatting_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
@@ -1391,6 +1413,39 @@ impl LanguageServer for Backend {
             })
             .collect();
         Ok(Some(lenses))
+    }
+
+    async fn formatting(&self, p: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
+        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let opts = crate::format::Options {
+            insert_spaces: p.options.insert_spaces,
+            tab_size: p.options.tab_size,
+        };
+        Ok(Some(Self::line_edits(
+            &text,
+            crate::format::format_lines(&text, &opts),
+        )))
+    }
+
+    async fn range_formatting(
+        &self,
+        p: DocumentRangeFormattingParams,
+    ) -> Result<Option<Vec<TextEdit>>> {
+        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let opts = crate::format::Options {
+            insert_spaces: p.options.insert_spaces,
+            tab_size: p.options.tab_size,
+        };
+        // the depth still comes from the whole document, so a range
+        // lands where a full pass would have put it
+        Ok(Some(Self::line_edits(
+            &text,
+            crate::format::format_range(&text, &opts, p.range.start.line, p.range.end.line),
+        )))
     }
 
     async fn folding_range(&self, p: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {

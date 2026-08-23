@@ -113,6 +113,38 @@ its interior.
 Editors that issue a `semanticTokens/range` request (large files,
 visible-viewport optimization) get exactly the tokens inside it.
 
+#### Formatting
+
+**Shift+Alt+F** (or format-on-save) re-indents the document by brace
+depth and strips trailing whitespace. Selecting a region and using
+range formatting does the same for those lines only, at the
+indentation a whole-document pass would have given them.
+
+The formatter is deliberately **line-preserving**: it rewrites the
+leading and trailing whitespace of a line and nothing else. It never
+joins, splits or reorders lines, never touches a byte inside a string
+literal or a comment body, and never emits an edit for a line that is
+already correct — so folding, selection and cursor position survive.
+Braces inside strings and comments do not move the indent depth.
+
+Two things it will not touch:
+
+- **Continuation lines of a multi-line string or block comment** —
+  their leading whitespace is content, not layout.
+- **`#!` preprocessor directives** — these are processed line-wise
+  ahead of the parser, so their column is not the formatter's to move.
+
+Indentation follows the editor: the `insertSpaces` and `tabSize` the
+client sends with the request decide tabs versus spaces and the width.
+Upstream `etc/opensips.cfg` is tab-indented, which is what a client
+sending no preference gets.
+
+The guarantee is tested three ways: the reformatted document must be
+identical to the original once leading and trailing whitespace is
+stripped from every line; formatting must be idempotent; and, against
+a real binary, the positioned parse errors `opensips -C` reports must
+be unchanged by formatting.
+
 #### CLI check mode
 
 `opensips-lsp check [--strict] [--bin <opensips>] <file>...` runs the
