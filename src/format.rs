@@ -12,12 +12,21 @@
 //! that is provably safe to normalise, and it is also the part that
 //! actually rots in a config edited by many hands.
 //!
-//! Two things are deliberately left alone:
+//! Three things are deliberately left alone:
 //!
 //! * **Continuation lines of a multi-line string or block comment.**
 //!   Their leading whitespace is content, not layout.
 //! * **`#!` preprocessor directives.** OpenSIPS processes them
 //!   line-wise ahead of the parser; their column is not ours to move.
+//! * **Lines that continue the previous statement.**  Brace depth is
+//!   not the whole story about indentation here.  A call whose
+//!   arguments span lines, a condition broken across lines, and the
+//!   body of a braceless `if` are all indented by the author to show
+//!   what they belong to, and none of that shows up in the brace
+//!   count.  Re-indenting them to brace depth flattens deliberate
+//!   layout and — for a braceless `if` — makes the body read as
+//!   though it runs unconditionally.  So a line is only re-indented
+//!   when the previous code line actually ENDED a statement.
 
 use crate::analyze::{Class, classify};
 
@@ -90,6 +99,19 @@ fn lines_with_offsets(text: &str) -> Vec<Line<'_>> {
     out
 }
 
+/// Did this line end a statement?  Only `;`, `{` and `}` in code
+/// position do; anything else means the next line continues it.
+fn ends_statement(body: &str, start: usize, class: &[Class]) -> Option<bool> {
+    let mut last = None;
+    for (off, ch) in body.char_indices() {
+        if ch.is_whitespace() || class.get(start + off) != Some(&Class::Code) {
+            continue;
+        }
+        last = Some(ch);
+    }
+    last.map(|c| matches!(c, ';' | '{' | '}'))
+}
+
 /// The rewritten text of every line, in order.  Lines the formatter
 /// leaves alone come back byte-identical.
 fn formatted_lines(text: &str, opts: &Options) -> Vec<String> {
@@ -97,6 +119,9 @@ fn formatted_lines(text: &str, opts: &Options) -> Vec<String> {
     let lines = lines_with_offsets(text);
     let mut out = Vec::with_capacity(lines.len());
     let mut depth: usize = 0;
+    // whether the last line carrying code closed its statement; blank
+    // and comment-only lines do not change the answer
+    let mut prev_ended = true;
 
     for line in &lines {
         // A line continues a multi-line string or block comment when
@@ -143,13 +168,19 @@ fn formatted_lines(text: &str, opts: &Options) -> Vec<String> {
             }
         }
 
-        let indent = if trimmed.starts_with("#!") {
-            // not ours to move: the preprocessor reads these line-wise
+        let indent = if trimmed.starts_with("#!") || !prev_ended {
+            // not ours to move: a preprocessor directive is read
+            // line-wise ahead of the parser, and a line continuing the
+            // previous statement is indented by its author to show
+            // what it belongs to
             body[..leading_ws].to_string()
         } else {
             opts.indent(depth.saturating_sub(closers))
         };
         out.push(format!("{indent}{trimmed}{cr}"));
+        if let Some(ended) = ends_statement(body, line.start, &class) {
+            prev_ended = ended;
+        }
 
         // net brace delta over the code positions of this line
         for (off, ch) in body.char_indices() {

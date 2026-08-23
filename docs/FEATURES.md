@@ -209,12 +209,21 @@ literal or a comment body, and never emits an edit for a line that is
 already correct — so folding, selection and cursor position survive.
 Braces inside strings and comments do not move the indent depth.
 
-Two things it will not touch:
+Three things it will not touch:
 
 - **Continuation lines of a multi-line string or block comment** —
   their leading whitespace is content, not layout.
 - **`#!` preprocessor directives** — these are processed line-wise
   ahead of the parser, so their column is not the formatter's to move.
+- **Lines that continue the previous statement.** Brace depth is not
+  the whole story about indentation here. A call whose arguments span
+  lines, a condition broken across lines, and the body of a braceless
+  `if` are all placed by the author to show what they belong to, and
+  none of that shows up in the brace count. A line is only re-indented
+  when the previous code line actually *ended* a statement — with `;`,
+  `{` or `}`. Dedenting a braceless `if` body would be the worst of
+  it: the parse would not change, but the body would read as though it
+  runs unconditionally.
 
 Indentation follows the editor: the `insertSpaces` and `tabSize` the
 client sends with the request decide tabs versus spaces and the width.

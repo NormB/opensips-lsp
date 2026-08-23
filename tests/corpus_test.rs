@@ -65,7 +65,39 @@ fn corpus_sweep_no_panics_and_no_silent_failures() {
         mods_total += mods.len();
         routes_total += defs.len();
 
-        // invariant 2: real-parser rejection is never silent
+        // invariant 2: the formatter is safe on every real-world file
+        // it will ever meet.  Fixtures cannot cover the layouts people
+        // actually write — hanging argument indents, conditions broken
+        // across lines, braceless `if` bodies — so the corpus is where
+        // that gets proven.
+        for opts in [
+            opensips_lsp::format::Options {
+                insert_spaces: false,
+                tab_size: 4,
+            },
+            opensips_lsp::format::Options {
+                insert_spaces: true,
+                tab_size: 4,
+            },
+        ] {
+            let out = opensips_lsp::format::format(&text, &opts);
+            assert_eq!(
+                out,
+                opensips_lsp::format::format(&out, &opts),
+                "formatting {} was not idempotent",
+                f.display()
+            );
+            let skel =
+                |t: &str| -> Vec<String> { t.lines().map(|l| l.trim().to_string()).collect() };
+            assert_eq!(
+                skel(&out),
+                skel(&text),
+                "formatting {} changed content, not just indentation",
+                f.display()
+            );
+        }
+
+        // invariant 3: real-parser rejection is never silent
         {
             let bin = &bin;
             let out = std::process::Command::new(bin)

@@ -258,3 +258,76 @@ fn range_formatting_touches_only_the_requested_lines() {
         "the misindented line in range was not edited"
     );
 }
+
+/// Brace depth is not the whole story about indentation, which real
+/// configs demonstrate immediately: a call whose arguments span lines,
+/// a condition broken across lines, and the body of a braceless `if`
+/// are all positioned by the author to show what they belong to, and
+/// none of it shows up in the brace count.
+#[test]
+fn a_line_continuing_the_previous_statement_keeps_its_own_indent() {
+    // arguments spanning lines: the hanging indent is the author's
+    let src = "route {\nnats_publish(\"topic\",\n        \"payload\");\nexit;\n}\n";
+    let out = format(src, &spaces(4));
+    assert!(
+        out.contains("\n        \"payload\");"),
+        "a hanging argument indent was flattened: {out:?}"
+    );
+    // and the statement after it is back under brace depth
+    assert!(out.contains("\n    exit;"), "{out:?}");
+}
+
+#[test]
+fn a_condition_broken_across_lines_keeps_its_own_indent() {
+    let src = "route {\nif ($rU == \"a\"\n        || $rU == \"b\") {\nexit;\n}\n}\n";
+    let out = format(src, &spaces(4));
+    assert!(
+        out.contains("\n        || $rU == \"b\") {"),
+        "a continued condition was flattened: {out:?}"
+    );
+    // the body still indents from the brace that opened
+    assert!(out.contains("\n        exit;"), "{out:?}");
+}
+
+/// The one that matters most: dedenting a braceless `if` body makes it
+/// READ as though it runs unconditionally.  The parse would not change
+/// — which is exactly why a formatter must not do it.
+#[test]
+fn a_braceless_if_body_is_not_dedented_into_a_lie() {
+    let src = "route {\nif (!($rU =~ \"x\"))\n        return;\nexit;\n}\n";
+    let out = format(src, &spaces(4));
+    assert!(
+        out.contains("\n        return;"),
+        "the braceless if body was dedented, so it now reads as unconditional: {out:?}"
+    );
+}
+
+#[test]
+fn blank_and_comment_lines_do_not_end_a_statement() {
+    // a comment between a call and its continuation must not make the
+    // continuation look like a fresh statement
+    let src = "route {\nf(\"a\",\n# why\n        \"b\");\nexit;\n}\n";
+    let out = format(src, &spaces(4));
+    assert!(out.contains("\n        \"b\");"), "{out:?}");
+}
+
+#[test]
+fn a_statement_ending_line_still_reindents_the_next() {
+    // each terminator, in a fixture where it makes sense
+    let cases = [
+        // after `;`
+        ("route {\nx;\nexit;\n}\n", 2, "    exit;"),
+        // after `{`
+        ("route {\nif (1) {\nexit;\n}\n}\n", 2, "        exit;"),
+        // after `}`
+        ("route {\nif (1) {\n}\nexit;\n}\n", 3, "    exit;"),
+    ];
+    for (src, line, want) in cases {
+        let out = format(src, &spaces(4));
+        assert_eq!(
+            out.lines().nth(line).unwrap(),
+            want,
+            "a line after a statement terminator must be re-indented: {out:?}"
+        );
+    }
+}
