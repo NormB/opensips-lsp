@@ -39,6 +39,7 @@ fn advertised_providers() -> BTreeSet<String> {
 /// coverage assertion below forces a new capability to add its row
 /// here, so this table cannot quietly fall behind the server.
 const DOC_TOKENS: &[(&str, &str)] = &[
+    ("call_hierarchy_provider", "call hierarchy"),
     ("code_action_provider", "quick fix"),
     ("code_lens_provider", "code lens"),
     ("completion_provider", "completion"),

@@ -279,6 +279,32 @@ pub fn definition_of(doc: &str, line: u32, col: u32) -> Option<Located> {
         .find(|d| d.name == name)
 }
 
+/// The innermost route-family block whose extent covers `line`.
+///
+/// Route blocks do not nest in this language, so at most one can
+/// match; the search is over `blocks` rather than the text so a
+/// caller that already has them does not pay to re-scan.
+pub fn enclosing_block(blocks: &[analyze::Block], line: u32) -> Option<&analyze::Block> {
+    blocks.iter().find(|b| line >= b.line && line <= b.end_line)
+}
+
+/// Every `route(NAME)` call in `doc`, paired with the block it sits
+/// in.  These are the edges of the route call graph.
+///
+/// The target of an edge is always a main-table `route[NAME]` block —
+/// that is the route-namespace rule — but the source can be any
+/// route-family block: a `failure_route` is not itself callable via
+/// `route()`, yet it may call into the main table, and that is a real
+/// edge.  A call outside every block carries `None`; the real parser
+/// rejects such a config, but the analyzer must not assume it.
+pub fn call_edges(doc: &str) -> Vec<(Option<analyze::Block>, Located)> {
+    let blocks = analyze::route_blocks(doc);
+    analyze::route_refs(doc)
+        .into_iter()
+        .map(|call| (enclosing_block(&blocks, call.line).cloned(), call))
+        .collect()
+}
+
 /// The namespace a route-name symbol lives in.  OpenSIPS keeps one
 /// route table per block kind: `route(NAME)` invokes only the main
 /// table (`route[NAME]` blocks); `failure_route[NAME]` and friends

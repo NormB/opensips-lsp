@@ -206,6 +206,94 @@ impl Backend {
             .collect()
     }
 
+    /// The open buffer for `uri`, or empty when the document is not
+    /// open — a call-hierarchy follow-up can name a file the client
+    /// never opened.
+    fn text_for(&self, uri: &Uri) -> String {
+        self.docs.get(uri).map(|d| d.1.clone()).unwrap_or_default()
+    }
+
+    /// A call-hierarchy item for one route block.
+    ///
+    /// `range` is the block's whole extent so an editor can frame it;
+    /// `selection_range` is the name itself, which is what gets
+    /// highlighted on navigation.  `data` carries the route name so
+    /// the follow-up calls need not re-derive it from a position.
+    fn hierarchy_item(uri: &Uri, b: &analyze::Block, text: &str) -> CallHierarchyItem {
+        let name_line = Self::doc_line(text, b.name_line);
+        let name_start = analyze::byte_to_utf16(&name_line, b.name_col as usize);
+        let kw_line = Self::doc_line(text, b.line);
+        let end_line = Self::doc_line(text, b.end_line);
+        CallHierarchyItem {
+            name: if b.name.is_empty() {
+                b.kind.clone()
+            } else {
+                format!("{}[{}]", b.kind, b.name)
+            },
+            kind: SymbolKind::FUNCTION,
+            tags: None,
+            detail: None,
+            uri: uri.clone(),
+            range: Range {
+                start: Position::new(b.line, analyze::byte_to_utf16(&kw_line, b.col as usize)),
+                end: Position::new(
+                    b.end_line,
+                    analyze::byte_to_utf16(&end_line, b.end_col as usize),
+                ),
+            },
+            selection_range: Range {
+                start: Position::new(b.name_line, name_start),
+                end: Position::new(
+                    b.name_line,
+                    name_start + analyze::byte_to_utf16(&b.name, b.name.len()),
+                ),
+            },
+            data: Some(serde_json::json!({ "route": b.name })),
+        }
+    }
+
+    /// The UTF-16 range of one `route(NAME)` call site's name.
+    fn call_range(text: &str, call: &analyze::Located) -> Range {
+        let line = Self::doc_line(text, call.line);
+        let start = analyze::byte_to_utf16(&line, call.col as usize);
+        Range {
+            start: Position::new(call.line, start),
+            end: Position::new(
+                call.line,
+                start + analyze::byte_to_utf16(&call.name, call.name.len()),
+            ),
+        }
+    }
+
+    /// The route name a call-hierarchy item stands for.
+    fn item_route(item: &CallHierarchyItem) -> Option<String> {
+        item.data
+            .as_ref()
+            .and_then(|d| d.get("route"))
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+    }
+
+    /// The main-table definition of `name` within an include closure,
+    /// as (uri, text, block).
+    fn main_definition(
+        files: &[(std::path::PathBuf, String)],
+        name: &str,
+    ) -> Option<(Uri, String, analyze::Block)> {
+        for (path, text) in files {
+            let Some(uri) = Uri::from_file_path(path) else {
+                continue;
+            };
+            if let Some(b) = analyze::route_blocks(text)
+                .into_iter()
+                .find(|b| b.kind == "route" && b.name == name)
+            {
+                return Some((uri, text.clone(), b));
+            }
+        }
+        None
+    }
+
     /// The include closure rooted at an open document: the document
     /// itself plus transitively included files (open buffers first,
     /// disk fallback).  Non-file documents get a single-entry closure.
@@ -602,6 +690,7 @@ impl LanguageServer for Backend {
                     work_done_progress_options: Default::default(),
                 }),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
+                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -1413,6 +1502,116 @@ impl LanguageServer for Backend {
             })
             .collect();
         Ok(Some(lenses))
+    }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        p: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        let uri = p.text_document_position_params.text_document.uri;
+        let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let pos = p.text_document_position_params.position;
+        // only the main table takes part: `route(NAME)` is the only
+        // call form the server can see, so a failure_route or
+        // event_route has no callers it could honestly report
+        let Some((name, logic::RouteNs::Main)) =
+            logic::route_symbol_ns_at(&text, pos.line, pos.character)
+        else {
+            return Ok(None);
+        };
+        let files = self.closure_for(&uri, &text);
+        let Some((def_uri, def_text, block)) = Self::main_definition(&files, &name) else {
+            // a call to a route that is defined nowhere: the analyzer
+            // already flags it, and there is no item to anchor to
+            return Ok(None);
+        };
+        Ok(Some(vec![Self::hierarchy_item(
+            &def_uri, &block, &def_text,
+        )]))
+    }
+
+    async fn incoming_calls(
+        &self,
+        p: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        let Some(name) = Self::item_route(&p.item) else {
+            return Ok(None);
+        };
+        let files = self.closure_for(&p.item.uri, &self.text_for(&p.item.uri));
+        let mut out: Vec<CallHierarchyIncomingCall> = Vec::new();
+        for (path, text) in &files {
+            let Some(uri) = Uri::from_file_path(path) else {
+                continue;
+            };
+            for (caller, call) in logic::call_edges(text) {
+                if call.name != name {
+                    continue;
+                }
+                // a call outside every block cannot be attributed to a
+                // caller; the real parser rejects that config anyway
+                let Some(caller) = caller else { continue };
+                let range = Self::call_range(text, &call);
+                let item = Self::hierarchy_item(&uri, &caller, text);
+                match out.iter_mut().find(|c| {
+                    c.from.uri == item.uri && c.from.selection_range == item.selection_range
+                }) {
+                    Some(existing) => existing.from_ranges.push(range),
+                    None => out.push(CallHierarchyIncomingCall {
+                        from: item,
+                        from_ranges: vec![range],
+                    }),
+                }
+            }
+        }
+        Ok(Some(out))
+    }
+
+    async fn outgoing_calls(
+        &self,
+        p: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        let Some(name) = Self::item_route(&p.item) else {
+            return Ok(None);
+        };
+        let files = self.closure_for(&p.item.uri, &self.text_for(&p.item.uri));
+        let Some((_, def_text, block)) = Self::main_definition(&files, &name) else {
+            return Ok(None);
+        };
+        let mut out: Vec<CallHierarchyOutgoingCall> = Vec::new();
+        for call in analyze::route_refs(&def_text)
+            .into_iter()
+            .filter(|c| c.line >= block.line && c.line <= block.end_line)
+        {
+            let range = Self::call_range(&def_text, &call);
+            let to = match Self::main_definition(&files, &call.name) {
+                Some((uri, text, b)) => Self::hierarchy_item(&uri, &b, &text),
+                // a target defined nowhere is still an edge the reader
+                // should see; say so rather than dropping it silently
+                None => CallHierarchyItem {
+                    name: format!("route[{}]", call.name),
+                    kind: SymbolKind::FUNCTION,
+                    tags: None,
+                    detail: Some("undefined".into()),
+                    uri: p.item.uri.clone(),
+                    range,
+                    selection_range: range,
+                    data: Some(serde_json::json!({ "route": call.name })),
+                },
+            };
+            match out
+                .iter_mut()
+                .find(|c| c.to.uri == to.uri && c.to.selection_range == to.selection_range)
+            {
+                Some(existing) => existing.from_ranges.push(range),
+                None => out.push(CallHierarchyOutgoingCall {
+                    to,
+                    from_ranges: vec![range],
+                }),
+            }
+        }
+        Ok(Some(out))
     }
 
     async fn formatting(&self, p: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {

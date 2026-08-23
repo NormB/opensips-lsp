@@ -80,6 +80,30 @@ includes. Named `route` blocks show a **reference count** code lens
 (counted across the include closure); disable with
 `opensipsLsp.codeLens.references`.
 
+#### Call hierarchy
+
+**Shift+Alt+H** on a route name — at a `route(NAME)` call or on the
+`route[NAME]` definition — opens the call graph. Incoming calls list
+every block that calls it; outgoing calls list every route it calls.
+Both span the include closure, so a caller living in an included file
+shows up with that file's URI.
+
+Several calls from the same block collapse into one entry carrying
+each call site's range, so the editor can step through them.
+
+A route called but defined nowhere still appears as an outgoing edge,
+marked `undefined` — the call is in the file, and dropping it would
+hide something the reader can see.
+
+The graph is the **main route table**. `route(NAME)` is the only call
+form the server can observe, so `route[NAME]` blocks are what take
+part. A `failure_route[NAME]` or `event_route[NAME]` is armed by a
+module function that takes the route name as a string
+(`t_on_failure("NAME")`), which the server does not track: those
+blocks can *make* calls, and do show up as callers, but asking for
+their own hierarchy declines rather than reporting "no callers" —
+which would be a confident wrong answer.
+
 #### Quick fixes
 
 The lightbulb offers: **Load module 'X'** when the parser reports
