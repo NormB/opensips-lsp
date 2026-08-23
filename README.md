@@ -19,6 +19,7 @@ script language (`opensips.cfg`).
 | **Code lenses** | Reference counts above route definitions (include-closure-wide). |
 | **Call hierarchy** | The route call graph: who calls `route[X]`, and what `route[X]` calls, across the include closure. Main-table only — a `failure_route` is armed by a module-function string the server cannot see, so it makes calls but reports no callers. |
 | **Quick fixes** | Load the module exporting an unknown function; create a missing route stub. |
+| **Refactorings** | Extract a selection into a `route[...]` of its own, leaving a call behind; remove duplicate `loadmodule` lines (a second load is a parse error, not untidiness). |
 | **Catalog-pinned validation** | Undocumented `modparam` parameters flagged against YOUR source tree's docs. |
 | **Include links** | `include_file`/`import_file` paths are Ctrl+Click document links. |
 | **Formatting** | Whole-document and range formatting re-indents by brace depth and strips trailing whitespace, honouring the editor's tab settings. Line-preserving: it never joins, splits or reorders lines, and never touches a string or comment body. |

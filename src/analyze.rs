@@ -84,6 +84,11 @@ fn line_col(text: &str, offset: usize) -> (u32, u32) {
     (line, col as u32)
 }
 
+/// Word byte, for callers outside this module.
+pub fn is_word_byte(c: u8) -> bool {
+    is_word(c)
+}
+
 fn is_word(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_'
 }

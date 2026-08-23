@@ -217,6 +217,143 @@ pub fn completions_with_core_files(
     complete_files(catalog, core, files, line_prefix)
 }
 
+/// What extracting a selection into its own route would do.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtractPlan {
+    /// The generated route name, guaranteed not to collide.
+    pub name: String,
+    /// First selected line (0-based, inclusive).
+    pub start_line: u32,
+    /// Last selected line (0-based, inclusive).
+    pub end_line: u32,
+    /// The line that replaces the selection, at its indentation.
+    pub call_line: String,
+    /// 0-based line the new block is inserted before.
+    pub insert_line: u32,
+    /// The new `route[NAME] { ... }` block, newline-terminated.
+    pub block: String,
+}
+
+/// Plan an extract-route refactoring for the lines `start..=end`, or
+/// decline.
+///
+/// It declines far more than it accepts, and every refusal is a case
+/// where accepting would change what the config does:
+///
+/// * outside a route block, or covering the block's own braces —
+///   there is no body to lift, or lifting it would unbalance the file;
+/// * unbalanced code braces inside the selection — the same;
+/// * a `return` in the selection.  `return` leaves the route it is
+///   written in; moved into a new route it returns to the CALLER, so
+///   the statements after the extracted call would start running when
+///   they did not before.  That is a behaviour change no editor should
+///   make silently.
+pub fn extract_route(doc: &str, start_line: u32, end_line: u32) -> Option<ExtractPlan> {
+    let lines: Vec<&str> = doc.lines().collect();
+    if start_line > end_line || end_line as usize >= lines.len() {
+        return None;
+    }
+    let blocks = analyze::route_blocks(doc);
+    let enclosing = enclosing_block(&blocks, start_line)?;
+    // the selection must sit strictly inside the block's braces
+    if start_line <= enclosing.line
+        || end_line >= enclosing.end_line
+        || !(start_line..=end_line).all(|l| {
+            enclosing_block(&blocks, l).is_some_and(|b| {
+                b.line == enclosing.line && b.name == enclosing.name && b.kind == enclosing.kind
+            })
+        })
+    {
+        return None;
+    }
+
+    let selected: Vec<&str> = lines[start_line as usize..=end_line as usize].to_vec();
+    if selected.iter().all(|l| l.trim().is_empty()) {
+        return None;
+    }
+
+    // brace balance and `return`, judged in code position only
+    let class = crate::analyze::classify(doc);
+    let mut off = doc
+        .lines()
+        .take(start_line as usize)
+        .map(|l| l.len() + 1)
+        .sum::<usize>();
+    let mut depth = 0i32;
+    for line in &selected {
+        let bytes = line.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let code = class.get(off + i) == Some(&crate::analyze::Class::Code);
+            if code {
+                match bytes[i] {
+                    b'{' => depth += 1,
+                    b'}' => depth -= 1,
+                    _ => {}
+                }
+                if depth < 0 {
+                    return None;
+                }
+                if bytes[i..].starts_with(b"return")
+                    && (i == 0 || !crate::analyze::is_word_byte(bytes[i - 1]))
+                    && bytes
+                        .get(i + 6)
+                        .is_none_or(|c| !crate::analyze::is_word_byte(*c))
+                {
+                    return None;
+                }
+            }
+            i += 1;
+        }
+        off += line.len() + 1;
+    }
+    if depth != 0 {
+        return None;
+    }
+
+    // a name nothing else uses
+    let taken: std::collections::HashSet<String> = blocks.iter().map(|b| b.name.clone()).collect();
+    let mut name = "EXTRACTED".to_string();
+    let mut n = 2;
+    while taken.contains(&name) {
+        name = format!("EXTRACTED_{n}");
+        n += 1;
+    }
+
+    let first = selected[0];
+    let indent = &first[..first.len() - first.trim_start().len()];
+    let mut block = format!("route[{name}] {{\n");
+    for line in &selected {
+        block.push_str(line);
+        block.push('\n');
+    }
+    block.push_str("}\n");
+
+    Some(ExtractPlan {
+        call_line: format!("{indent}route({name});"),
+        name,
+        start_line,
+        end_line,
+        insert_line: enclosing.end_line + 1,
+        block,
+    })
+}
+
+/// The lines carrying a `loadmodule` that an earlier line already
+/// loaded — every occurrence after the first, per module.
+///
+/// Loading a module twice is not a harmless tidy-up issue: the real
+/// parser rejects the second load outright, so these lines are an
+/// error the document can be repaired of.
+pub fn duplicate_loadmodules(doc: &str) -> Vec<u32> {
+    let mut seen = std::collections::HashSet::new();
+    analyze::loaded_modules(doc)
+        .into_iter()
+        .filter(|m| !seen.insert(m.name.clone()))
+        .map(|m| m.line)
+        .collect()
+}
+
 /// One inlay hint: a label the editor draws at a position, without
 /// changing the document.
 #[derive(Debug, Clone, PartialEq)]

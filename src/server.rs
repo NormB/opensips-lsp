@@ -1835,6 +1835,94 @@ impl LanguageServer for Backend {
         };
         let cat = self.catalog.read().unwrap();
         let mut out: Vec<CodeActionOrCommand> = Vec::new();
+
+        // Extract is offered for a real selection of whole lines, not
+        // for a bare cursor or a word inside a line: it lifts LINES,
+        // so offering it for a sub-line selection would move more than
+        // the user highlighted.  A selection ending at column 0 of the
+        // next line does not include that line, per the usual editor
+        // convention.
+        let sel_end = if p.range.end.character == 0 && p.range.end.line > p.range.start.line {
+            p.range.end.line - 1
+        } else {
+            p.range.end.line
+        };
+        let start_line_text = Self::doc_line(&text, p.range.start.line);
+        let covers_whole_lines = p.range.start.character == 0
+            && (sel_end > p.range.start.line
+                || p.range.end.character
+                    >= analyze::byte_to_utf16(&start_line_text, start_line_text.len()));
+        if covers_whole_lines
+            && let Some(plan) = logic::extract_route(&text, p.range.start.line, sel_end)
+        {
+            let last = Self::doc_line(&text, plan.end_line);
+            let mut edits = vec![
+                // the selection becomes the call
+                TextEdit {
+                    range: Range {
+                        start: Position::new(plan.start_line, 0),
+                        end: Position::new(
+                            plan.end_line,
+                            analyze::byte_to_utf16(&last, last.len()),
+                        ),
+                    },
+                    new_text: plan.call_line,
+                },
+                // and the new block lands after the enclosing one
+                TextEdit {
+                    range: Range {
+                        start: Position::new(plan.insert_line, 0),
+                        end: Position::new(plan.insert_line, 0),
+                    },
+                    new_text: plan.block,
+                },
+            ];
+            edits.sort_by_key(|e| e.range.start.line);
+            let mut changes = std::collections::HashMap::new();
+            changes.insert(uri.clone(), edits);
+            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: format!("Extract into route[{}]", plan.name),
+                kind: Some(CodeActionKind::REFACTOR_EXTRACT),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(changes),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }));
+        }
+
+        // a second `loadmodule` for the same module is a parse error,
+        // not untidiness: the real checker rejects the config
+        let dups = logic::duplicate_loadmodules(&text);
+        if !dups.is_empty() {
+            let edits: Vec<TextEdit> = dups
+                .iter()
+                .map(|line| TextEdit {
+                    // take the whole line including its newline
+                    range: Range {
+                        start: Position::new(*line, 0),
+                        end: Position::new(line + 1, 0),
+                    },
+                    new_text: String::new(),
+                })
+                .collect();
+            let mut changes = std::collections::HashMap::new();
+            changes.insert(uri.clone(), edits);
+            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: format!(
+                    "Remove {} duplicate loadmodule line{}",
+                    dups.len(),
+                    if dups.len() == 1 { "" } else { "s" }
+                ),
+                kind: Some(CodeActionKind::SOURCE_ORGANIZE_IMPORTS),
+                edit: Some(WorkspaceEdit {
+                    changes: Some(changes),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }));
+        }
+
         for d in &p.context.diagnostics {
             for f in logic::quick_fixes(&cat, &text, &d.message) {
                 let pos = Position::new(f.line, f.col);

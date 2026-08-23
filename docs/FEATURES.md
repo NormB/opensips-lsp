@@ -133,6 +133,42 @@ The lightbulb offers: **Load module 'X'** when the parser reports
 `f` (inserted after the last `loadmodule`), and **Create route[x]**
 for an undefined `route(x)` target (a stub is appended).
 
+#### Refactorings
+
+**Extract into a route.** Select statements inside a route body and
+the lightbulb offers to lift them into a `route[EXTRACTED]` of their
+own, leaving a `route(EXTRACTED);` call at the original indentation.
+The new block lands after the enclosing one, and the generated name
+steps aside from any name already in the file.
+
+The action appears for a selection of whole lines, not for a bare
+cursor or a word inside a line — it lifts *lines*, so offering it for
+a sub-line selection would move more than was highlighted.
+
+It declines more than it accepts, and each refusal is a case where
+accepting would change what the config does:
+
+- a selection outside a route body, or covering the block's own
+  braces — there is nothing to lift, or lifting it would unbalance
+  the file;
+- unbalanced braces inside the selection, for the same reason;
+- **a `return` in the selection.** `return` leaves the route it is
+  written in. Moved into a new route it returns to the *caller*, so
+  the statements after the extracted call would start running when
+  they did not before. That is a behaviour change no editor should
+  make silently, so the action is simply not offered.
+
+Braces and `return` are judged in code position, so a `return` inside
+a string or a comment does not block anything.
+
+**Remove duplicate `loadmodule` lines.** A second `loadmodule` for the
+same module is not untidiness — the real parser rejects it outright,
+positioned on the second line. The action removes every occurrence
+after the first and **does not reorder anything**: load order decides
+module initialisation order and a `modparam` must follow its own
+`loadmodule`, so sorting is not a transformation that can be applied
+blind.
+
 #### Catalog-pinned validation
 
 `modparam("m", "p", ...)` warns as you type when the configured
