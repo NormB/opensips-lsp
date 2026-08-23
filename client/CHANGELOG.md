@@ -2,6 +2,19 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.14.0] — 2026-08-23
+
+- **Pull diagnostics**: `textDocument/diagnostic` and
+  `workspace/diagnostic`. The workspace sweep reports problems across
+  the project without opening a file, and reports carry a result id so
+  an unchanged document comes back `unchanged` rather than resending.
+- **Only root configs appear in the workspace sweep.** A config that
+  another config includes is a fragment, not a program — checked alone
+  it would flag every route its parent defines as undefined. Roots are
+  the files nothing else includes, and their closures already cover
+  the fragments. The sweep stops at 500 configs and logs that it did.
+- Pushing stops when the client pulls, so nothing is reported twice.
+
 ## [0.13.0] — 2026-08-23
 
 - **Watched files**: an include or the OpenSIPS documentation tree
