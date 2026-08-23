@@ -23,9 +23,9 @@ extension and it just works.
     parentheses
 - **Hover documentation** for functions, parameters, modules, and
   pseudo-variables, harvested from OpenSIPS's own docs.
-- **Navigation** — Ctrl+Click `route(name)` to jump to its
-  definition (even into an `include_file`); Ctrl+Shift+O lists every
-  route block with its full extent; route blocks fold.
+- **Navigation** — go to definition: Ctrl+Click `route(name)` to jump
+  to its definition (even into an `include_file`); Ctrl+Shift+O lists every
+  route block (document symbols) with its full extent; route blocks fold.
 - **Signature help** — type `(` or `,` in a call and the signature
   pops up with the active parameter highlighted.
 - **References & rename** — Shift+F12 lists every call site of a
@@ -39,6 +39,33 @@ extension and it just works.
   reference counts appear above route definitions.
 - **Semantic highlighting** — route names and pseudo-variables are
   colored by real analysis, even inside strings.
+- **Formatting** — Shift+Alt+F or format-on-save re-indents by brace
+  depth and strips trailing whitespace, following your editor's tab
+  settings; range formatting does the same for a selection. Line-preserving on purpose: it never joins, splits or
+  reorders lines, never touches a string or comment, and leaves a
+  line that continues the previous statement exactly where you put
+  it — a hanging indent or a braceless `if` body stays readable.
+- **Call hierarchy** — Shift+Alt+H on a route name opens the route
+  call graph: who calls `route[X]`, and what `route[X]` calls, across
+  the include closure.
+- **Inlay hints** — parameter names from the documentation drawn at
+  each documented call site.
+- **Include links** — Ctrl+Click an `include_file`/`import_file` path
+  to open it.
+- **Pull diagnostics** — `textDocument/diagnostic` and a workspace
+  sweep that reports problems across the project without opening
+  every file. Only root configs are swept: a config another one
+  includes is a fragment, not a program.
+- **Watched files** — an include or the documentation tree changing
+  on disk (a git checkout, a rebuild) re-checks and re-harvests
+  without you touching the buffer.
+- **Refactorings** — extract a selection into a `route[...]` of its
+  own, leaving a call behind; remove duplicate `loadmodule` lines (a
+  second load is a parse error, not untidiness). The extraction
+  declines when it would change behaviour — a selection containing
+  `return` is never lifted.
+- **Live settings** — the runtime toggles apply without restarting
+  the server.
 - **Snippets** — `route`, `failure_route`, `ifmethod`, `modparam`,
   `switch`, `xlog`, and more.
 - **Safe by default** — in untrusted workspaces diagnostics stay off

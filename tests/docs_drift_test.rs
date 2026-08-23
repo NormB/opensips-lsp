@@ -74,19 +74,24 @@ fn every_advertised_capability_is_documented() {
         "the advertised capabilities and the documentation map disagree"
     );
 
-    let readme = read("README.md").to_lowercase();
-    let features = read("docs/FEATURES.md").to_lowercase();
+    // client/README.md is the marketplace listing — the page a
+    // prospective user reads before installing anything.  It was the
+    // least-watched page here and had fallen seven features behind
+    // while the gated pages stayed current, which is exactly what a
+    // gate covering only some pages buys you.
+    let pages = [
+        ("README.md", read("README.md").to_lowercase()),
+        ("docs/FEATURES.md", read("docs/FEATURES.md").to_lowercase()),
+        ("client/README.md", read("client/README.md").to_lowercase()),
+    ];
     let mut missing = Vec::new();
     for (provider, token) in DOC_TOKENS {
-        if !readme.contains(*token) {
-            missing.push(format!(
-                "README.md says nothing about {provider} (no {token:?})"
-            ));
-        }
-        if !features.contains(*token) {
-            missing.push(format!(
-                "docs/FEATURES.md says nothing about {provider} (no {token:?})"
-            ));
+        for (name, text) in &pages {
+            if !text.contains(*token) {
+                missing.push(format!(
+                    "{name} says nothing about {provider} (no {token:?})"
+                ));
+            }
         }
     }
     assert!(
@@ -154,17 +159,16 @@ fn every_setting_the_server_reads_is_documented() {
     let server = read("src/server.rs");
     let features = read("docs/FEATURES.md");
 
-    // initialization options: `opts.get("name")`
-    let mut opts: BTreeSet<&str> = BTreeSet::new();
-    for (_, rest) in server
-        .match_indices("opts.get(\"")
-        .map(|(i, _)| server.split_at(i))
-    {
-        if let Some(name) = rest
-            .strip_prefix("opts.get(\"")
-            .and_then(|r| r.split('"').next())
-        {
-            opts.insert(name);
+    // initialization options: `opts.get("name")`.  Whitespace is
+    // stripped first because rustfmt wraps the call as
+    // `opts\n.get("name")`, and a scan for the literal `opts.get("`
+    // silently finds nothing there — a gate defeated by the formatter
+    // CI itself enforces.
+    let flat: String = server.chars().filter(|c| !c.is_whitespace()).collect();
+    let mut opts: BTreeSet<String> = BTreeSet::new();
+    for (i, _) in flat.match_indices("opts.get(\"") {
+        if let Some(name) = flat[i + 10..].split('"').next() {
+            opts.insert(name.to_string());
         }
     }
     // the client namespace key is a wrapper, not a setting

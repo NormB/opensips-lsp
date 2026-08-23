@@ -123,20 +123,38 @@ fn the_shipped_admin_doc_follows_the_opensips_readme_standard() {
     let params: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
     // EVERY initialization option the server reads must be documented
     // inside the Exported Parameters section (a misplaced heading
-    // silently ejects entries from the harvested section)
-    for opt in [
-        "opensipsPath",
-        "opensipsSrc",
-        "checkTimeoutMs",
-        "analyzerDiagnostics",
-        "codeLensReferences",
-        "maxDiagnostics",
-        "snippetCompletions",
-        "cacheDir",
-    ] {
+    // silently ejects entries from the harvested section).
+    // The list is DERIVED from the server, not written out here.  A
+    // hand-maintained list cannot fail for the one thing it exists to
+    // catch: this check carried a literal array written before inlay
+    // hints existed, so new settings went undocumented while it
+    // reported green.
+    //
+    // Whitespace is stripped before scanning because rustfmt wraps the
+    // call as `opts\n.get("name")`, and an extraction looking for the
+    // literal `opts.get("` silently finds nothing there — a gate
+    // defeated by the formatter CI itself enforces.
+    let server = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/server.rs"))
+        .expect("src/server.rs");
+    let flat: String = server.chars().filter(|c| !c.is_whitespace()).collect();
+    let mut opts: Vec<String> = Vec::new();
+    for (i, _) in flat.match_indices("opts.get(\"") {
+        if let Some(name) = flat[i + 10..].split('"').next()
+            && name != "opensipsLsp"
+            && !opts.iter().any(|o| o == name)
+        {
+            opts.push(name.to_string());
+        }
+    }
+    assert!(
+        opts.len() >= 8,
+        "only {} init options found — the scan went blind: {opts:?}",
+        opts.len()
+    );
+    for opt in &opts {
         assert!(
-            params.contains(&opt),
-            "{opt} missing from params: {params:?}"
+            params.contains(&opt.as_str()),
+            "{opt} is read by the server but missing from docs/ADMIN.md params: {params:?}"
         );
     }
     assert!(

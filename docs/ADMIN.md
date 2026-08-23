@@ -110,6 +110,22 @@ Example:
 { "codeLensReferences": false }
 ```
 
+#### inlayHintParameterNames (boolean)
+
+Draw the parameter name from the documentation before each argument
+of a documented call, so `t_relay("udp", 1)` reads as
+`t_relay(flags: "udp", outbound_proxy: 1)` without the document
+changing. Only calls the catalogue knows are hinted, and the editor
+asks for the visible range only.
+
+Default: `true`.
+
+Example:
+
+```json
+{ "inlayHintParameterNames": false }
+```
+
 #### maxDiagnostics (integer)
 
 Bound on the diagnostics published per file.
