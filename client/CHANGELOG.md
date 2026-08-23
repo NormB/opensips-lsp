@@ -2,6 +2,19 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.12.0] — 2026-08-23
+
+- **Inlay hints**: arguments at a documented call site are labelled
+  with the parameter name the module's own documentation gives them,
+  so `t_relay("udp", 1)` reads as
+  `t_relay(flags: "udp", outbound_proxy: 1)` without the document
+  changing. Only calls the catalogue knows are hinted — which is what
+  keeps `if`, `while` and `route` out — and a call with more arguments
+  than the signature documents is hinted only as far as the signature
+  goes. Bracket markers and defaults are stripped to the name.
+  The editor asks for the visible range and only that is computed.
+  `opensipsLsp.inlayHints.parameterNames` turns them off, live.
+
 ## [0.11.0] — 2026-08-23
 
 - **Call hierarchy**: `textDocument/prepareCallHierarchy`,
