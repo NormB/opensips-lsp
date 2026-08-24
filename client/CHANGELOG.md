@@ -2,6 +2,33 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.18.0] — 2026-08-24
+
+- **Every module's functions and parameters now ship with the
+  extension.** 0.17.0 gave you the core language before you configured
+  anything; that left the half a real config is actually made of.
+  `is_method` is a `sipmsgops` function, not core, so with no source
+  tree `loadmodule "` offered nothing at all and a module call
+  completed to the core entries and stopped. 186 modules, 352
+  functions and 1300 parameters harvested from OpenSIPS 4.0.1 now ship
+  alongside. Module functions still appear only inside a config that
+  `loadmodule`s them — the built-ins never invite a call your config
+  cannot make.
+- **What the built-ins cannot know is what you compiled.** The module
+  list is what 4.0.1 documents, not what exists on your system; the
+  `-C` checker still reports a module it cannot load. Set `opensipsSrc`
+  and your own tree replaces the built-in catalogues wholesale — never
+  merged, because blending two versions is wrong in a way neither is
+  alone.
+- **Hover now reads the syntax before it guesses.** A global
+  `log_level=2` and `modparam("opentelemetry", "log_level", 2)` are two
+  different things that share a name, and your config already says
+  which one is on screen: the first is the core parameter, the second
+  is that module's. Previously, with a catalogue loaded, the global
+  hovered as the module's parameter — and a module you had not even
+  loaded could shadow the language. Both are fixed, and signature help
+  resolved in the same wrong order.
+
 ## [0.17.1] — 2026-08-24
 
 Documentation and test work; the server behaves exactly as 0.17.0 did.
