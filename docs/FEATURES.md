@@ -344,7 +344,8 @@ clients that can't pass options.
 - Snippet completions and static snippets compose: static snippets
   scaffold blocks, completion snippets fill in calls.
 - Include handling is capped for safety: depth 8, 64 files, 1 MiB
-  per file (OpenSIPS itself allows depth 50). The LSP resolves
+  per file (OpenSIPS itself caps includes at depth 20 —
+  `CFG_MAX_INCLUDE_DEPTH` in `cfg_pp.h`). The LSP resolves
   relative include paths against the including file's directory;
   note that at runtime OpenSIPS tries the process working directory
   FIRST and only then the including file's directory — a same-named

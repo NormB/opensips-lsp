@@ -5,12 +5,14 @@
 ### Overview
 
 `opensips-lsp` is a Language Server Protocol server for the OpenSIPS
-routing script language (`opensips.cfg`). It provides diagnostics,
-context-sensitive completion (modules, parameters, exported and core
-functions, pseudo-variables after `$`), hover documentation,
-go-to-definition for routes, and document symbols to any LSP-capable
-editor. Positions are exchanged in UTF-16 units per the LSP default,
-correct on multibyte lines.
+routing script language (`opensips.cfg`), for any LSP-capable editor.
+Positions are exchanged in UTF-16 units per the LSP default, correct
+on multibyte lines.
+
+The full capability list lives in [`FEATURES.md`](FEATURES.md) and is
+checked against the server on every build, so it cannot fall behind
+what ships. It is deliberately not repeated here: a second list is a
+second thing to forget.
 
 Semantic validation is delegated to OpenSIPS itself: the server runs
 `opensips -C -f <file>` and maps the parser's own errors
