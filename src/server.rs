@@ -1726,6 +1726,18 @@ impl LanguageServer for Backend {
                     }
                     let lt = Self::doc_line(&ftext, b.line);
                     let c = analyze::byte_to_utf16(&lt, b.col as usize);
+                    // LSP 3.17 deprecates `SymbolInformation` here in
+                    // favour of `WorkspaceSymbol`, and for this server
+                    // that is a distinction without a difference:
+                    // measured, the two encode BYTE-IDENTICALLY,
+                    // because the useful half of `WorkspaceSymbol` is
+                    // a location carrying only a URI, with the range
+                    // fetched later by `workspaceSymbol/resolve`.  The
+                    // ranges here are already in hand from the scan
+                    // that found the symbols, so the lazy form would
+                    // add a round-trip to deliver something already
+                    // computed.  Revisit only if these become
+                    // expensive to produce.
                     #[allow(deprecated)]
                     out.push(SymbolInformation {
                         name: format!("{}[{}]", b.kind, b.name),
