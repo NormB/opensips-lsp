@@ -2,6 +2,28 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.19.1] — 2026-08-24
+
+Nothing changes for VS Code users; this fixes the tree-sitter grammar
+for everyone else.
+
+- **The grammar could not be built by any editor it was offered to.**
+  `src/` was gitignored, so the generated `src/parser.c` was in no
+  commit — and that is the file every consumer builds from, none of
+  them running the CLI: nvim-treesitter fetches
+  `files = { "src/parser.c" }`, Helix and Zed compile that path
+  directly. The README has pointed Neovim, Helix and Zed users at this
+  grammar all along and not one of them could have used it. The
+  generated output is now committed, which is the conventional layout
+  for a tree-sitter grammar, and a gate regenerates and compares so it
+  cannot go stale.
+- **The Zed guide drops a workaround it never needed.** It was cloning
+  the repository and giving the grammar directory a git root of its
+  own, on the belief that Zed required one. Zed takes a `path` for a
+  grammar in a subdirectory — as do Helix (`subpath`) and
+  nvim-treesitter (`location`) — so the guide now points at the public
+  repository directly.
+
 ## [0.19.0] — 2026-08-24
 
 - **`#!` directives are now flagged as having no effect.** OpenSIPS has
