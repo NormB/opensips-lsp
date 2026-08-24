@@ -2,6 +2,20 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.16.0] — 2026-08-24
+
+- **`opensips*.cfg` is now recognised**, so `opensips-tls.cfg` and
+  `opensips-local.cfg` get language support without configuring
+  anything. `opensips.cfg` and `*.opensips.cfg` continue to work, and
+  the generic `.cfg` extension is still deliberately not claimed.
+- **The installer now tells you it opts you out of updates.**
+  `install.sh` sideloads a VSIX, and an editor never offers updates
+  for a sideloaded extension — it carries no marketplace metadata, so
+  an install can sit many releases behind with nothing indicating it.
+  The script, the PowerShell installer and the Getting Started guide
+  now say so, and name the two ways out: re-run the script, or install
+  from the Extensions view so updates arrive on their own.
+
 ## [0.15.2] — 2026-08-23
 
 - **This listing now describes what the extension actually does.** It
