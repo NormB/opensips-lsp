@@ -2,6 +2,29 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.19.0] — 2026-08-24
+
+- **`#!` directives are now flagged as having no effect.** OpenSIPS has
+  no preprocessor — its lexer starts a line comment at `#` and defines
+  no preprocessor token at all — so `#!ifdef USE_TCP` guards nothing
+  and `#!define X 5060` binds nothing. A config carried over from
+  Kamailio still parses while every conditional in it has quietly
+  stopped meaning anything, which is worth saying out loud. The
+  warning fires only on a comment that starts at that position and
+  only for keywords Kamailio's own lexer defines, so shebangs,
+  ordinary comments, and a directive parked inside a block comment are
+  left alone. Toggle with `opensipsLsp.diagnostics.analyzer`.
+- **The docs said the opposite.** `docs/FEATURES.md` and a comment in
+  the formatter both described `#!` lines as preprocessor directives
+  processed ahead of the parser. That was mirrored from the Kamailio
+  server, where it is true. Corrected, with the reason.
+- Internally: the analysis cache is now instrumented and gated, so a
+  change that recomputed on every keystroke would fail a test rather
+  than show up as a hot editor; CI gained an advisory gate
+  (`cargo audit`) and an MSRV job that builds with the exact toolchain
+  `rust-version` claims; and the client is installed from a lockfile
+  rather than resolved afresh on every build.
+
 ## [0.18.1] — 2026-08-24
 
 Documentation only; the server behaves exactly as 0.18.0 did.
