@@ -165,3 +165,82 @@ fn the_documented_cli_usage_is_the_real_usage() {
         "docs/EDITORS.md does not show the real usage line: {shown:?}"
     );
 }
+
+/// The Zed walkthrough in `docs/ZED.md` hands the reader a shell block
+/// to paste.  A block that no longer parses, or that has drifted from
+/// the reference copy of the same files in `docs/EDITORS.md`, is worse
+/// than no instructions: it fails halfway through, on their machine.
+fn fenced<'a>(doc: &'a str, lang: &str, after: &str) -> &'a str {
+    let from = doc
+        .find(after)
+        .unwrap_or_else(|| panic!("{after:?} not in the page"));
+    let fence = format!("```{lang}\n");
+    let start = doc[from..]
+        .find(&fence)
+        .unwrap_or_else(|| panic!("no {lang} block after {after:?}"))
+        + from
+        + fence.len();
+    let end = doc[start..].find("```").expect("unterminated block") + start;
+    &doc[start..end]
+}
+
+#[test]
+fn the_zed_walkthrough_is_valid_shell() {
+    let walk = read("docs/ZED.md");
+    let block = fenced(&walk, "sh", "## 1. Build the extension");
+    let dir = std::env::temp_dir().join(format!("oslsp-zed-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("block.sh");
+    std::fs::write(&path, block).unwrap();
+    let out = std::process::Command::new("bash")
+        .arg("-n")
+        .arg(&path)
+        .output()
+        .expect("bash");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        out.status.success(),
+        "docs/ZED.md hands the reader shell that does not parse:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn the_two_zed_pages_agree_on_the_extension_source() {
+    let walk = read("docs/ZED.md");
+    let reference = read("docs/EDITORS.md");
+
+    // the walkthrough embeds lib.rs in a heredoc inside its shell
+    // block; the reference shows it as a plain rust block
+    let shell = fenced(&walk, "sh", "## 1. Build the extension");
+    let start = shell.find("<<'RUST'\n").expect("lib.rs heredoc") + "<<'RUST'\n".len();
+    let end = shell[start..].find("\nRUST\n").expect("heredoc end") + start;
+    let embedded = shell[start..end].trim();
+    let shown = fenced(&reference, "rust", "## Zed").trim();
+    assert_eq!(
+        embedded, shown,
+        "docs/ZED.md and docs/EDITORS.md disagree about the extension source"
+    );
+
+    // and both must pin the same API version
+    let pin = |t: &str| {
+        let i = t.find("zed_extension_api = ").expect("the api pin");
+        t[i..].lines().next().unwrap().to_string()
+    };
+    assert_eq!(
+        pin(&walk),
+        pin(&reference),
+        "the two pages pin different zed_extension_api versions"
+    );
+}
+
+/// The walkthrough is only reachable if something points at it.
+#[test]
+fn the_zed_walkthrough_is_linked_from_the_pages_that_should_lead_there() {
+    for (page, needle) in [("README.md", "docs/ZED.md"), ("docs/EDITORS.md", "ZED.md")] {
+        assert!(
+            read(page).contains(needle),
+            "{page} never links the Zed walkthrough"
+        );
+    }
+}

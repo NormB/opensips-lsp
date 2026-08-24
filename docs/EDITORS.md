@@ -278,6 +278,10 @@ impl zed::Extension for OpensipsExtension {
 zed::register_extension!(OpensipsExtension);
 ```
 
+The step-by-step version of all of this, including getting the grammar
+into a repository of its own and what to do when it does not work, is
+[`docs/ZED.md`](ZED.md).
+
 Then open the extensions page, run **`zed: install dev extension`**,
 and pick the directory. Zed builds it; `zed: open log` or
 `zed --foreground` shows what happened if it does not appear.

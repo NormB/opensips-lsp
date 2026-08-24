@@ -114,6 +114,8 @@ tests run in CI; `tree-sitter generate` builds the parser locally.
   Neovim, coc.nvim, Helix, Emacs, Vim, Sublime Text, Kate and
   JetBrains (LSP4IJ), plus any other LSP client, plus using the
   `check` CLI in CI and git hooks with no editor at all.
+- [`docs/ZED.md`](docs/ZED.md) — Zed step by step: Zed needs a small
+  WebAssembly extension, and this builds one for you.
 - API docs: `cargo doc --open` (`missing_docs` is `deny`).
 
 ## Editors
