@@ -172,6 +172,36 @@ The readiness log message says `, cached` on a hit. Override the
 location with the `OPENSIPS_LSP_CACHE_DIR` environment variable
 (env-only knob); delete the directory to force a re-harvest.
 
+### Data handling
+
+Nothing the server reads leaves the machine. No HTTP client is linked
+into the binary, it opens no sockets, and it speaks JSON-RPC to the
+editor over stdin and stdout. There is no telemetry, no analytics, no
+crash reporting and no update check, and no language model is involved
+at any point: hover and completion text is parsed from OpenSIPS's own
+documentation on disk rather than generated.
+
+Everything it touches is local:
+
+- **Read** — the open configuration and every file its
+  `include_file`/`import_file` closure names, plus the configured `opensipsSrc` tree.
+- **Written** — the documentation catalog cache described under
+  Caching above. It holds harvested documentation only; configuration
+  text is never written to it.
+- **Executed** — the `opensipsPath` binary, once per check, under the
+  constraints described under Security below.
+
+Two caveats matter where configuration content is sensitive:
+
+- `trace.server` set to `messages` or `verbose` writes the LSP traffic
+  — which carries the full text of every open configuration — into the
+  editor's output channel. It stays on the machine, but it is the one
+  place configuration text lands in a log that is easy to attach to a
+  bug report. The default is `off`.
+- The editor is a separate trust domain. Its own telemetry, and any
+  extension with access to the buffer, see the configuration whatever
+  this server does.
+
 ### Security
 
 `opensips -C` **dlopens the modules the configuration loads**, so
