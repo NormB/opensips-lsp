@@ -433,6 +433,45 @@ pub fn builtin_core() -> &'static BuiltinCore {
     })
 }
 
+/// The vendored module catalogue: every module the pinned release
+/// documents, with its exported functions and parameters.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BuiltinModules {
+    /// The OpenSIPS version the docs were harvested from.
+    pub version: String,
+    /// One entry per documented module.
+    pub modules: Vec<ModuleDoc>,
+}
+
+/// The built-in module catalogue, used when no source tree is
+/// configured.
+///
+/// `is_method` is a `sipmsgops` function, not core, so the core
+/// catalogue alone still left every module call undocumented and
+/// `loadmodule "` offering nothing at all.  What a module exports does
+/// move between releases — which is exactly why a configured tree
+/// REPLACES this wholesale rather than merging with it: two versions
+/// blended together would be wrong in a way neither is on its own.
+/// Every built-in entry says which version it came from.
+pub fn builtin_modules() -> &'static BuiltinModules {
+    static B: std::sync::OnceLock<BuiltinModules> = std::sync::OnceLock::new();
+    B.get_or_init(|| {
+        let mut b: BuiltinModules = serde_json::from_str(include_str!("modules_builtin.json"))
+            .expect("the vendored module catalogue must parse");
+        let note = format!(
+            "\n\n*Built-in documentation from OpenSIPS {} — set `opensipsSrc` \
+             to your own source tree for version-exact docs.*",
+            b.version
+        );
+        for m in b.modules.iter_mut() {
+            for it in m.functions.iter_mut().chain(m.params.iter_mut()) {
+                it.doc.push_str(&note);
+            }
+        }
+        b
+    })
+}
+
 /// Harvest the core-language docs from an OpenSIPS 4.x source tree;
 /// missing or unparsable pages simply yield empty sections.
 pub fn harvest_core(tree_root: &Path) -> CoreDocs {

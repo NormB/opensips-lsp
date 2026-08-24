@@ -107,9 +107,11 @@ fn complete(
 #[test]
 fn a_global_parameter_completes_with_no_source_tree_configured() {
     let (mut child, rx, mut stdin, uri, ready) = boot("params", "log_\n");
+    // the line reads "core docs" alone or "core and module docs"
+    // depending on what the harvest left empty; both must name core
     assert!(
-        ready.contains("core docs built in from"),
-        "the readiness line must say the docs are built in: {ready}"
+        ready.contains("built in from") && ready.contains("core"),
+        "the readiness line must say the core docs are built in: {ready}"
     );
 
     let labels = complete(&mut stdin, &rx, &uri, 2, 0, 4);
@@ -173,6 +175,68 @@ fn hover_on_a_built_in_entry_names_the_version_and_the_escape_hatch() {
     assert!(
         text.contains("opensipsSrc"),
         "hover must name the setting that overrides it: {text:?}"
+    );
+    let _ = child.kill();
+}
+
+/// `is_method` is a `sipmsgops` function, and it was the case that
+/// made the core-only fallback look incomplete: the language
+/// completed, but nothing a real config actually calls did.
+#[test]
+fn a_module_function_completes_with_no_source_tree_configured() {
+    let (mut child, rx, mut stdin, uri, ready) = boot(
+        "modfn",
+        "loadmodule \"sipmsgops.so\"\nroute {\n    is_\n}\n",
+    );
+    assert!(
+        ready.contains("module docs built in from"),
+        "the readiness line must say module docs are built in: {ready}"
+    );
+    let labels = complete(&mut stdin, &rx, &uri, 2, 2, 7);
+    assert!(
+        labels.contains(&"is_method".to_string()),
+        "is_method must complete once sipmsgops is loaded; got {} items",
+        labels.len()
+    );
+    let _ = child.kill();
+}
+
+/// The built-ins must not defeat the loaded-module rule.  Offering
+/// every module's functions everywhere would be worse than offering
+/// none: it invites calls the config cannot make.
+#[test]
+fn a_module_function_stays_hidden_until_its_module_is_loaded() {
+    let (mut child, rx, mut stdin, uri, _) =
+        boot("modgate", "loadmodule \"tm.so\"\nroute {\n    is_\n}\n");
+    let labels = complete(&mut stdin, &rx, &uri, 2, 2, 7);
+    assert!(
+        !labels.contains(&"is_method".to_string()),
+        "sipmsgops is not loaded, so is_method must not be offered"
+    );
+    // ...while the module that IS loaded contributes normally
+    let labels = complete(&mut stdin, &rx, &uri, 3, 2, 7);
+    assert!(
+        !labels.is_empty(),
+        "tm's own functions should still be there"
+    );
+    let _ = child.kill();
+}
+
+/// With no tree there were no module NAMES either, so the first thing
+/// anyone types in a fresh config completed to nothing.
+#[test]
+fn module_names_complete_inside_loadmodule_with_nothing_configured() {
+    let (mut child, rx, mut stdin, uri, _) = boot("modnames", "loadmodule \"");
+    let labels = complete(&mut stdin, &rx, &uri, 2, 0, 12);
+    assert!(
+        labels.len() > 100,
+        "the whole module set should be offered, not {} items",
+        labels.len()
+    );
+    assert!(
+        labels.iter().any(|l| l.starts_with("sipmsgops")),
+        "sipmsgops must be offerable: {:?}",
+        &labels[..labels.len().min(10)]
     );
     let _ = child.kill();
 }

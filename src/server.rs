@@ -1075,17 +1075,36 @@ impl LanguageServer for Backend {
         if builtin {
             *self.core.write().unwrap() = catalog::builtin_core().core.clone();
         }
+        // The same argument one level up: `is_method` is a sipmsgops
+        // function, so a core-only fallback still left every module
+        // call undocumented and `loadmodule "` offering nothing.  What
+        // a module exports moves between releases, so a harvested tree
+        // REPLACES this rather than merging — blending two versions
+        // would be wrong in a way neither is alone.
+        let builtin_mods = self.catalog.read().unwrap().is_empty();
+        if builtin_mods {
+            *self.catalog.write().unwrap() = catalog::builtin_modules().modules.clone();
+        }
         let n = self.catalog.read().unwrap().len();
         let c = self.core.read().unwrap().functions.len();
-        let tag = if cached { ", cached" } else { "" };
-        let tag = if builtin {
-            format!(
-                "{tag}, core docs built in from {}",
-                catalog::builtin_core().version
-            )
+        let mut tag = if cached {
+            ", cached".to_string()
         } else {
-            tag.to_string()
+            String::new()
         };
+        if builtin || builtin_mods {
+            let what = match (builtin, builtin_mods) {
+                (true, true) => "core and module docs",
+                (true, false) => "core docs",
+                _ => "module docs",
+            };
+            let version = if builtin {
+                &catalog::builtin_core().version
+            } else {
+                &catalog::builtin_modules().version
+            };
+            tag.push_str(&format!(", {what} built in from {version}"));
+        }
         self.client
             .log_message(
                 MessageType::INFO,

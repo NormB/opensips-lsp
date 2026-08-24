@@ -289,23 +289,43 @@ support and then never answers cannot stall startup. The tree usually
 lives outside the workspace, so its watcher is a relative pattern
 rooted at the tree.
 
-#### Core language, before you configure anything
+#### Documentation before you configure anything
 
-The core language — parameters, functions and pseudo-variables like
-`log_level`, `socket`, `mpath` — is not a module, so it should not need a source tree to
-complete. A catalogue harvested from OpenSIPS 4.0.1 ships with the
-extension and is used when no source tree is configured, which is why
-`log_`-style completion works on a fresh install.
+Two catalogues — the core language and every documented module — are
+built in, harvested from OpenSIPS 4.0.1 and used when no source tree
+is configured:
 
-It is clearly labelled: hover any built-in entry and it says which
+- **the core language** — parameters, functions and pseudo-variables
+  like `log_level`, `socket`, `mpath`, which are not a module at all;
+- **every documented module** — 186 of them, with their exported
+  functions and parameters, so `loadmodule "` offers real names and a
+  call like `is_method` completes and hovers.
+
+Both are clearly labelled: hover any built-in entry and it says which
 version the documentation came from and that setting `opensipsSrc`
-gives you docs exact for your own build. A configured source tree always
-wins — being exact for the version you actually run is the whole
-point of harvesting in the first place.
+gives you docs exact for your own build. A configured source tree
+always wins, and **replaces** a built-in catalogue rather than merging
+with it — blending two versions would be wrong in a way neither is on
+its own.
 
-Module documentation is deliberately NOT shipped this way. What
-modules exist and what they export depends on what you built, so
-there is no honest version to pin it to.
+Shipping the module half reverses an earlier decision, which said
+there was no honest version to pin module docs to because what modules
+exist depends on what you built. That objection was right about the
+risk and wrong about the remedy: it applies equally to core parameters,
+which move between releases too, and the answer in both cases is
+provenance plus a total override rather than silence. Two things keep
+it honest:
+
+- **the loaded-module rule still holds** — a module's functions are
+  offered only inside a config that `loadmodule`s it, so the built-ins
+  never invite a call the config cannot make;
+- **the checker has the last word** — `-C` loads the modules a config
+  references, so a module you have not built is reported as a
+  diagnostic on the `loadmodule` line itself.
+
+What the built-ins cannot tell you is whether a module is installed on
+*your* system: the name list is what 4.0.1 documents, not what you
+compiled.
 
 #### CLI check mode
 

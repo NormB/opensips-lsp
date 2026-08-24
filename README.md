@@ -54,7 +54,7 @@ Via LSP `initializationOptions` (or environment fallback):
 | Option | Env | Default | Meaning |
 |---|---|---|---|
 | `opensipsPath` | `OPENSIPS_LSP_BIN` | `opensips` | Binary used for `-C` diagnostics. |
-| `opensipsSrc` | `OPENSIPS_LSP_SRC` | *(none)* | Source tree to harvest module docs from. The core language does not need it: a catalogue harvested from OpenSIPS 4.0.1 ships with the server and is used whenever no tree is configured, so `log_level` and friends complete on a fresh install. A configured tree always wins. |
+| `opensipsSrc` | `OPENSIPS_LSP_SRC` | *(none)* | Source tree to harvest documentation from. Not needed to get started: the core language and all 186 documented modules are built in, harvested from OpenSIPS 4.0.1 and used whenever no tree is configured, so `log_level`, `loadmodule "` and `is_method` all complete on a fresh install. A configured tree wins and replaces them wholesale, which is what you want when your build differs from 4.0.1. |
 
 Diagnostics fidelity note: `-C` loads the modules the cfg references,
 so it needs a tree/installation where those `.so` files exist (an
