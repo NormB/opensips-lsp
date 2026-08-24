@@ -2,6 +2,28 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.18.1] — 2026-08-24
+
+Documentation only; the server behaves exactly as 0.18.0 did.
+
+- **Every editor is documented, not just VS Code.** The server speaks
+  LSP 3.17 over stdio, so any LSP client can drive it, and
+  `docs/EDITORS.md` now has worked examples for Neovim, coc.nvim,
+  Helix, Emacs, Vim, Sublime Text, Kate and JetBrains (via LSP4IJ) —
+  plus using `check` in CI or a git hook with no editor at all.
+- **Zed has a step-by-step guide**, `docs/ZED.md`. Zed cannot be
+  pointed at a language server from settings alone; it needs a small
+  WebAssembly extension, and the guide's shell block builds one,
+  including giving the tree-sitter grammar the repository of its own
+  that Zed requires.
+- **The examples were wrong in ways that mattered.** They told every
+  non-VS-Code client to match `opensips.cfg` and nothing else, long
+  after the association widened to `opensips*.cfg` and
+  `*.opensips.cfg`; they told Helix to claim *every* `.cfg` file, which
+  is the one thing this extension refuses to do; and they presented
+  `opensipsSrc` as the way to get documentation, which stopped being
+  true in 0.18.0. All corrected, and gated so they cannot drift again.
+
 ## [0.18.0] — 2026-08-24
 
 - **Every module's functions and parameters now ship with the
