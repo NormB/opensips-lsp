@@ -2,6 +2,24 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.17.0] — 2026-08-24
+
+- **The core language completes out of the box.** Typing `log_` used
+  to offer nothing until you pointed `opensipsSrc` at a source tree —
+  19 control-flow keywords was the whole vocabulary. A catalogue
+  harvested from OpenSIPS 4.0.1 (66 functions, 97 parameters, 119
+  pseudo-variables) now ships with the extension and fills that in.
+  Hover on any built-in entry says which version it came from; set
+  `opensipsSrc` and your own tree wins, because only that is exact for
+  the build you run. Module documentation is still tree-only — what
+  modules exist depends on what you built.
+- **`exit` no longer completes as `exit()`.** It is documented among
+  the core functions, so with a tree configured it inserted a snippet
+  for a statement written `exit;`. Statement keywords stay statements.
+- **Hover no longer comes back empty for `exit` and friends**, where a
+  bare keyword used to beat the documented entry purely by arriving
+  first.
+
 ## [0.16.0] — 2026-08-24
 
 - **`opensips*.cfg` is now recognised**, so `opensips-tls.cfg` and

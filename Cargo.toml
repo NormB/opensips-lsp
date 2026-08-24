@@ -1,6 +1,6 @@
 [package]
 name = "opensips-lsp"
-version = "0.16.0"
+version = "0.17.0"
 edition = "2024"
 description = "Language Server Protocol implementation for the OpenSIPS routing script language"
 license = "MIT OR Apache-2.0"
