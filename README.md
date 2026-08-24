@@ -155,6 +155,44 @@ Semantic truth stays in OpenSIPS itself (`-C`); the server never
 guesses about grammar validity, so it is automatically correct for
 whatever OpenSIPS version it is pointed at.
 
+## Data handling
+
+Nothing this server sees leaves your machine. There is no network
+client in it: the crate links no HTTP library — check `Cargo.lock` —
+opens no sockets, and speaks JSON-RPC to your editor over
+stdin/stdout. No telemetry, no analytics, no crash reporting, no
+update check, and no model: hover and completion text is parsed out
+of OpenSIPS's own documentation on disk, never generated.
+
+What it touches, all of it local:
+
+- **Reads** — the cfg you opened and every file its
+  `include_file`/`import_file` closure names, plus the `opensipsSrc`
+  tree you configure.
+- **Writes** — one documentation-catalog cache under `cacheDir`
+  (default: the platform cache directory). It holds *documentation*
+  harvested from that tree; your configuration is never written
+  to it.
+- **Runs** — your own `opensips` binary, as `opensips -C` on the file
+  you opened, to produce diagnostics. That is code execution; see
+  [Security note](#security-note) for what gates it.
+
+Two caveats worth knowing:
+
+- Setting `opensipsLsp.trace.server` to `messages` or `verbose` echoes
+  the LSP traffic — which carries your cfg text — into the editor's
+  output channel. It stays on the machine, but it is the one place
+  config content lands in a log that is easy to paste into a bug
+  report. The default is `off`.
+- Your editor is a separate question. Its own telemetry, an AI
+  assistant extension, or anything else with access to the buffer sees
+  what you type regardless of what this server does. That boundary is
+  outside this project.
+
+The only outbound connection anywhere in this repository is
+`install.sh`/`install.ps1` fetching a release from GitHub, and your
+editor fetching the extension. Both are downloads.
+
 ## Security note
 
 `opensips -C` **dlopens the modules the cfg loads** — their

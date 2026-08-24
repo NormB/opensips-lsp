@@ -131,6 +131,16 @@ None to start — the server is bundled. Optional, for the full
 experience: an `opensips` binary (diagnostics) and an OpenSIPS source
 tree (documentation). Supports OpenSIPS 4.0.x and 3.6.x.
 
+## Privacy
+
+Everything stays on your machine. The extension talks to a local
+server over stdin/stdout: no HTTP client is linked into it, there is
+no telemetry or analytics, and no model is involved — hover and
+completion text is parsed from OpenSIPS's own documentation on disk.
+The only program it runs is your own `opensips` binary, for `-C`
+diagnostics. Your editor's own telemetry, and any AI extension you
+have installed, are a separate matter from this one.
+
 ## Links
 
 [Repository](https://github.com/NormB/opensips-lsp) ·
