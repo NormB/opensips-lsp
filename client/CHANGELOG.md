@@ -2,6 +2,29 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.19.2] — 2026-08-24
+
+Documentation only; the server and the extension behave exactly as
+0.19.1 did.
+
+- **What this extension does with your configuration is now written
+  down.** Someone evaluating it asked whether anything parsed from
+  their `opensips.cfg` is sent to a cloud service or a language model
+  — a fair question about a file that carries customer names,
+  credentials and dial plans, and one no page here answered. The
+  answer was already no: no HTTP client is linked into the server, the
+  transport is stdin/stdout, the only program it runs is your own
+  `opensips` binary, and hover and completion text is parsed from
+  OpenSIPS's documentation on disk rather than generated. This
+  listing, the README and `SECURITY.md` now say so — with the two
+  caveats that matter, that `trace.server` echoes cfg text into the
+  editor's output channel and that your editor's own telemetry is not
+  this server's to control.
+- **The no-network property is now a reportable security claim.**
+  `SECURITY.md` puts any path by which configuration content, file
+  paths or environment values reach the network in scope, which makes
+  the guarantee falsifiable instead of promotional.
+
 ## [0.19.1] — 2026-08-24
 
 Nothing changes for VS Code users; this fixes the tree-sitter grammar
