@@ -78,7 +78,9 @@ extension and it just works.
    Linux, macOS, and Windows, x64 and arm64).
 2. Open a folder containing an `opensips.cfg` — syntax colors,
    completion, and navigation work immediately. Files named
-   `opensips.cfg` or `*.opensips.cfg` are recognized automatically;
+   `opensips.cfg`, `opensips*.cfg` (so `opensips-tls.cfg` and
+   `opensips-local.cfg` work) or `*.opensips.cfg` are recognized
+   automatically;
    for other names (split configs, includes) add a
    [`files.associations`](https://code.visualstudio.com/docs/languages/identifiers)
    entry mapping them to `opensips-cfg` — the generic `.cfg`

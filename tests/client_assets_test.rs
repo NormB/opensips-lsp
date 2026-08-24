@@ -78,4 +78,41 @@ fn file_association_does_not_claim_every_cfg_file() {
         patterns.iter().any(|p| p == "*.opensips.cfg"),
         "a dedicated pattern for split configs: {patterns:?}"
     );
+
+    // Every pattern the extension claims must be documented where a
+    // user will look: widening the association silently is how you
+    // end up hijacking someone's file with no explanation on the page
+    // they read.
+    let listing =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/client/README.md")).unwrap();
+    for p in &patterns {
+        let p = p.as_str().unwrap();
+        assert!(
+            !p.starts_with("*.cfg") && p != "*",
+            "{p} is as broad as claiming every .cfg"
+        );
+        assert!(
+            listing.contains(p),
+            "client/README.md does not tell the reader that {p} is claimed"
+        );
+    }
+    // A first-line marker, if used, must be one the real lexer
+    // defines — inventing a marker would claim files on a rule the
+    // parser has never heard of.
+    if let Some(first) = lang["firstLine"].as_str() {
+        assert!(
+            first.starts_with("^#!"),
+            "a first-line rule must anchor on the script-type marker: {first}"
+        );
+        for marker in ["KAMAILIO", "OPENSER", "SER", "MAXCOMPAT", "ALL"] {
+            assert!(
+                first.contains(marker),
+                "{marker} is a script type src/core/cfg.lex accepts; the rule omits it"
+            );
+        }
+        assert!(
+            listing.contains("#!KAMAILIO"),
+            "client/README.md must say a first-line marker is honoured"
+        );
+    }
 }

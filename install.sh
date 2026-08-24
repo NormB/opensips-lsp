@@ -74,6 +74,12 @@ if [ -n "$INSTALLED_EDITOR" ]; then
     say "Optional settings (File > Preferences > Settings, search 'opensips'):"
     say "  - Opensips Path: your opensips binary (enables live error checking)"
     say "  - Opensips Src:  an OpenSIPS source tree (richer completion docs)"
+    say
+    say "NOTE: installing from a file means your editor will NOT"
+    say "      offer updates for this extension — a sideloaded VSIX"
+    say "      carries no marketplace metadata. To get updates, either"
+    say "      re-run this script, or install it from the Extensions"
+    say "      view instead (Open VSX editors: VSCodium, Cursor, ...)."
 else
     say
     say "No 'code'/'code-insiders'/'codium' command was found, so the"

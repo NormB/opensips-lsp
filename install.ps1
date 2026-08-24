@@ -33,6 +33,13 @@ foreach ($editor in 'code', 'code-insiders', 'codium') {
         $installed = $true
     }
 }
+if ($installed) {
+    Write-Host ""
+    Write-Host "NOTE: installing from a file means your editor will NOT offer"
+    Write-Host "      updates for this extension - a sideloaded VSIX carries no"
+    Write-Host "      marketplace metadata. To get updates, either re-run this"
+    Write-Host "      script, or install it from the Extensions view instead."
+}
 if (-not $installed) {
     Write-Host "No editor CLI found. Install the extension by hand:"
     Write-Host "  1. Download: https://github.com/$repo/releases/download/$tag/opensips-lsp-ext-$tag.vsix"

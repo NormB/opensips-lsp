@@ -23,6 +23,14 @@ the extension for you) or Option C.
 
 ### Option B — one command in a terminal
 
+> **Updates:** this route installs the extension from a downloaded
+> file, and an editor never offers updates for a sideloaded VSIX — it
+> carries no marketplace metadata. Re-run the script to update, or use
+> Option A on an Open VSX editor to have updates arrive on their own.
+> (If you are already on an old version this way, the Extensions view's
+> **Install Specific Version…** will move you across.)
+
+
 **Windows (PowerShell):**
 
 ```powershell
