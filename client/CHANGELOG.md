@@ -2,6 +2,26 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.17.1] — 2026-08-24
+
+Documentation and test work; the server behaves exactly as 0.17.0 did.
+
+- **The getting-started guide had the file-association rule wrong in
+  both directions.** It said a config must be named `opensips.cfg` "or
+  end in `.cfg`". Neither half was true: `opensips-proxy.cfg` is
+  claimed, a plain `foo.cfg` is not, and refusing to claim every
+  `.cfg` on your disk is deliberate. Corrected, and the gate that
+  should have caught it now reads that page too — it only ever read
+  the marketplace listing.
+- **`README.md` still presented `opensipsSrc` as the only way to get
+  documentation**, and the guide told you to go and set it when
+  completion showed no docs. Wrong for every core entry since 0.17.0.
+  Both now say the core language is documented out of the box, and a
+  new gate holds every page a new user reads to that claim.
+- Internally: the built-in catalogue is now proven over real LSP
+  stdio rather than only at the library level, and test fixtures clean
+  themselves up when a test fails instead of only when it passes.
+
 ## [0.17.0] — 2026-08-24
 
 - **The core language completes out of the box.** Typing `log_` used
