@@ -110,9 +110,14 @@ every time you save.
 - Type `$` — pseudo-variables (`$ru`, `$si`, …) with descriptions.
 - If a list ever disappears, press **Ctrl+Space** to bring it back.
 
-For the richest documentation in these popups, also set
-**Opensips Lsp: Opensips Src** (in the same Settings page) to a
-folder containing the OpenSIPS source code matching your version.
+The core language — `log_level` and the other globals, core
+functions, and pseudo-variables — is documented out of the box: the
+extension ships a catalogue harvested from OpenSIPS 4.0.1, and hover
+tells you so. Module documentation is a different matter, because
+which modules exist depends on what you built: for that, and for core
+docs exact to your own version, set **Opensips Lsp: Opensips Src** (in
+the same Settings page) to a folder containing the OpenSIPS source
+code matching your version.
 
 ### Reading and moving around
 
@@ -127,8 +132,8 @@ folder containing the OpenSIPS source code matching your version.
 
 | Symptom | Fix |
 |---|---|
-| No colors | The file must be named `opensips.cfg` or end in `.cfg`. |
+| No colors | The file has to match one of the claimed names: `opensips.cfg`, `opensips*.cfg` (so `opensips-proxy.cfg` works), or `*.opensips.cfg`. A plain `.cfg` is not enough — the extension deliberately does not claim every `.cfg` on your disk. |
 | No red squiggles | Set **Opensips Path** (step above), save the file, and make sure you trusted the folder. |
 | Squiggles on a correct file | The checker uses *your* OpenSIPS version — a config written for another version can legitimately fail. |
-| Completion has no documentation | Set **Opensips Src** to an OpenSIPS source folder. |
+| Completion has no documentation | Core functions, parameters and pseudo-variables carry built-in documentation, so this only applies to **module** entries: set **Opensips Src** to an OpenSIPS source folder to get those, and to replace the built-in core docs with ones exact to your build. |
 | Still stuck | **View → Output**, pick **OpenSIPS LSP** in the dropdown — the server explains what it is doing (e.g. "ready (193 documented modules)"). |

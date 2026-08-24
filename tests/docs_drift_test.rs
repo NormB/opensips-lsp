@@ -266,3 +266,56 @@ fn the_settings_table_renders_as_one_table() {
     );
     assert!(total > 8, "settings table has only {total} rows");
 }
+
+/// Behaviour a user meets on a fresh install has to be on the pages a
+/// fresh user reads.
+///
+/// The vendored core catalogue shipped in 0.17.0 and was described in
+/// `docs/FEATURES.md` and the marketplace listing, while `README.md`
+/// still presented `opensipsSrc` as the only way to get documentation
+/// and the getting-started guide told people to go and set it.  The
+/// capability gate above cannot see that: a built-in catalogue is not
+/// an LSP capability, so nothing tied it to a page.
+///
+/// The claim is checked per PARAGRAPH, not per page or per line.  Per
+/// page is too loose — `docs/GETTING_STARTED.md` already said "ships
+/// with" about the server binary and would have passed while saying
+/// nothing about documentation.  Per line is too tight, because the
+/// prose is hard-wrapped and the words land on different lines.
+#[test]
+fn the_built_in_core_catalogue_is_documented_where_a_new_user_reads() {
+    // derived from the source, so removing the fallback retires the
+    // requirement instead of leaving a gate demanding a dead feature
+    assert!(
+        read("src/server.rs").contains("catalog::builtin_core()"),
+        "the fallback is gone — retire this gate with it"
+    );
+
+    const MARKERS: &[&str] = &[
+        "built-in",
+        "built in",
+        "ships with",
+        "out of the box",
+        "without configuring",
+    ];
+    let mut missing = Vec::new();
+    for page in [
+        "README.md",
+        "docs/FEATURES.md",
+        "docs/GETTING_STARTED.md",
+        "client/README.md",
+    ] {
+        let text = read(page).to_lowercase();
+        let claimed = text
+            .split("\n\n")
+            .any(|para| para.contains("core") && MARKERS.iter().any(|m| para.contains(m)));
+        if !claimed {
+            missing.push(page);
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "no paragraph on these pages tells the reader the core language is \
+         documented without configuring anything: {missing:?}"
+    );
+}

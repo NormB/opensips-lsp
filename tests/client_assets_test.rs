@@ -83,18 +83,37 @@ fn file_association_does_not_claim_every_cfg_file() {
     // user will look: widening the association silently is how you
     // end up hijacking someone's file with no explanation on the page
     // they read.
-    let listing =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/client/README.md")).unwrap();
+    // Both pages count.  The marketplace listing is what a prospective
+    // user reads; the getting-started guide is where someone whose
+    // file has no colours actually goes, and its "No colors" row said
+    // a plain `.cfg` was enough long after the patterns had moved on.
+    let pages = [
+        (
+            "client/README.md",
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/client/README.md"))
+                .unwrap(),
+        ),
+        (
+            "docs/GETTING_STARTED.md",
+            std::fs::read_to_string(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/docs/GETTING_STARTED.md"
+            ))
+            .unwrap(),
+        ),
+    ];
     for p in &patterns {
         let p = p.as_str().unwrap();
         assert!(
             !p.starts_with("*.cfg") && p != "*",
             "{p} is as broad as claiming every .cfg"
         );
-        assert!(
-            listing.contains(p),
-            "client/README.md does not tell the reader that {p} is claimed"
-        );
+        for (name, text) in &pages {
+            assert!(
+                text.contains(p),
+                "{name} does not tell the reader that {p} is claimed"
+            );
+        }
     }
     // A first-line marker, if used, must be one the real lexer
     // defines — inventing a marker would claim files on a rule the
@@ -110,9 +129,11 @@ fn file_association_does_not_claim_every_cfg_file() {
                 "{marker} is a script type src/core/cfg.lex accepts; the rule omits it"
             );
         }
-        assert!(
-            listing.contains("#!KAMAILIO"),
-            "client/README.md must say a first-line marker is honoured"
-        );
+        for (name, text) in &pages {
+            assert!(
+                text.contains("#!KAMAILIO"),
+                "{name} must say a first-line marker is honoured"
+            );
+        }
     }
 }
