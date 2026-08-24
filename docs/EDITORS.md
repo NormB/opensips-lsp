@@ -1,19 +1,37 @@
-# Editor setup
+# Editor and tool setup
+
+The server speaks LSP 3.17 over stdio and knows nothing about any
+particular editor, so **any LSP client can drive it**. The sections
+below are worked examples for the clients people actually use; if
+yours is not here, the shape is always the same — run `opensips-lsp`,
+speak LSP on its stdin/stdout, and pass the settings either as
+`initializationOptions` or as environment variables.
 
 Install the server first — either grab a prebuilt binary from the
 [releases page](https://github.com/NormB/opensips-lsp/releases)
-(Linux/macOS tarballs and Windows zips, x86_64 and aarch64/arm64), or `cargo build --release` and put
-`target/release/opensips-lsp` on PATH.
-All examples pass the same three `initializationOptions` documented
-in `docs/ADMIN.md`.
+(Linux/macOS tarballs and Windows zips, x86_64 and aarch64/arm64), or
+`cargo build --release` and put `target/release/opensips-lsp` on PATH.
 
-## VS Code
+**You do not need a source tree to get started.** The core language
+and all documented modules are built in, harvested from OpenSIPS
+4.0.1, so completion and hover work immediately. Set `opensipsSrc`
+when you want documentation exact to your own build — it replaces the
+built-in catalogues wholesale. Every setting is optional; the full
+list is in [`docs/FEATURES.md`](FEATURES.md).
+
+## Which files the server should be given
+
+The VS Code extension claims `opensips.cfg`, `opensips*.cfg` (so
+`opensips-proxy.cfg` works) and `*.opensips.cfg`. It deliberately does
+NOT claim every `.cfg` on disk — that would hijack unrelated files.
+Configure your client to match the same set rather than a bare `.cfg`
+glob.
+
+## VS Code / VSCodium
 
 **Novice?** Use the [Getting Started guide](GETTING_STARTED.md)
 instead — one-command install and full usage walkthrough. The notes
 below are for building the extension from source.
-
-Use the bundled extension in `client/`:
 
 ```sh
 cd client && npm install && npm run compile
@@ -21,19 +39,29 @@ npx @vscode/vsce package        # produces opensips-lsp-ext-<version>.vsix
 code --install-extension opensips-lsp-ext-*.vsix
 ```
 
-Settings: `opensipsLsp.serverPath`, `opensipsLsp.opensipsPath`,
-`opensipsLsp.opensipsSrc`, `opensipsLsp.checkTimeoutMs`.
+Settings live under the `opensipsLsp.` prefix — `opensipsLsp.serverPath`,
+`opensipsLsp.opensipsPath`, `opensipsLsp.opensipsSrc`,
+`opensipsLsp.checkTimeoutMs`, and the rest listed in
+[`docs/FEATURES.md`](FEATURES.md).
 
 ## Neovim (0.10+, built-in LSP)
 
 ```lua
-vim.filetype.add({ filename = { ["opensips.cfg"] = "opensips-cfg" } })
+vim.filetype.add({
+  filename = { ["opensips.cfg"] = "opensips-cfg" },
+  pattern = {
+    ["opensips.*%.cfg"] = "opensips-cfg",
+    [".*%.opensips%.cfg"] = "opensips-cfg",
+  },
+})
 vim.api.nvim_create_autocmd("FileType", {
   pattern = "opensips-cfg",
   callback = function()
     vim.lsp.start({
       name = "opensips-lsp",
       cmd = { "opensips-lsp" },
+      root_dir = vim.fs.dirname(vim.api.nvim_buf_get_name(0)),
+      -- every option is optional; omit the table for built-in docs
       init_options = {
         opensipsPath = "/usr/local/sbin/opensips",
         opensipsSrc = "/path/to/opensips",
@@ -42,6 +70,24 @@ vim.api.nvim_create_autocmd("FileType", {
     })
   end,
 })
+```
+
+## coc.nvim
+
+`:CocConfig`:
+
+```json
+{
+  "languageserver": {
+    "opensips-lsp": {
+      "command": "opensips-lsp",
+      "filetypes": ["opensips-cfg"],
+      "initializationOptions": {
+        "opensipsPath": "/usr/local/sbin/opensips"
+      }
+    }
+  }
+}
 ```
 
 ## Helix
@@ -54,29 +100,35 @@ command = "opensips-lsp"
 
 [language-server.opensips-lsp.config]
 opensipsPath = "/usr/local/sbin/opensips"
-opensipsSrc = "/path/to/opensips"
 
 [[language]]
 name = "opensips-cfg"
 scope = "source.opensips"
-file-types = [{ glob = "opensips.cfg" }, "cfg"]
+file-types = [
+  { glob = "opensips.cfg" },
+  { glob = "opensips*.cfg" },
+  { glob = "*.opensips.cfg" },
+]
 comment-token = "#"
 language-servers = ["opensips-lsp"]
 ```
+
+Helix can also use the tree-sitter grammar in `tree-sitter-opensips/`
+for highlighting and folding; see the repository README.
 
 ## Emacs (eglot, built-in since 29)
 
 ```elisp
 (define-derived-mode opensips-cfg-mode prog-mode "OpenSIPS-cfg"
   (setq-local comment-start "# "))
-(add-to-list 'auto-mode-alist '("opensips\\.cfg\\'" . opensips-cfg-mode))
+(add-to-list 'auto-mode-alist '("opensips[^/]*\\.cfg\\'" . opensips-cfg-mode))
+(add-to-list 'auto-mode-alist '("\\.opensips\\.cfg\\'" . opensips-cfg-mode))
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs
                `(opensips-cfg-mode
                  . ("opensips-lsp"
                     :initializationOptions
                     (:opensipsPath "/usr/local/sbin/opensips"
-                     :opensipsSrc "/path/to/opensips"
                      :checkTimeoutMs 10000)))))
 ```
 
@@ -88,12 +140,11 @@ if executable('opensips-lsp')
     \ 'name': 'opensips-lsp',
     \ 'cmd': {server_info->['opensips-lsp']},
     \ 'initialization_options': {
-    \   'opensipsPath': '/usr/local/sbin/opensips',
-    \   'opensipsSrc': '/path/to/opensips'},
+    \   'opensipsPath': '/usr/local/sbin/opensips'},
     \ 'allowlist': ['opensips-cfg'],
     \ })
 endif
-au BufRead,BufNewFile opensips.cfg setfiletype opensips-cfg
+au BufRead,BufNewFile opensips.cfg,opensips*.cfg,*.opensips.cfg setfiletype opensips-cfg
 ```
 
 ## Sublime Text (LSP package)
@@ -108,8 +159,7 @@ au BufRead,BufNewFile opensips.cfg setfiletype opensips-cfg
       "command": ["opensips-lsp"],
       "selector": "source.opensips",
       "initializationOptions": {
-        "opensipsPath": "/usr/local/sbin/opensips",
-        "opensipsSrc": "/path/to/opensips"
+        "opensipsPath": "/usr/local/sbin/opensips"
       }
     }
   }
@@ -127,20 +177,78 @@ au BufRead,BufNewFile opensips.cfg setfiletype opensips-cfg
       "command": ["opensips-lsp"],
       "highlightingModeRegex": "^INI Files$",
       "initializationOptions": {
-        "opensipsPath": "/usr/local/sbin/opensips",
-        "opensipsSrc": "/path/to/opensips"
+        "opensipsPath": "/usr/local/sbin/opensips"
       }
     }
   }
 }
 ```
 
-## Environment-variable fallback (any client)
+## JetBrains IDEs (IntelliJ, PyCharm, …)
 
-Clients that cannot pass `initializationOptions` can export:
+JetBrains IDEs do not read a config file for third-party language
+servers; install the **LSP4IJ** plugin, then *Settings → Languages &
+Frameworks → Language Servers → +* and fill in:
+
+- **Command:** `opensips-lsp`
+- **Mappings → File name patterns:** `opensips.cfg`, `opensips*.cfg`,
+  `*.opensips.cfg`
+- **Configuration:** the same JSON object the other clients pass as
+  `initializationOptions`
+
+## Zed
+
+Zed registers language servers through an extension rather than
+through `settings.json`, so pointing it at this binary means writing a
+small Zed extension. The tree-sitter grammar in
+`tree-sitter-opensips/` is the starting point for the language half;
+the server half is a standard `command` entry. No worked example is
+given here because none has been tested against a Zed release — treat
+it as unproven rather than supported.
+
+## Any other LSP client
+
+The server reads LSP on stdin and writes it on stdout. Nothing else is
+required: no port, no daemon, no configuration file. Clients that
+cannot pass `initializationOptions` can use the environment instead:
 
 ```sh
 export OPENSIPS_LSP_BIN=/usr/local/sbin/opensips
 export OPENSIPS_LSP_SRC=/path/to/opensips
 export OPENSIPS_LSP_CHECK_TIMEOUT_MS=10000
 ```
+
+## Without an editor: CI, hooks, and scripts
+
+`opensips-lsp check` runs the same analysis in batch and prints
+`file:line:col: severity: message`, which most tooling already parses:
+
+```console
+$ opensips-lsp check /etc/opensips/opensips.cfg
+/etc/opensips/opensips.cfg:2:11: warning: route 'MISSING' is not defined here or in included files
+```
+
+Exit codes are 0 clean, 1 problems found (errors, or warnings under
+`--strict`), 2 usage or read failure — so it drops straight into a
+gate. Usage is
+`opensips-lsp check [--strict] [--bin <opensips>] <file>...`.
+
+GitHub Actions:
+
+```yaml
+- name: Check OpenSIPS configs
+  run: opensips-lsp check --strict $(git ls-files 'opensips*.cfg' '*.opensips.cfg')
+```
+
+A pre-commit hook:
+
+```sh
+#!/bin/sh
+files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(^|/)opensips[^/]*\.cfg$|\.opensips\.cfg$')
+[ -z "$files" ] && exit 0
+opensips-lsp check --strict $files
+```
+
+Passing `--bin` (or `OPENSIPS_LSP_BIN`) additionally runs the real
+OpenSIPS parser over each file, so CI catches what only the binary
+knows. Without it the check is static analysis alone.

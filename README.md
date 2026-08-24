@@ -110,8 +110,10 @@ tests run in CI; `tree-sitter generate` builds the parser locally.
   module-doc structure (overview, dependencies, exported parameters,
   security, FAQ). Its structure is itself validated by the test suite
   through this project's own OpenSIPS-README harvester.
-- [`docs/EDITORS.md`](docs/EDITORS.md) — setup for VS Code, Neovim,
-  Helix, Emacs, Vim, Sublime Text, and Kate.
+- [`docs/EDITORS.md`](docs/EDITORS.md) — worked setup for VS Code,
+  Neovim, coc.nvim, Helix, Emacs, Vim, Sublime Text, Kate and
+  JetBrains (LSP4IJ), plus any other LSP client, plus using the
+  `check` CLI in CI and git hooks with no editor at all.
 - API docs: `cargo doc --open` (`missing_docs` is `deny`).
 
 ## Editors
