@@ -31,24 +31,17 @@ If that prints a usage line, you are ready.
 
 ## 1. Build the extension
 
-Zed needs the tree-sitter grammar to live at the root of a repository,
-and this project keeps it in a subdirectory, so the first thing the
-script below does is give the grammar a repository of its own on your
-machine. Paste the whole block:
+Zed clones the tree-sitter grammar itself — `[grammars]` takes a
+repository, a revision, and a `path` for a grammar that lives in a
+subdirectory, which is this one. Paste the whole block:
 
 ```sh
 set -e
 ROOT="$HOME/.local/share/opensips-zed"
 rm -rf "$ROOT" && mkdir -p "$ROOT"
 
-# the grammar, in a repository of its own
-git clone --depth 1 https://github.com/NormB/opensips-lsp.git "$ROOT/checkout"
-cp -r "$ROOT/checkout/tree-sitter-opensips" "$ROOT/grammar"
-git -C "$ROOT/grammar" init -q
-git -C "$ROOT/grammar" add -A
-git -C "$ROOT/grammar" -c user.email=you@example.com -c user.name=you \
-    commit -qm "tree-sitter-opensips"
-REV=$(git -C "$ROOT/grammar" rev-parse HEAD)
+# the revision Zed should build the grammar from
+REV=$(git ls-remote https://github.com/NormB/opensips-lsp.git HEAD | cut -f1)
 
 # the extension itself
 EXT="$ROOT/extension"
@@ -64,8 +57,9 @@ description = "OpenSIPS configuration language and LSP"
 repository = "https://github.com/NormB/opensips-lsp"
 
 [grammars.opensips]
-repository = "file://$ROOT/grammar"
+repository = "https://github.com/NormB/opensips-lsp"
 rev = "$REV"
+path = "tree-sitter-opensips"
 
 [language_servers.opensips-lsp]
 name = "opensips-lsp"

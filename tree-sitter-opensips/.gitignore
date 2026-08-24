@@ -1,4 +1,9 @@
-/src/
+# The generated parser is COMMITTED, not ignored: every consumer of a
+# tree-sitter grammar builds from `src/parser.c` and none of them run
+# the CLI — nvim-treesitter fetches `files = { "src/parser.c" }`,
+# Helix and Zed compile that path directly.  Ignoring it made this
+# grammar unusable from every editor it was advertised for.
+# `grammar_generated_test.rs` fails if it drifts from grammar.js.
 /bindings/
 /Cargo.toml
 /binding.gyp
