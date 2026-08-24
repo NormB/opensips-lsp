@@ -102,6 +102,26 @@ fn complete(
         .collect()
 }
 
+fn hover(
+    stdin: &mut std::process::ChildStdin,
+    rx: &std::sync::mpsc::Receiver<serde_json::Value>,
+    uri: &str,
+    id: i64,
+    line: u32,
+    ch: u32,
+) -> String {
+    write_msg(
+        stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"textDocument/hover","params":{
+            "textDocument":{"uri":uri},"position":{"line":line,"character":ch}}}),
+    );
+    let r = wait_for(rx, |v| v["id"] == id, "hover");
+    r["result"]["contents"]["value"]
+        .as_str()
+        .unwrap_or("")
+        .to_string()
+}
+
 /// The complaint that produced the feature: typing `log_` offered
 /// nothing but control-flow keywords until a source tree was set.
 #[test]
@@ -239,4 +259,70 @@ fn module_names_complete_inside_loadmodule_with_nothing_configured() {
         &labels[..labels.len().min(10)]
     );
     let _ = child.kill();
+}
+
+/// A module the config never loads must not shadow the language.
+///
+/// The colliding name is DERIVED from the two vendored catalogues, not
+/// written down here.  In 4.0.1 it happens to be `log_level`, which is
+/// both a core global and an `opentelemetry` modparam — but whether a
+/// given name collides is a fact about the pinned version, and either
+/// side may rename it.  A hardcoded pair would keep passing while
+/// proving nothing, or fail in a way that looks like a bug in the
+/// server rather than a change upstream.
+#[test]
+fn a_core_global_outranks_a_same_named_param_of_an_unloaded_module() {
+    let (name, module) = colliding_param();
+
+    let (mut child, rx, mut stdin, uri, _) = boot("shadow", &format!("{name}=1\n"));
+    let text = hover(&mut stdin, &rx, &uri, 30, 0, 1);
+    assert!(
+        text.contains("core parameter"),
+        "the core global {name} must win when {module} is not loaded: {text:?}"
+    );
+    assert!(
+        !text.contains(&format!("modparam of `{module}`")),
+        "unloaded module {module} shadowed the language: {text:?}"
+    );
+    let _ = child.kill();
+
+    // ...and when the module IS loaded, its parameter is the answer:
+    // that is the modparam the config is actually setting.
+    let cfg = format!("loadmodule \"{module}.so\"\nmodparam(\"{module}\", \"{name}\", 1)\n");
+    let col = cfg
+        .lines()
+        .nth(1)
+        .unwrap()
+        .rfind(&name)
+        .expect("the parameter name is on the modparam line") as u32;
+    let (mut child, rx, mut stdin, uri, _) = boot("shadowload", &cfg);
+    let text = hover(&mut stdin, &rx, &uri, 31, 1, col + 1);
+    assert!(
+        text.contains(&format!("modparam of `{module}`")),
+        "a loaded module's parameter must win: {text:?}"
+    );
+    let _ = child.kill();
+}
+
+/// A parameter name that is both a core global and some module's
+/// modparam in the pinned catalogues.
+fn colliding_param() -> (String, String) {
+    use std::collections::HashSet;
+    let core: HashSet<&str> = opensips_lsp::catalog::builtin_core()
+        .core
+        .params
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    for m in &opensips_lsp::catalog::builtin_modules().modules {
+        if let Some(p) = m.params.iter().find(|p| core.contains(p.name.as_str())) {
+            return (p.name.clone(), m.name.clone());
+        }
+    }
+    panic!(
+        "no core/module parameter collision in the pinned catalogues.  This gate \
+         proves a core global outranks an unloaded module's parameter of the same \
+         name, and needs a colliding name to do it: if a harvest ever has none, \
+         replace this with a synthetic catalogue rather than deleting the gate."
+    )
 }

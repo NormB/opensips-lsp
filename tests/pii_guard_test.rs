@@ -99,6 +99,15 @@ fn repository_tree_is_free_of_personal_infrastructure() {
     }
     // this file plants examples on purpose; everything else must be clean
     hits.retain(|h| !h.contains("pii_guard_test.rs"));
+    // The vendored catalogues are upstream's own documentation, emitted
+    // by `examples/gen_*_catalog.rs` from the pinned source tree, and a
+    // freshness gate proves each still equals a fresh harvest of it.
+    // Upstream writes RFC1918 addresses in its examples — `10.0.0.1` is
+    // in OpenSIPS's own module docs — and rewriting them would falsify
+    // the documentation the user reads.  Nothing hand-written can hide
+    // here, because the freshness gate would reject it.  Every other
+    // detector still applies to these files.
+    hits.retain(|h| !(h.contains("_builtin.json") && h.contains("RFC1918")));
     assert!(
         hits.is_empty(),
         "personal infrastructure leaked:\n{}",

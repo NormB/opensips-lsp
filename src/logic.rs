@@ -406,25 +406,28 @@ fn signature_of(
     doc: &str,
     name: &str,
 ) -> Option<String> {
-    let loaded: Vec<String> = analyze::loaded_modules(doc)
-        .into_iter()
-        .map(|m| m.name)
-        .collect();
+    let loaded = loaded_names(doc);
+    let sig = |m: &ModuleDoc| {
+        m.functions
+            .iter()
+            .find(|f| f.name == name)
+            .map(|f| f.detail.clone())
+    };
     catalog
         .iter()
         .filter(|m| loaded.contains(&m.name))
-        .chain(catalog.iter().filter(|m| !loaded.contains(&m.name)))
-        .find_map(|m| {
-            m.functions
-                .iter()
-                .find(|f| f.name == name)
-                .map(|f| f.detail.clone())
-        })
+        .find_map(sig)
         .or_else(|| {
             core.functions
                 .iter()
                 .find(|f| f.name == name)
                 .map(|f| f.detail.clone())
+        })
+        .or_else(|| {
+            catalog
+                .iter()
+                .filter(|m| !loaded.contains(&m.name))
+                .find_map(sig)
         })
 }
 
@@ -462,19 +465,17 @@ pub fn parameter_hints(
     out
 }
 
-/// Markdown hover for `word`: loaded-module symbols win, then any
-/// module's symbols, then module names themselves.
-pub fn hover_markdown(catalog: &[ModuleDoc], doc: &str, word: &str) -> Option<String> {
-    let loaded: Vec<String> = analyze::loaded_modules(doc)
+/// The modules `doc` loads, by name.
+fn loaded_names(doc: &str) -> Vec<String> {
+    analyze::loaded_modules(doc)
         .into_iter()
         .map(|m| m.name)
-        .collect();
-    let ordered = catalog
-        .iter()
-        .filter(|m| loaded.contains(&m.name))
-        .chain(catalog.iter().filter(|m| !loaded.contains(&m.name)));
+        .collect()
+}
 
-    for m in ordered {
+/// Hover text for `word` among the given modules, if one documents it.
+fn hover_among<'a>(mods: impl Iterator<Item = &'a ModuleDoc>, word: &str) -> Option<String> {
+    for m in mods {
         if let Some(f) = m.functions.iter().find(|f| f.name == word) {
             return Some(format!(
                 "```\n{}\n```\n*module {}*\n\n{}",
@@ -488,6 +489,24 @@ pub fn hover_markdown(catalog: &[ModuleDoc], doc: &str, word: &str) -> Option<St
             ));
         }
     }
+    None
+}
+
+/// Markdown hover for `word`: loaded-module symbols win, then any
+/// module's symbols, then module names themselves.
+///
+/// Core entries are not consulted here — [`hover_markdown_with_core`]
+/// interleaves them, because a core global must outrank a same-named
+/// parameter of a module the config never loads.
+pub fn hover_markdown(catalog: &[ModuleDoc], doc: &str, word: &str) -> Option<String> {
+    let loaded = loaded_names(doc);
+    hover_among(catalog.iter().filter(|m| loaded.contains(&m.name)), word)
+        .or_else(|| hover_among(catalog.iter().filter(|m| !loaded.contains(&m.name)), word))
+        .or_else(|| hover_module_name(catalog, word))
+}
+
+/// Hover for a module name itself.
+fn hover_module_name(catalog: &[ModuleDoc], word: &str) -> Option<String> {
     catalog.iter().find(|m| m.name == word).map(|m| {
         format!(
             "**module {}** — {} params, {} functions",
@@ -1354,7 +1373,13 @@ pub fn hover_markdown_with_core(
     doc: &str,
     word: &str,
 ) -> Option<String> {
-    if let Some(h) = hover_markdown(catalog, doc, word) {
+    // A module the config never loads must not shadow the language.
+    // Before the module catalogue shipped built in this was
+    // unreachable without a source tree; with 186 modules always
+    // present, hovering the core global `log_level` resolved to the
+    // `opentelemetry` modparam of the same name.
+    let loaded = loaded_names(doc);
+    if let Some(h) = hover_among(catalog.iter().filter(|m| loaded.contains(&m.name)), word) {
         return Some(h);
     }
     if let Some(f) = core.functions.iter().find(|f| f.name == word) {
@@ -1374,5 +1399,7 @@ pub fn hover_markdown_with_core(
     {
         return Some(format!("**{}** — {}\n\n{}", v.name, v.detail, v.doc));
     }
-    None
+    // last: a module the config does not load, and module names
+    hover_among(catalog.iter().filter(|m| !loaded.contains(&m.name)), word)
+        .or_else(|| hover_module_name(catalog, word))
 }
