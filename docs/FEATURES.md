@@ -16,8 +16,10 @@ Two complementary layers:
   a config loads its modules, which executes code).
 - **Analyzer warnings** — fast, between saves, as you type
   (debounced): `route(name)` calls whose target is defined nowhere in
-  the file or its includes, and duplicate route definitions. Source
-  `opensips-lsp`, severity warning; toggle with
+  the file or its includes, duplicate route definitions, and `#!`
+  lines that spell a Kamailio preprocessor directive — OpenSIPS has
+  none, so `#!ifdef` guards nothing and `#!define` binds nothing.
+  Source `opensips-lsp`, severity warning; toggle with
   `opensipsLsp.diagnostics.analyzer`.
 
 #### Completion
@@ -213,8 +215,11 @@ Three things it will not touch:
 
 - **Continuation lines of a multi-line string or block comment** —
   their leading whitespace is content, not layout.
-- **`#!` preprocessor directives** — these are processed line-wise
-  ahead of the parser, so their column is not the formatter's to move.
+- **`#!` lines** — OpenSIPS has no preprocessor (its `cfg.lex` has
+  `COM_LINE #` and no preprocessor token), so these are comments and
+  their column is the author's. The analyzer warns separately when one
+  spells a Kamailio directive such as `#!ifdef`, because it guards
+  nothing here.
 - **Lines that continue the previous statement.** Brace depth is not
   the whole story about indentation here. A call whose arguments span
   lines, a condition broken across lines, and the body of a braceless
@@ -360,7 +365,7 @@ clients that can't pass options.
 | `opensipsLsp.opensipsSrc` | `opensipsSrc` | `OPENSIPS_LSP_SRC` | *(unset)* | Source tree for completion/hover docs. |
 | `opensipsLsp.diagnostics.enable` | *(maps to empty `opensipsPath`)* | — | `true` | Toggle diagnostics without losing the configured path. |
 | `opensipsLsp.diagnostics.maxProblems` | `maxDiagnostics` | — | `100` | Bound on published diagnostics per file. |
-| `opensipsLsp.diagnostics.analyzer` | `analyzerDiagnostics` | — | `true` | Fast analyzer warnings between saves (undefined `route()` targets, duplicate definitions, undocumented modparams). |
+| `opensipsLsp.diagnostics.analyzer` | `analyzerDiagnostics` | — | `true` | Fast analyzer warnings between saves (undefined `route()` targets, duplicate definitions, undocumented modparams, inert `#!` directives). |
 | `opensipsLsp.codeLens.references` | `codeLensReferences` | — | `true` | Reference-count code lenses on route definitions. |
 | `opensipsLsp.inlayHints.parameterNames` | `inlayHintParameterNames` | — | `true` | Draw parameter names at documented call sites. |
 | `opensipsLsp.checkTimeoutMs` | `checkTimeoutMs` | `OPENSIPS_LSP_CHECK_TIMEOUT_MS` | `10000` | Kill a `-C` run after this many ms. |

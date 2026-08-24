@@ -24,6 +24,19 @@ pub struct AnalysisCache {
     map: DashMap<String, (i32, Arc<DocAnalysis>)>,
 }
 
+/// Total [`DocAnalysis`] builds in this process — an instrumentation
+/// seam for the memoization tests, and cheap enough to always keep.
+///
+/// Without it the memoization is only checkable by reading the code:
+/// a change that recomputed on every request would leave every test
+/// green and only show up as a hot editor.
+static ANALYSIS_BUILDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many [`DocAnalysis`] builds have run in this process.
+pub fn analysis_builds() -> usize {
+    ANALYSIS_BUILDS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 impl AnalysisCache {
     /// The analysis for `(uri, version)`, computed from `text` on the
     /// first request for this version.
@@ -33,6 +46,7 @@ impl AnalysisCache {
         {
             return e.1.clone();
         }
+        ANALYSIS_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let a = Arc::new(DocAnalysis {
             blocks: analyze::route_blocks(text),
             refs: analyze::route_refs(text),

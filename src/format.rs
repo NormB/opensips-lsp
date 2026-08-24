@@ -169,10 +169,13 @@ fn formatted_lines(text: &str, opts: &Options) -> Vec<String> {
         }
 
         let indent = if trimmed.starts_with("#!") || !prev_ended {
-            // not ours to move: a preprocessor directive is read
-            // line-wise ahead of the parser, and a line continuing the
-            // previous statement is indented by its author to show
-            // what it belongs to
+            // not ours to move.  A `#!` line is a COMMENT here —
+            // OpenSIPS has no preprocessor, whatever it may look like
+            // to someone arriving from Kamailio — and a comment's
+            // column is the author's; the analyzer warns separately
+            // that such a line does nothing.  A line continuing the
+            // previous statement is likewise indented by its author to
+            // show what it belongs to
             body[..leading_ws].to_string()
         } else {
             opts.indent(depth.saturating_sub(closers))

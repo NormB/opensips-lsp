@@ -140,4 +140,4 @@ is the point: mixing two versions is worse than either.
 | Squiggles on a correct file | The checker uses *your* OpenSIPS version — a config written for another version can legitimately fail. |
 | Completion has no documentation | Core and module entries both carry built-in documentation from 4.0.1, so an entry with none is one 4.0.1 does not document: set **Opensips Src** to an OpenSIPS source folder matching your build. |
 | A module I have is not offered | The built-in list is what 4.0.1 documents, not what you compiled. Set **Opensips Src** to your own tree. |
-| Still stuck | **View → Output**, pick **OpenSIPS LSP** in the dropdown — the server explains what it is doing (e.g. "ready (193 documented modules)"). |
+| Still stuck | **View → Output**, pick **OpenSIPS LSP** in the dropdown — the server explains what it is doing (e.g. "ready (186 documented modules, 66 core functions, core and module docs built in from 4.0.1)"). |

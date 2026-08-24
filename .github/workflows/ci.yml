@@ -47,7 +47,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
-      - run: npm install
+      # `ci` installs exactly the locked tree and fails if the lock
+      # and the manifest disagree; `install` would quietly resolve
+      # something else
+      - run: npm ci
       - run: npm run compile
 
   grammar:
@@ -64,10 +67,40 @@ jobs:
       - run: npx --yes tree-sitter-cli@0.26 generate
       - run: npx --yes tree-sitter-cli@0.26 test
 
+  audit:
+    name: Advisories (cargo audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # dependabot opens PRs; it does not fail a build.  A dependency
+      # that grows an advisory between bumps should stop the line here
+      # rather than wait to be noticed.
+      - name: install cargo-audit
+        run: cargo install cargo-audit --locked
+      - run: cargo audit --deny warnings
+
+  msrv:
+    name: MSRV (rust-version in Cargo.toml)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: read the declared MSRV
+        id: msrv
+        run: echo "v=$(grep -m1 '^rust-version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.v }}
+      - uses: Swatinem/rust-cache@v2
+      # the manifest claims this version compiles the crate; this is
+      # what makes that a fact rather than a hope
+      - run: cargo check --all-targets
+
   # Aggregate gate for branch protection: one required context.
   ci-success:
     name: CI success
-    needs: [rust, client, grammar]
+    needs: [rust, client, grammar, audit, msrv]
     runs-on: ubuntu-latest
     steps:
       - run: echo "all CI jobs green"

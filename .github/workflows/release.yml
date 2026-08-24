@@ -85,7 +85,7 @@ jobs:
       - name: Package platform + universal builds
         working-directory: client
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run compile
           # platform builds carry the matching server binary
           for triple in "linux-x64 x86_64 linux-gnu" "linux-arm64 aarch64 linux-gnu" \

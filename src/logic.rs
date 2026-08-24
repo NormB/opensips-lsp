@@ -778,6 +778,97 @@ pub struct AnalyzerDiag {
     pub message: String,
 }
 
+/// Preprocessor directives Kamailio's `src/core/cfg.lex` defines and
+/// OpenSIPS does not have at all.
+///
+/// OpenSIPS's own `cfg.lex` has `COM_LINE #` and the rule
+/// `<INITIAL>{COM_LINE}.*{CR} { count(); }` — a `#` starts a line
+/// comment that is counted and thrown away — and contains no
+/// preprocessor token of any kind.  So `#!ifdef USE_TCP` does not
+/// guard anything: the block it appears to open is always active, and
+/// `#!define X 5060` binds nothing.  Proven against the real 4.0.1
+/// binary: a syntax error placed inside `#!ifdef NEVER_DEFINED` is
+/// still reported, which it would not be if the block were skipped.
+///
+/// That silence is the problem.  A config carried over from Kamailio
+/// keeps working in the sense that it parses, while every conditional
+/// in it has quietly stopped meaning anything.
+const KAMAILIO_ONLY_DIRECTIVES: &[&str] = &[
+    "def",
+    "define",
+    "defenv",
+    "defenvs",
+    "defexp",
+    "defexps",
+    "endif",
+    "ifdef",
+    "ifexp",
+    "ifndef",
+    "redef",
+    "redefine",
+    "subst",
+    "substdef",
+    "substdefs",
+    "trydef",
+    "trydefenv",
+    "trydefenvs",
+    "trydefine",
+];
+
+/// Warn on `#!` directives that do nothing here.
+///
+/// Only a comment that STARTS at this position counts: the same text
+/// inside a block comment is somebody deliberately commenting code
+/// out, and flagging that would be noise.
+fn inert_directive_diagnostics(text: &str) -> Vec<AnalyzerDiag> {
+    let classes = analyze::classify(text);
+    let mut out = Vec::new();
+    let mut offset = 0usize;
+    for line in text.split_inclusive('\n') {
+        let lead = line.len() - line.trim_start().len();
+        let at = offset + lead;
+        let rest = line.trim_start();
+        offset += line.len();
+        let Some(after) = rest.strip_prefix("#!") else {
+            continue;
+        };
+        // a comment that begins here, not one already open
+        if classes.get(at) != Some(&analyze::Class::Comment)
+            || (at > 0 && classes.get(at - 1) == Some(&analyze::Class::Comment))
+        {
+            continue;
+        }
+        let kw: String = after
+            .trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        if kw.is_empty() || !KAMAILIO_ONLY_DIRECTIVES.contains(&kw.to_ascii_lowercase().as_str()) {
+            continue;
+        }
+        let (line_no, _) = byte_line_col(text, at);
+        out.push(AnalyzerDiag {
+            line: line_no,
+            col_start: lead as u32,
+            col_end: (lead + rest.trim_end_matches(['\r', '\n']).len()) as u32,
+            message: format!(
+                "`#!{kw}` has no effect: OpenSIPS has no preprocessor, so this is \
+                 a comment. It is a Kamailio directive — any block it appears to \
+                 guard is always active here"
+            ),
+        });
+    }
+    out
+}
+
+/// Line and column of a byte offset.
+fn byte_line_col(text: &str, at: usize) -> (u32, u32) {
+    let before = &text[..at];
+    let line = before.matches('\n').count() as u32;
+    let col = before.len() - before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    (line, col as u32)
+}
+
 /// Analyzer diagnostics for `text` (the file at `path`): `route(x)`
 /// calls whose target is defined nowhere in the include closure, and
 /// duplicate route definitions (every occurrence after the first is
@@ -787,6 +878,7 @@ pub fn analyzer_diagnostics(
     text: &str,
     loader: &dyn Fn(&std::path::Path) -> Option<String>,
 ) -> Vec<AnalyzerDiag> {
+    let mut out = inert_directive_diagnostics(text);
     let files = include_closure(path, text, loader);
     let blocks: Vec<(std::path::PathBuf, analyze::Block)> = files
         .iter()
@@ -808,7 +900,6 @@ pub fn analyzer_diagnostics(
         .iter()
         .any(|(_, b)| b.kind == "route" && b.name.is_empty());
     let is_main_ref = |name: &str| !name.is_empty() && name.bytes().all(|c| c == b'0');
-    let mut out = Vec::new();
     for r in analyze::route_refs(text) {
         if r.name.is_empty() || defined.contains(r.name.as_str()) {
             continue;
