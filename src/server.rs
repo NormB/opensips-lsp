@@ -1457,13 +1457,15 @@ impl LanguageServer for Backend {
         let cat = self.catalog.read().unwrap();
         let core = self.core.read().unwrap();
         Ok(
-            logic::hover_markdown_with_core(&cat, &core, &text, &word).map(|md| Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: md,
-                }),
-                range: None,
-            }),
+            logic::hover_markdown_at(&cat, &core, &text, &word, pos.line, byte_col as u32).map(
+                |md| Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: md,
+                    }),
+                    range: None,
+                },
+            ),
         )
     }
 

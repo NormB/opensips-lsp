@@ -1365,6 +1365,72 @@ pub fn signature_at(
         .map(|f| (f.detail.clone(), f.doc.clone(), commas))
 }
 
+/// Where the hovered word sits, when the syntax decides the answer on
+/// its own rather than leaving it to precedence.
+///
+/// A global `log_level=2` and `modparam("opentelemetry", "log_level",
+/// 2)` are two different things that share a name, and the config says
+/// which one you are looking at.  Resolving by precedence answers the
+/// question the text already answered: with opentelemetry loaded, the
+/// global assignment hovered as the module's parameter.
+enum HoverSite {
+    /// The parameter-name argument of `modparam("m", "p", ...)`: the
+    /// module named in the call decides, not the loaded set.
+    Modparam(String),
+    /// A bare `name = value` statement — a core global.  Inside a
+    /// route, assignment targets are pseudo-variables, which are not
+    /// bare words, so this form is unambiguous.
+    Global,
+    /// Anywhere else: a call, an operand, a module name.
+    Other,
+}
+
+fn hover_site(doc: &str, word: &str, line: u32, col: u32) -> HoverSite {
+    if let Some(c) = analyze::modparam_calls(doc).into_iter().find(|c| {
+        c.line == line && c.param == word && col >= c.col && col < c.col + c.param.len() as u32
+    }) {
+        return HoverSite::Modparam(c.module);
+    }
+    let Some(text) = doc.lines().nth(line as usize) else {
+        return HoverSite::Other;
+    };
+    let lead = (text.len() - text.trim_start().len()) as u32;
+    let rest = text.trim_start();
+    let starts_here = col >= lead && col < lead + word.len() as u32;
+    if starts_here && rest.starts_with(word) && rest[word.len()..].trim_start().starts_with('=') {
+        return HoverSite::Global;
+    }
+    HoverSite::Other
+}
+
+/// [`hover_markdown_with_core`], with the syntax consulted first.
+pub fn hover_markdown_at(
+    catalog: &[ModuleDoc],
+    core: &crate::catalog::CoreDocs,
+    doc: &str,
+    word: &str,
+    line: u32,
+    col: u32,
+) -> Option<String> {
+    match hover_site(doc, word, line, col) {
+        HoverSite::Modparam(module) => {
+            // the module the call names, and only it
+            if let Some(h) = hover_among(catalog.iter().filter(|m| m.name == module), word) {
+                return Some(h);
+            }
+            // an undocumented module, or a parameter it does not
+            // declare: fall through rather than answer nothing
+        }
+        HoverSite::Global => {
+            if let Some(p) = core.params.iter().find(|p| p.name == word) {
+                return Some(format!("**{}** — core parameter\n\n{}", p.name, p.doc));
+            }
+        }
+        HoverSite::Other => {}
+    }
+    hover_markdown_with_core(catalog, core, doc, word)
+}
+
 /// [`hover_markdown`] plus core functions, core parameters, and
 /// pseudo-variables (`word` may be given without the `$`).
 pub fn hover_markdown_with_core(

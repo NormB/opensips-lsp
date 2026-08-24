@@ -286,6 +286,21 @@ fn a_core_global_outranks_a_same_named_param_of_an_unloaded_module() {
     );
     let _ = child.kill();
 
+    // ...and loading the module does not change what a GLOBAL means.
+    // A `name = value` statement is a core parameter and a
+    // `modparam("m", "name", ...)` is that module's — two different
+    // things that share a name, and the config says which is which.
+    // Precedence alone got this wrong: with the module loaded, the
+    // global assignment hovered as the module's parameter.
+    let cfg = format!("loadmodule \"{module}.so\"\n{name}=1\n");
+    let (mut child, rx, mut stdin, uri, _) = boot("shadowglobal", &cfg);
+    let text = hover(&mut stdin, &rx, &uri, 32, 1, 1);
+    assert!(
+        text.contains("core parameter"),
+        "a global assignment is the core parameter even with {module} loaded: {text:?}"
+    );
+    let _ = child.kill();
+
     // ...and when the module IS loaded, its parameter is the answer:
     // that is the modparam the config is actually setting.
     let cfg = format!("loadmodule \"{module}.so\"\nmodparam(\"{module}\", \"{name}\", 1)\n");
