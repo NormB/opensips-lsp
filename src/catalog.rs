@@ -392,6 +392,47 @@ pub struct CoreDocs {
     pub pvars: Vec<Item>,
 }
 
+/// The vendored core catalogue: what the core language looks like in
+/// the version this release pins.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BuiltinCore {
+    /// The OpenSIPS version the docs were harvested from.
+    pub version: String,
+    /// The harvested core docs.
+    pub core: CoreDocs,
+}
+
+/// The built-in core catalogue, used when no source tree is
+/// configured.
+///
+/// Core parameters, functions and pseudo-variables are the LANGUAGE,
+/// not a module: requiring a full source checkout before `log_level`
+/// completes makes the extension useless out of the box.  A tree the
+/// user configures still wins, because only that is exact for their
+/// build — so every built-in entry says which version it came from.
+pub fn builtin_core() -> &'static BuiltinCore {
+    static B: std::sync::OnceLock<BuiltinCore> = std::sync::OnceLock::new();
+    B.get_or_init(|| {
+        let mut b: BuiltinCore = serde_json::from_str(include_str!("core_builtin.json"))
+            .expect("the vendored core catalogue must parse");
+        let note = format!(
+            "\n\n*Built-in documentation from OpenSIPS {} — set `opensipsSrc` \
+             to your own source tree for version-exact docs.*",
+            b.version
+        );
+        for it in b
+            .core
+            .functions
+            .iter_mut()
+            .chain(b.core.params.iter_mut())
+            .chain(b.core.pvars.iter_mut())
+        {
+            it.doc.push_str(&note);
+        }
+        b
+    })
+}
+
 /// Harvest the core-language docs from an OpenSIPS 4.x source tree;
 /// missing or unparsable pages simply yield empty sections.
 pub fn harvest_core(tree_root: &Path) -> CoreDocs {

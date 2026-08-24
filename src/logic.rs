@@ -32,6 +32,18 @@ pub struct Comp {
 }
 
 /// A small core-keyword seed; module functions dominate real usage.
+/// Control-flow keywords that are STATEMENTS, not calls: they are
+/// written `exit;`, never `exit()`.
+///
+/// The core documentation lists several of them among its functions,
+/// so without this they complete as tabstop snippets and typing
+/// `exit` yields `exit()` — wrong in a way the parser then rejects.
+/// It only showed up once core docs were available by default; with a
+/// configured tree it had been wrong all along.
+const STATEMENT_KEYWORDS: &[&str] = &[
+    "if", "else", "switch", "case", "default", "while", "for", "exit", "drop", "return", "break",
+];
+
 const CORE_KEYWORDS: &[&str] = &[
     "if",
     "else",
@@ -193,7 +205,11 @@ fn complete_files(
             label: f.name.clone(),
             detail: f.detail.clone(),
             doc: f.doc.clone(),
-            kind: CompKind::Function,
+            kind: if STATEMENT_KEYWORDS.contains(&f.name.as_str()) {
+                CompKind::Keyword
+            } else {
+                CompKind::Function
+            },
         });
     }
     for p in &core.params {
@@ -1228,7 +1244,17 @@ fn dedup_completions(items: Vec<Comp>) -> Vec<Comp> {
     for c in items {
         match best.get(&c.label) {
             Some(&i) => {
-                if rank(&c.kind) > rank(&out[i].as_ref().unwrap().kind) {
+                let kept = out[i].as_ref().unwrap();
+                // On equal rank the documented one wins.  `exit` is
+                // offered twice — once as a bare keyword, once from
+                // the core docs — and both are keywords, so without
+                // this the doc-less one survives purely by arriving
+                // first and hover comes back empty.
+                let better = rank(&c.kind) > rank(&kept.kind)
+                    || (rank(&c.kind) == rank(&kept.kind)
+                        && kept.doc.is_empty()
+                        && !c.doc.is_empty());
+                if better {
                     out[i] = Some(c);
                 }
             }

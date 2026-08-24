@@ -66,6 +66,11 @@ extension and it just works.
   `return` is never lifted.
 - **Live settings** — the runtime toggles apply without restarting
   the server.
+- **Core language out of the box** — parameters, functions and
+  pseudo-variables (`log_level`, `socket`, `mpath`) complete before you configure
+  anything, from a catalogue harvested from OpenSIPS 4.0.1 and shipped
+  with the extension. Hover says which version it came from; point
+  `opensipsSrc` at your own source tree for docs exact to your build.
 - **Snippets** — `route`, `failure_route`, `ifmethod`, `modparam`,
   `switch`, `xlog`, and more.
 - **Safe by default** — in untrusted workspaces diagnostics stay off

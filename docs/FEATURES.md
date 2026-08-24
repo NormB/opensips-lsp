@@ -289,6 +289,24 @@ support and then never answers cannot stall startup. The tree usually
 lives outside the workspace, so its watcher is a relative pattern
 rooted at the tree.
 
+#### Core language, before you configure anything
+
+The core language — parameters, functions and pseudo-variables like
+`log_level`, `socket`, `mpath` — is not a module, so it should not need a source tree to
+complete. A catalogue harvested from OpenSIPS 4.0.1 ships with the
+extension and is used when no source tree is configured, which is why
+`log_`-style completion works on a fresh install.
+
+It is clearly labelled: hover any built-in entry and it says which
+version the documentation came from and that setting `opensipsSrc`
+gives you docs exact for your own build. A configured source tree always
+wins — being exact for the version you actually run is the whole
+point of harvesting in the first place.
+
+Module documentation is deliberately NOT shipped this way. What
+modules exist and what they export depends on what you built, so
+there is no honest version to pin it to.
+
 #### CLI check mode
 
 `opensips-lsp check [--strict] [--bin <opensips>] <file>...` runs the
