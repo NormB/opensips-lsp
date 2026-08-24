@@ -24,7 +24,7 @@ fn boot(
     extra_opts: serde_json::Value,
     stub_errors: usize,
 ) -> (
-    std::process::Child,
+    Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     String,
@@ -63,15 +63,18 @@ fn boot(
         opts[k] = v.clone();
     }
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env_remove("OPENSIPS_LSP_BIN")
-        .env_remove("OPENSIPS_LSP_SRC")
-        .env_remove("OPENSIPS_LSP_CACHE_DIR")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env_remove("OPENSIPS_LSP_BIN")
+            .env_remove("OPENSIPS_LSP_SRC")
+            .env_remove("OPENSIPS_LSP_CACHE_DIR")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(
@@ -192,17 +195,20 @@ fn harvest_reports_progress_and_warns_on_an_empty_tree() {
     // a CONFIGURED tree that yields no documentation at all
     let tree = base.join("empty-tree");
     std::fs::create_dir_all(tree.join("modules")).unwrap();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", "")
-        .env(
-            "OPENSIPS_LSP_CACHE_DIR",
-            base.join("cache").display().to_string(),
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "")
+            .env(
+                "OPENSIPS_LSP_CACHE_DIR",
+                base.join("cache").display().to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(
@@ -272,13 +278,16 @@ fn runtime_settings_apply_without_a_server_restart() {
     let text = "route {\n    route(a);\n    route(b);\n}\n";
     std::fs::write(&cfg, text).unwrap();
     let uri = format!("file://{}", cfg.display());
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", "")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(

@@ -84,3 +84,60 @@ pub fn required_env(var: &str) -> String {
         ),
     }
 }
+
+/// A spawned server that owns the fixture directory it was given.
+///
+/// Every stdio test used to kill its child and remove its directory on
+/// the last line of the test body — which is the one line a failing
+/// assertion never reaches.  A green run left 21 directories behind; a
+/// red one also left a server process running, and one of those was
+/// found alive nearly six hours later.  Cleanup that only happens when
+/// nothing goes wrong is not cleanup, so it belongs in `Drop`, which
+/// runs on the panic path too.
+///
+/// `Deref` keeps every existing call site working: `spawn_reader(&mut
+/// child)` and `child.stdin.take()` still mean what they meant, and an
+/// explicit `child.kill()` at the end of a test is now belt-and-braces
+/// rather than the only thing standing between a failure and a leak.
+pub struct Server {
+    child: Child,
+    dir: std::path::PathBuf,
+}
+
+impl Server {
+    pub fn new(child: Child, dir: impl AsRef<std::path::Path>) -> Self {
+        Self {
+            child,
+            dir: dir.as_ref().to_path_buf(),
+        }
+    }
+
+    /// Shadows `Child::kill` so the existing `let _ = child.kill();`
+    /// lines keep compiling and keep meaning "stop it now".
+    pub fn kill(&mut self) -> std::io::Result<()> {
+        self.child.kill()
+    }
+}
+
+impl std::ops::Deref for Server {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.child
+    }
+}
+
+impl std::ops::DerefMut for Server {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.child
+    }
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        // reap it, or the process lingers as a zombie for as long as
+        // the test binary runs
+        let _ = self.child.wait();
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}

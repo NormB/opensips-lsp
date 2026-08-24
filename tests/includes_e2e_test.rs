@@ -19,22 +19,25 @@ fn start(
     base: &std::path::Path,
     init_opts: serde_json::Value,
 ) -> (
-    std::process::Child,
+    Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
 ) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", "")
-        .env("OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS", "10")
-        .env(
-            "OPENSIPS_LSP_CACHE_DIR",
-            base.join("cache").display().to_string(),
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "")
+            .env("OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS", "10")
+            .env(
+                "OPENSIPS_LSP_CACHE_DIR",
+                base.join("cache").display().to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        base,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(

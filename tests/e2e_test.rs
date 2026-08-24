@@ -27,14 +27,17 @@ fn diagnostics_flow_over_stdio() {
     std::fs::write(&cfg, "loadmodule \"nope.so\"\nbroken here\n").unwrap();
     let uri = format!("file://{}", cfg.display());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", stub.display().to_string())
-        .env("OPENSIPS_LSP_SRC", "") // no catalog needed for this flow
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("server binary must spawn");
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", stub.display().to_string())
+            .env("OPENSIPS_LSP_SRC", "") // no catalog needed for this flow
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("server binary must spawn"),
+        &dir,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
 
@@ -115,14 +118,17 @@ fn hanging_opensips_check_is_bounded_and_reported() {
     let cfg = dir.join("t.cfg");
     std::fs::write(&cfg, "route{}\n").unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", stub.display().to_string())
-        .env("OPENSIPS_LSP_CHECK_TIMEOUT_MS", "300")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", stub.display().to_string())
+            .env("OPENSIPS_LSP_CHECK_TIMEOUT_MS", "300")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
 
@@ -170,13 +176,16 @@ fn empty_opensips_bin_disables_checks_entirely() {
     let cfg = dir.join("t.cfg");
     std::fs::write(&cfg, "route{}\n").unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", "") // explicit opt-out
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "") // explicit opt-out
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
 
@@ -227,13 +236,16 @@ fn symbol_columns_are_utf16_on_multibyte_lines() {
     std::fs::write(&cfg, text).unwrap();
     let uri = format!("file://{}", cfg.display());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", "")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(
@@ -276,13 +288,16 @@ fn folding_and_nested_symbols_over_stdio() {
     std::fs::write(&cfg, text).unwrap();
     let uri = format!("file://{}", cfg.display());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", "")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(
@@ -348,13 +363,16 @@ fn references_rename_highlight_over_stdio() {
     std::fs::write(&cfg, text).unwrap();
     let uri = format!("file://{}", cfg.display());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", "")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(
@@ -471,13 +489,16 @@ fn check_invocation_carries_the_opensips_flags() {
     std::fs::write(&cfg, "route { exit; }\n").unwrap();
     let uri = format!("file://{}", cfg.display());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", stub.display().to_string())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", stub.display().to_string())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(
@@ -535,13 +556,16 @@ fn check_runs_in_the_configs_own_directory() {
     std::fs::write(&cfg, "route { exit; }\n").unwrap();
     let uri = format!("file://{}", cfg.display());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", stub.display().to_string())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", stub.display().to_string())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(
@@ -597,14 +621,17 @@ fn a_newer_save_supersedes_a_slow_running_check() {
     std::fs::write(&cfg, v1).unwrap();
     let uri = format!("file://{}", cfg.display());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", stub.display().to_string())
-        .env("OPENSIPS_LSP_CHECK_TIMEOUT_MS", "60000")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", stub.display().to_string())
+            .env("OPENSIPS_LSP_CHECK_TIMEOUT_MS", "60000")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(

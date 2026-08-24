@@ -55,17 +55,20 @@ fn all_features_over_stdio_against_a_synthetic_tree() {
     std::fs::write(&cfg, DOC).unwrap();
     let uri = format!("file://{}", cfg.display());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        // config via initializationOptions below, NOT env: proves the
-        // option path; env supplies only the cache dir (env-only knob)
-        .env_remove("OPENSIPS_LSP_BIN")
-        .env_remove("OPENSIPS_LSP_SRC")
-        .env("OPENSIPS_LSP_CACHE_DIR", cache.display().to_string())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            // config via initializationOptions below, NOT env: proves the
+            // option path; env supplies only the cache dir (env-only knob)
+            .env_remove("OPENSIPS_LSP_BIN")
+            .env_remove("OPENSIPS_LSP_SRC")
+            .env("OPENSIPS_LSP_CACHE_DIR", cache.display().to_string())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
 
@@ -188,15 +191,18 @@ fn all_features_over_stdio_against_a_synthetic_tree() {
 
     // second server against the same tree must hit the cache
     child.kill().ok();
-    let mut child2 = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env_remove("OPENSIPS_LSP_BIN")
-        .env_remove("OPENSIPS_LSP_SRC")
-        .env("OPENSIPS_LSP_CACHE_DIR", cache.display().to_string())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child2 = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env_remove("OPENSIPS_LSP_BIN")
+            .env_remove("OPENSIPS_LSP_SRC")
+            .env("OPENSIPS_LSP_CACHE_DIR", cache.display().to_string())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
     let rx2 = spawn_reader(&mut child2);
     let mut stdin2 = child2.stdin.take().unwrap();
     write_msg(
@@ -243,18 +249,21 @@ fn signature_help_and_pvar_text_edits() {
     std::fs::write(&cfg, doc).unwrap();
     let uri = format!("file://{}", cfg.display());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env_remove("OPENSIPS_LSP_BIN")
-        .env_remove("OPENSIPS_LSP_SRC")
-        .env(
-            "OPENSIPS_LSP_CACHE_DIR",
-            base.join("cache").display().to_string(),
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env_remove("OPENSIPS_LSP_BIN")
+            .env_remove("OPENSIPS_LSP_SRC")
+            .env(
+                "OPENSIPS_LSP_CACHE_DIR",
+                base.join("cache").display().to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(
@@ -343,19 +352,22 @@ fn undocumented_modparam_warns_between_saves() {
     let cfg = base.join("c.cfg");
     std::fs::write(&cfg, doc).unwrap();
     let uri = format!("file://{}", cfg.display());
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env_remove("OPENSIPS_LSP_BIN")
-        .env_remove("OPENSIPS_LSP_SRC")
-        .env("OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS", "10")
-        .env(
-            "OPENSIPS_LSP_CACHE_DIR",
-            base.join("cache").display().to_string(),
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env_remove("OPENSIPS_LSP_BIN")
+            .env_remove("OPENSIPS_LSP_SRC")
+            .env("OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS", "10")
+            .env(
+                "OPENSIPS_LSP_CACHE_DIR",
+                base.join("cache").display().to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(

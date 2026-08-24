@@ -41,14 +41,17 @@ fn full_stack_against_a_real_4x_tree() {
     std::fs::write(&cfg, &bad).unwrap();
     let uri = format!("file://{}", cfg.display());
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_BIN", &bin) // empty = diagnostics off
-        .env("OPENSIPS_LSP_SRC", &tree)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", &bin) // empty = diagnostics off
+            .env("OPENSIPS_LSP_SRC", &tree)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
 

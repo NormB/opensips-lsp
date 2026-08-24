@@ -15,7 +15,7 @@ fn boot(
     tag: &str,
     text: &str,
 ) -> (
-    std::process::Child,
+    Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     String,
@@ -29,14 +29,17 @@ fn boot(
     let uri = format!("file://{}", cfg.display());
 
     // no tree, no binary: the out-of-the-box state
-    let mut child = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
-        .env("OPENSIPS_LSP_SRC", "")
-        .env("OPENSIPS_LSP_BIN", "")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_SRC", "")
+            .env("OPENSIPS_LSP_BIN", "")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
     let rx = spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     write_msg(
