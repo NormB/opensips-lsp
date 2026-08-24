@@ -198,13 +198,111 @@ Frameworks → Language Servers → +* and fill in:
 
 ## Zed
 
-Zed registers language servers through an extension rather than
-through `settings.json`, so pointing it at this binary means writing a
-small Zed extension. The tree-sitter grammar in
-`tree-sitter-opensips/` is the starting point for the language half;
-the server half is a standard `command` entry. No worked example is
-given here because none has been tested against a Zed release — treat
-it as unproven rather than supported.
+Zed cannot be pointed at a language server from `settings.json` alone:
+only "language server, context server and debugger extensions require
+the presence of custom Rust", so registering this one means a small
+extension compiled to WebAssembly. It is four files.
+
+`extension.toml`:
+
+```toml
+id = "opensips"
+name = "OpenSIPS"
+version = "0.0.1"
+schema_version = 1
+authors = ["you <you@example.com>"]
+description = "OpenSIPS configuration language and LSP"
+repository = "https://github.com/you/zed-opensips"
+
+[grammars.opensips]
+repository = "https://github.com/NormB/opensips-lsp"
+rev = "<commit sha>"
+
+[language_servers.opensips-lsp]
+name = "opensips-lsp"
+languages = ["OpenSIPS"]
+```
+
+`languages/opensips-cfg/config.toml`:
+
+```toml
+name = "OpenSIPS"
+grammar = "opensips"
+path_suffixes = ["opensips.cfg"]
+line_comments = ["# "]
+```
+
+`Cargo.toml`:
+
+```toml
+[package]
+name = "zed-opensips"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+zed_extension_api = "0.7"
+```
+
+`src/lib.rs`:
+
+```rust
+use zed_extension_api as zed;
+
+struct OpensipsExtension;
+
+impl zed::Extension for OpensipsExtension {
+    fn new() -> Self {
+        Self
+    }
+
+    fn language_server_command(
+        &mut self,
+        _language_server_id: &zed::LanguageServerId,
+        worktree: &zed::Worktree,
+    ) -> zed::Result<zed::Command> {
+        let path = worktree
+            .which("opensips-lsp")
+            .ok_or_else(|| "opensips-lsp is not on $PATH".to_string())?;
+        Ok(zed::Command {
+            command: path,
+            args: vec![],
+            env: worktree.shell_env(),
+        })
+    }
+}
+
+zed::register_extension!(OpensipsExtension);
+```
+
+Then open the extensions page, run **`zed: install dev extension`**,
+and pick the directory. Zed builds it; `zed: open log` or
+`zed --foreground` shows what happened if it does not appear.
+
+Two caveats worth knowing before you start:
+
+- **`path_suffixes` are suffixes, not globs.** `"opensips.cfg"` matches
+  any path ENDING in that, so `opensips.cfg` and `db.opensips.cfg` are
+  covered but `opensips-proxy.cfg` is not. Zed's `file_types` setting
+  does take globs, so a user can widen it in `settings.json`:
+
+  ```json
+  "file_types": { "OpenSIPS": ["opensips*.cfg", "**/*.opensips.cfg"] }
+  ```
+
+- **`[grammars]` clones a repository and expects the grammar at its
+  root**, and this project keeps its grammar in the
+  `tree-sitter-opensips/` subdirectory. Publishing that directory as
+  its own repository is the fix for a shareable extension; for local
+  development a `file://` URL in `repository` works.
+
+The Rust above is compiled and checked against `zed_extension_api`
+0.7 (`cargo build --release --target wasm32-wasip1`) — but no part of
+this has been exercised inside a running Zed, so treat the end-to-end
+result as unverified.
 
 ## Any other LSP client
 
