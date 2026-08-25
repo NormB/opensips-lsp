@@ -183,168 +183,25 @@ fn rename_round_trip_survives_the_real_parser() {
 /// found, and every one of them made the server warn about a
 /// parameter that exists.
 ///
-/// The exceptions below are the other direction: places where the
-/// EXAMPLE is wrong, or where upstream documents no heading at all.
-/// Each is a finding about OpenSIPS's documentation, not about this
-/// parser, so each is listed by name rather than waved through by a
-/// count.
-const UPSTREAM_DOC_GAPS: [(&str, &str, &str); 32] = [
-    ("auth_aka", "pending_timeout", "no heading documents it"),
-    (
-        "auth_jwt",
-        "start_ts",
-        "heading documents `start_ts_column`",
-    ),
-    ("auth_jwt", "end_ts", "heading documents `end_ts_column`"),
-    // `## Parameters` with `### name`, not the `### Exported
-    // Parameters` / `#### name` every other module writes
-    (
-        "auth_web3",
-        "web3_authentication_rpc_url",
-        "README shape not harvested",
-    ),
-    (
-        "auth_web3",
-        "web3_authentication_contract_address",
-        "README shape not harvested",
-    ),
-    (
-        "auth_web3",
-        "web3_ens_rpc_url",
-        "README shape not harvested",
-    ),
-    (
-        "auth_web3",
-        "web3_ens_registry_address",
-        "README shape not harvested",
-    ),
-    (
-        "auth_web3",
-        "web3_contract_debug_mode",
-        "README shape not harvested",
-    ),
-    (
-        "auth_web3",
-        "authentication_rpc_url",
-        "README shape not harvested",
-    ),
-    (
-        "auth_web3",
-        "authentication_contract_address",
-        "README shape not harvested",
-    ),
-    ("auth_web3", "ens_rpc_url", "README shape not harvested"),
-    (
-        "auth_web3",
-        "ens_registry_address",
-        "README shape not harvested",
-    ),
-    (
-        "auth_web3",
-        "contract_debug_mode",
-        "README shape not harvested",
-    ),
-    ("auth_web3", "rpc_timeout", "README shape not harvested"),
-    // headings write the index as a template: `app[index]_..._column`
-    (
-        "b2b_sca",
-        "app1_shared_entity_column",
-        "heading is `app[index]_shared_entity_column`",
-    ),
-    (
-        "b2b_sca",
-        "app2_shared_entity_column",
-        "heading is `app[index]_shared_entity_column`",
-    ),
-    (
-        "b2b_sca",
-        "app1_call_state_column",
-        "heading is `app[index]_call_state_column`",
-    ),
-    (
-        "b2b_sca",
-        "app2_call_state_column",
-        "heading is `app[index]_call_state_column`",
-    ),
-    (
-        "b2b_sca",
-        "app1_call_info_uri_column",
-        "heading is `app[index]_call_info_uri_column`",
-    ),
-    (
-        "b2b_sca",
-        "app2_call_info_uri_column",
-        "heading is `app[index]_call_info_uri_column`",
-    ),
-    (
-        "b2b_sca",
-        "app1_call_info_appearance_uri_column",
-        "heading is `app[index]_...`",
-    ),
-    (
-        "b2b_sca",
-        "app2_call_info_appearance_uri_column",
-        "heading is `app[index]_...`",
-    ),
-    (
-        "b2b_sca",
-        "app1_b2bl_key_column",
-        "heading is `appindex_b2bl_key_column`",
-    ),
-    (
-        "b2b_sca",
-        "app2_b2bl_key_column",
-        "heading is `appindex_b2bl_key_column`",
-    ),
-    (
-        "config",
-        "restart_persistent_memory",
-        "heading documents `enable_restart_persistency`",
-    ),
-    ("cpl_c", "cpl_table", "no heading documents it"),
-    (
-        "osp",
-        "use_number_portablity",
-        "example typo for `use_number_portability`",
-    ),
-    (
-        "osp",
-        "networkid_param",
-        "heading documents `networkid_parameter`",
-    ),
-    (
-        "osp",
-        "switchid_param",
-        "heading documents `switchid_parameter`",
-    ),
-    (
-        "proto_bin",
-        "tcp_async_local_write_timeout",
-        "no heading documents it",
-    ),
-    (
-        "rtpengine",
-        "extra_failover_error",
-        "no heading documents it",
-    ),
-    ("tcp_mgm", "connect_timeout_col", "no heading documents it"),
-];
-
-/// Every parameter a module's own README sets in an example is in the
-/// catalogue.
+/// The other direction — an example naming a parameter the module does
+/// not export — used to be a hand-curated array of 32 triples. It is
+/// now derived: a module's `param_export_t` tables are the list
+/// `modparam()` is checked against at startup, so a name absent from
+/// them is not a parameter, whoever wrote it. That is provable rather
+/// than curated, and it carries its own evidence.
 #[test]
 fn the_catalogue_contains_every_parameter_the_readmes_set() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let modules = std::path::Path::new(&tree).join("modules");
+    let root = std::path::Path::new(&tree);
     let re =
         regex::Regex::new(r#"modparam\(\s*"([A-Za-z0-9_]+)"\s*,\s*"([A-Za-z0-9_]+)""#).unwrap();
     let catalogue = opensips_lsp::catalog::builtin_modules();
 
     let mut checked = 0usize;
     let mut missing: Vec<String> = Vec::new();
-    let mut stale: Vec<String> = Vec::new();
-    let mut seen_gap: Vec<(&str, &str)> = Vec::new();
-    let mut dirs: Vec<std::path::PathBuf> = std::fs::read_dir(&modules)
+    let mut not_exported: Vec<String> = Vec::new();
+    let mut with_tables = 0usize;
+    let mut dirs: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("modules"))
         .expect("an OpenSIPS source tree has modules/")
         .flatten()
         .map(|e| e.path())
@@ -361,6 +218,10 @@ fn the_catalogue_contains_every_parameter_the_readmes_set() {
             ));
             continue;
         };
+        let exported = opensips_lsp::catalog::param_names_from_c(&dir, root);
+        if !exported.names.is_empty() {
+            with_tables += 1;
+        }
         for c in re.captures_iter(&readme) {
             // only what the module says about ITSELF: a README often
             // shows another module's parameter in a worked example
@@ -369,45 +230,39 @@ fn the_catalogue_contains_every_parameter_the_readmes_set() {
             }
             let param = c[2].to_string();
             checked += 1;
-            let excused = UPSTREAM_DOC_GAPS
-                .iter()
-                .find(|(m, p, _)| *m == module && *p == param);
             if doc.params.iter().any(|p| p.name == param) {
-                if let Some((_, _, why)) = excused {
-                    stale.push(format!(
-                        "{module}::{param} is harvested now — drop it ({why})"
-                    ));
-                }
                 continue;
             }
-            match excused {
-                Some((m, p, _)) => {
-                    if !seen_gap.contains(&(m, p)) {
-                        seen_gap.push((m, p));
-                    }
+            // absent from the catalogue is a failure unless the
+            // module's own C tables say it is not a parameter at all
+            if !exported.names.is_empty() && !exported.names.contains(&param) {
+                let entry = format!("{module}::{param}");
+                if !not_exported.contains(&entry) {
+                    not_exported.push(entry);
                 }
-                None => missing.push(format!("{module}::{param}")),
+            } else {
+                missing.push(format!("{module}::{param}"));
             }
         }
     }
     assert!(checked > 1500, "suspiciously few examples read: {checked}");
+    // POSITIVE CONTROL. The exception is "absent from the C tables".
+    // Were the extraction to stop matching, every example would be
+    // excused and this test would pass having proven nothing.
+    assert!(
+        with_tables >= 175,
+        "only {with_tables} modules exposed a parameter table; \
+         the derived exception would excuse everything"
+    );
     assert!(
         missing.is_empty(),
-        "{} parameter(s) a README sets are not in the catalogue:\n{}",
+        "{} parameter(s) a README sets are exported by the module but absent from the catalogue:\n{}",
         missing.len(),
         missing.join("\n")
     );
-    // an exception that no longer fires is an exception that stopped
-    // describing the tree — it hides the next regression
-    assert!(stale.is_empty(), "stale exceptions:\n{}", stale.join("\n"));
-    assert_eq!(
-        seen_gap.len(),
-        UPSTREAM_DOC_GAPS.len(),
-        "exceptions that never fired: {:?}",
-        UPSTREAM_DOC_GAPS
-            .iter()
-            .filter(|(m, p, _)| !seen_gap.contains(&(*m, *p)))
-            .collect::<Vec<_>>()
+    eprintln!(
+        "catalogue covers {checked} README modparam examples; {} example(s) name a parameter the module never exported:\n{}",
+        not_exported.len(),
+        not_exported.join("\n")
     );
-    eprintln!("catalogue covers {checked} README modparam examples");
 }
