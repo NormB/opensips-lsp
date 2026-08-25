@@ -15,6 +15,7 @@ module.exports = grammar({
     source_file: $ => repeat($._top_level),
 
     _top_level: $ => choice(
+      $.include,
       $.loadmodule,
       $.modparam,
       $.global_assignment,
@@ -23,6 +24,25 @@ module.exports = grammar({
 
     comment: _ => token(seq('#', /[^\n]*/)),
     block_comment: _ => token(seq('/*', /[^*]*\*+([^/*][^*]*\*+)*/, '/')),
+
+    // The grammar did not model includes at all, while the server's
+    // scanner follows them and the whole split-configuration feature
+    // rests on them — so an editor driven by this grammar and the
+    // server driven by that scanner disagreed about what the file
+    // even contains.
+    //
+    // `!!` is accepted and `#!` is NOT, because that is what the real
+    // 4.0.1 parser does: `!!include_file` is read, `#!include_file`
+    // is a comment and never opened.  Kamailio reads both, and its
+    // sibling grammar accepts both; the difference is measured
+    // against each binary rather than shared between them.
+    include: $ => seq(
+      token(prec(3, seq(
+        optional('!!'),
+        choice('include_file', 'import_file'),
+      ))),
+      $.string,
+    ),
 
     loadmodule: $ => seq('loadmodule', $.string),
 

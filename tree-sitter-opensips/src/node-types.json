@@ -592,6 +592,21 @@
     }
   },
   {
+    "type": "include",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "string",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "keyword_statement",
     "named": true,
     "fields": {},
@@ -805,6 +820,10 @@
       "types": [
         {
           "type": "global_assignment",
+          "named": true
+        },
+        {
+          "type": "include",
           "named": true
         },
         {

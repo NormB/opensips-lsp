@@ -1951,3 +1951,105 @@ fn a_conditionally_guarded_include_is_still_claimed() {
         let _ = std::fs::remove_dir_all(&base);
     }
 }
+
+/// A configuration split the way a real one is split.
+///
+/// Modelled on a 2400-line production config carved into 60 fragments
+/// at its route boundaries: every fragment calls routes that live in
+/// other fragments, which is what a split configuration IS.  Analysed
+/// without knowing their root, those cross-references come back as
+/// "not defined" — seventy-five of them on the config this test is
+/// modelled on, on a configuration with nothing wrong with it.
+///
+/// The count is the point.  One fragment calling one parent route is
+/// a mechanism test; this is the blast radius, and it is what makes
+/// the difference between a usable editor and one nobody trusts.
+#[test]
+fn a_configuration_split_into_many_cross_calling_fragments_is_clean() {
+    const N: usize = 40;
+    let base = std::env::temp_dir().join(format!("frag-scale-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("inc")).unwrap();
+
+    // each fragment defines one route and calls its two neighbours,
+    // so every one of them depends on files it does not include
+    let piece = |i: usize| {
+        format!(
+            "route[R{i}] {{\n    route(R{});\n    route(R{});\n}}\n",
+            (i + 1) % N,
+            (i + N - 1) % N
+        )
+    };
+    let mut root = String::from("");
+    for i in 0..N {
+        root.push_str(&format!("include_file \"inc/p{i}.cfg\"\n"));
+        std::fs::write(base.join(format!("inc/p{i}.cfg")), piece(i)).unwrap();
+    }
+    root.push_str("route {\n    route(R0);\n}\n");
+    std::fs::write(base.join("opensips.cfg"), &root).unwrap();
+
+    let (mut child, rx, mut stdin) = start(&base, "");
+    for i in 0..N {
+        let uri = format!("file://{}", base.join(format!("inc/p{i}.cfg")).display());
+        did_open(&mut stdin, &uri, &piece(i));
+    }
+    // one fragment gains a call to a route that exists nowhere: the
+    // publish it produces is the signal that analysis really ran, and
+    // its neighbours' silence then means something
+    let ghost_uri = format!("file://{}", base.join("inc/p0.cfg").display());
+    let ghost_text = format!(
+        "{}route[EXTRA] {{\n    route(NO_SUCH_ROUTE);\n}}\n",
+        piece(0)
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri": ghost_uri, "version": 2},
+            "contentChanges":[{"text": ghost_text}]}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "textDocument/publishDiagnostics"
+                && v["params"]["uri"] == ghost_uri
+                && !v["params"]["diagnostics"].as_array().unwrap().is_empty()
+        },
+        "the planted finding",
+    );
+    let msgs: Vec<&str> = v["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d["message"].as_str())
+        .collect();
+    assert!(
+        msgs.iter().any(|m| m.contains("NO_SUCH_ROUTE")),
+        "a route defined nowhere is still reported: {msgs:?}"
+    );
+    assert!(
+        !msgs.iter().any(|m| m.contains("route 'R")),
+        "and the neighbours it calls are NOT: {msgs:?}"
+    );
+
+    // every fragment must know its root, or the silence above is luck
+    let mut id = 400;
+    for i in 0..N {
+        id += 1;
+        let uri = format!("file://{}", base.join(format!("inc/p{i}.cfg")).display());
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
+                "params":{"uri": uri}}),
+        );
+        let want = id;
+        let v = wait_for(&rx, |v| v["id"] == want, "analysisRoot");
+        assert!(
+            v["result"]
+                .as_str()
+                .is_some_and(|s| s.ends_with("opensips.cfg")),
+            "fragment {i} of {N} did not find its root: {v}"
+        );
+    }
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}

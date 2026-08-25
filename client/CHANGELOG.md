@@ -4,94 +4,52 @@ All notable changes to the OpenSIPS Routing Script extension.
 
 ## [0.20.0] — 2026-08-25
 
-Opening an included file directly now works, in both senses people
-asked for: it gets colors, and it stops reporting problems that were
-artefacts of opening it on its own.
+**Opening an included file on its own now works.** A configuration
+split across `include_file`/`import_file` is the normal shape of a
+real deployment, and until now every file in one except the root was
+second-class: no colours, and a screenful of warnings about routes
+its parent defines.
 
-- **A `.cfg` your configuration includes is recognized.** The
-  extension still refuses to claim every `.cfg` on disk — that
-  hijacks unrelated tools' config files — but a fragment named
-  `carrier-routes.cfg` is no longer left as plain text. VS Code hands
-  it over unassociated, the extension asks the server whether
-  anything includes it, and gives it the OpenSIPS language when
-  something does. Files another extension has already claimed are
-  left alone, and `opensipsLsp.associateIncludedFiles` turns it off.
-- **An included file is analysed as part of its root.** A fragment is
-  not a program: on its own it flagged every route its parent defines
-  as undefined and handed `opensips -C` something it was never meant
-  to accept. Diagnostics now run over the ROOT's closure and the
-  checker runs on the root, with each error routed back to the file
-  it actually names — an error inside the fragment lands on the
-  fragment's own line, and a failure elsewhere in the program is
-  reported on line 1 naming where it is rather than rendering clean.
-- **Navigation from a fragment reaches its parent.** Go to
-  definition, references, rename, call hierarchy, workspace symbols
-  and route completion span the root's closure, so a `route()` the
-  parent defines resolves and completes from inside the include.
-- **New request `opensips/analysisRoot`** for other clients: what is
-  this document a piece of? The root's URI, or `null` when it is a
-  program in its own right.
-- **A split-by-site layout works.** A config that reaches shared
-  routing as `../common/routing.cfg` names the same file the editor
-  opens as `common/routing.cfg`; keyed apart, the fragment had no
-  root and the feature silently did nothing for that layout. `.` and
-  `..` are now folded when an include is resolved, which also stops
-  the closure visiting one file twice and calling every route it
-  defines a duplicate.
-- **Typing the `include_file` line clears the warnings it fixes.**
-  Adding the include is the fix for a fragment reporting its parent's
-  routes as undefined — but the warnings stayed on screen until that
-  buffer was next touched, so the fix looked like it had not worked.
-  The file an include names is re-checked as soon as the line is
-  typed.
-- **A workspace too large to scan says so.** The include graph is
-  built from the first 500 configs under the workspace; past that a
-  root is not seen and its fragments stop being recognised. That now
-  produces a warning in the output channel instead of an unexplained
-  disappearance.
-- **The call graph works from inside an included file.** Asking who
-  calls a route the parent defines answered "nobody" — the follow-up
-  needs the root's text, and while you are editing an include the
-  root is not a file the editor has opened, so it was read as empty.
-- **A configuration with more than 64 includes keeps working.** The
-  include closure is bounded for safety, and a fragment past the
-  bound was analysed without its OWN includes — routes it could see
-  before started reading as undefined. Its own closure now leads and
-  the root's follows.
-- **A stray byte no longer erases a configuration.** A comment
-  written in latin-1 — an accent, a name — made the whole config
-  unreadable to the include graph, so every file it includes silently
-  stopped being recognised. Bytes are decoded leniently now.
-- **A large config is skipped consistently, and said out loud.** The
-  workspace scan and the include loader each decided for themselves
-  what they could read and disagreed above 1 MiB: the root was found
-  and then could not be loaded, so its routes quietly left scope.
-  One rule now, and any config it cannot read is named in the output
-  channel.
-- **`check` no longer fails CI on a correct split configuration.**
-  The command a git hook and a CI job run had no idea a file might be
-  part of something larger, so it reported the parent's routes as
-  undefined — and `--strict` makes warnings errors, so a green
-  configuration failed the build. It now finds the root the same way
-  the editor does.
-- **A folder added to the workspace after startup is picked up.**
-  Workspace folders were read once, at startup, and never again, so
-  everything in a folder you added stayed unrecognised until the
-  window was reloaded.
-- **A file behind a `#!ifdef` is still part of your configuration**,
-  because OpenSIPS reads it either way. Verified against the 4.0.1
-  binary rather than assumed: Kamailio compiles such includes out and
-  its extension skips them, and copying that rule here would have
-  broken configurations that are fine.
-- **A failed check no longer invents a file and a line.** When
-  `opensips -C` fails without positioning the error — a module it
-  cannot load, a bad module path — the note read "check failed
-  in , line 1: ...", naming an empty file and sending you to a
-  line the parser never mentioned. It now says only what is
-  known.
+- **It gets the language.** The extension still refuses to claim every
+  `.cfg` on your disk — that hijacks unrelated tools' config files —
+  but a fragment named `carrier-routes.cfg` is no longer left as plain
+  text. It asks the server whether anything includes the file and sets
+  the language when something does, leaving files another extension
+  already claims alone. Turn it off with `opensipsLsp.associateIncludedFiles`.
+- **It is analysed as part of its root.** Routes, modules and defines
+  the parent brings are in scope, so they stop reading as undefined —
+  on the configuration this was developed against, splitting it across
+  sixty files produced seventy-five false warnings before and none
+  after. `opensips -C` runs on the root, with each error routed back to
+  the file it actually names.
+- **Navigation spans the whole configuration.** Go to definition,
+  references, rename, call hierarchy, workspace symbols, reference
+  counts and route completion all reach across the include boundary
+  from inside a fragment.
+- **`opensips-lsp check` agrees with the editor.** The command a git hook and
+  a CI job run now finds the root the same way, so a correct split
+  configuration no longer fails the build under `--strict`.
+- **New request `opensips/analysisRoot`** for editors other than VS Code:
+  what is this document a piece of? The root's URI, or `null` when it
+  is a program in its own right.
 
-Open the FOLDER, not the single file — the root is found by reading
-the configs under the workspace folders your client sends.
+**One thing to do:** open the folder, not the single file. The root is
+found by reading the configs under your workspace folders, so with a
+single file open there is nothing to read. Folders added after startup
+are picked up.
+
+- **A file behind a `#!ifdef` IS part of your configuration**,
+  because OpenSIPS reads it either way — verified against the 4.0.1
+  binary. Kamailio compiles such includes out and its extension skips
+  them; the two engines genuinely differ here.
+
+Limits are announced rather than silent: a workspace past 500 configs,
+and any config too large or unreadable to include in the graph, say so
+in the output channel.
+
+Also fixed, and unrelated to the above: a failed `opensips -C` run that
+reported no position used to render as `check failed in , line 1: …`,
+naming an empty file and a line the parser never gave.
 
 ## [0.19.2] — 2026-08-24
 

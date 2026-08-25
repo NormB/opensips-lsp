@@ -70,6 +70,7 @@ fn grammar_and_scanner_agree_on_the_corpus() {
         "/tree-sitter-opensips/test/corpus"
     );
     let mut cases = 0;
+    let mut includes_seen = 0;
     for entry in std::fs::read_dir(dir).expect("corpus dir") {
         let path = entry.expect("entry").path();
         if path.extension().and_then(|e| e.to_str()) != Some("txt") {
@@ -93,7 +94,26 @@ fn grammar_and_scanner_agree_on_the_corpus() {
                 count(&expected, "modparam"),
                 "{title}: modparam count diverges\n--- input ---\n{input}"
             );
+            // Includes were the one construct the two sides modelled
+            // differently and nothing compared: the scanner followed
+            // them — correctly, the real parser reads them — while
+            // this grammar had no include rule at all.  An editor
+            // driven by the grammar and a server driven by the
+            // scanner then disagreed about what the file contains,
+            // which for a feature built entirely on include
+            // directives is the disagreement that matters most.
+            assert_eq!(
+                analyze::includes(&input).len(),
+                count(&expected, "include"),
+                "{title}: include count diverges\n--- input ---\n{input}"
+            );
+            includes_seen += count(&expected, "include");
         }
     }
     assert!(cases >= 8, "corpus went missing? saw {cases} cases");
+    assert!(
+        includes_seen >= 2,
+        "the corpus must exercise includes — bare and `!!`-prefixed — or \
+         that comparison is zero against zero: {includes_seen}"
+    );
 }

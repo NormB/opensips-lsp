@@ -240,3 +240,23 @@ route {
         (call_expression
           function: (identifier)
           (string))))))
+
+================================================================================
+include directives, bare and prefixed
+================================================================================
+
+include_file "opensips-local.cfg"
+#!include_file "extra.cfg"
+!!import_file "other.cfg"
+loadmodule "tm.so"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (include
+    (string))
+  (comment)
+  (include
+    (string))
+  (loadmodule
+    (string)))
