@@ -448,6 +448,13 @@ always wins, and **replaces** a built-in catalogue rather than merging
 with it — blending two versions would be wrong in a way neither is on
 its own.
 
+The built-in catalogue covers several releases — one in full plus what
+each later release changed — so `opensipsVersion` picks which one to
+judge against. A `modparam` warning names the release it was judged
+against, and when the parameter exists in another supported release it
+says which, because a name absent from one release and present in its
+neighbour is a version mismatch rather than a typo.
+
 Shipping the module half reverses an earlier decision, which said
 there was no honest version to pin module docs to because what modules
 exist depends on what you built. That objection was right about the
@@ -498,6 +505,7 @@ clients that can't pass options.
 | `opensipsLsp.serverPath` | — | — | `opensips-lsp` | Server binary; the default uses the copy bundled in platform builds, then PATH. |
 | `opensipsLsp.opensipsPath` | `opensipsPath` | `OPENSIPS_LSP_BIN` | `opensips` | Binary for `-C` diagnostics; empty disables them. |
 | `opensipsLsp.opensipsSrc` | `opensipsSrc` | `OPENSIPS_LSP_SRC` | *(unset)* | Source tree for completion/hover docs. |
+| `opensipsLsp.opensipsVersion` | `opensipsVersion` | `OPENSIPS_LSP_VERSION` | *(newest)* | Built-in release to check `modparam` names against. Ignored when `opensipsSrc` is set. |
 | `opensipsLsp.diagnostics.enable` | *(maps to empty `opensipsPath`)* | — | `true` | Toggle diagnostics without losing the configured path. |
 | `opensipsLsp.diagnostics.maxProblems` | `maxDiagnostics` | — | `100` | Bound on published diagnostics per file. |
 | `opensipsLsp.diagnostics.analyzer` | `analyzerDiagnostics` | — | `true` | Fast analyzer warnings between saves (undefined `route()` targets, duplicate definitions, undocumented modparams, inert `#!` directives). |

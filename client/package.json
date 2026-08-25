@@ -60,6 +60,11 @@
           "default": "",
           "description": "OpenSIPS source tree to harvest module documentation from (completion/hover)."
         },
+        "opensipsLsp.opensipsVersion": {
+          "type": "string",
+          "default": "",
+          "description": "Built-in OpenSIPS release to check modparam names against (e.g. 3.6.8). Empty means the newest the catalogue covers. Ignored when opensipsSrc is set."
+        },
         "opensipsLsp.checkTimeoutMs": {
           "type": "number",
           "default": 10000,

@@ -109,10 +109,29 @@ pub fn run_check(args: &[String]) -> i32 {
                 (harvested, catalog::CatalogOrigin::ConfiguredTree)
             }
         }
-        None => (
-            catalog::builtin_modules().modules.clone(),
-            catalog::CatalogOrigin::BuiltIn(catalog::builtin_modules().version.clone()),
-        ),
+        // no tree: the built-in catalogue, at the release the user
+        // named if they named a supported one
+        None => {
+            let wanted = std::env::var("OPENSIPS_LSP_VERSION")
+                .ok()
+                .filter(|v| !v.trim().is_empty());
+            let chosen = match &wanted {
+                Some(v) => catalog::builtin_modules_at(v).unwrap_or_else(|| {
+                    // silently using a different release would have
+                    // the run report on something nobody asked about
+                    eprintln!(
+                        "opensips-lsp: no built-in catalogue for OpenSIPS {v} — \
+                         supported: {}; using {}",
+                        catalog::builtin_versioned().versions().join(", "),
+                        catalog::builtin_versioned().newest()
+                    );
+                    catalog::builtin_modules().clone()
+                }),
+                None => catalog::builtin_modules().clone(),
+            };
+            let version = chosen.version.clone();
+            (chosen.modules, catalog::CatalogOrigin::BuiltIn(version))
+        }
     };
     // Findings go to stdout as `file:line:col: sev: msg` and are
     // parsed by other tools; a header among them would break that, so

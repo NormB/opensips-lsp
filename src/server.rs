@@ -25,6 +25,10 @@ pub struct Backend {
     /// releases, and a parameter absent from a built-in catalogue
     /// may simply be one that version does not have.
     catalog_origin: std::sync::Arc<std::sync::RwLock<catalog::CatalogOrigin>>,
+    /// The built-in release to check against, when the user named
+    /// one. A configured source tree still wins over it: that is
+    /// exact for their build, and this is a choice among ours.
+    wanted_version: std::sync::RwLock<Option<String>>,
     core: std::sync::RwLock<catalog::CoreDocs>,
     src: std::sync::RwLock<Option<String>>,
     opensips_bin: std::sync::RwLock<Option<String>>,
@@ -82,6 +86,7 @@ impl Backend {
             catalog_origin: std::sync::Arc::new(std::sync::RwLock::new(
                 catalog::CatalogOrigin::BuiltIn(catalog::builtin_modules().version.clone()),
             )),
+            wanted_version: std::sync::RwLock::new(None),
             core: std::sync::RwLock::new(catalog::CoreDocs::default()),
             src: std::sync::RwLock::new(None),
             opensips_bin: std::sync::RwLock::new(None),
@@ -1233,6 +1238,13 @@ impl LanguageServer for Backend {
         // delays the initialize handshake
         *self.src.write().unwrap() = src;
 
+        *self.wanted_version.write().unwrap() = opts
+            .get("opensipsVersion")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .or_else(|| std::env::var("OPENSIPS_LSP_VERSION").ok())
+            .filter(|s| !s.is_empty());
+
         Ok(InitializeResult {
             offset_encoding: None,
             server_info: Some(ServerInfo {
@@ -1348,9 +1360,32 @@ impl LanguageServer for Backend {
         // would be wrong in a way neither is alone.
         let builtin_mods = self.catalog.read().unwrap().is_empty();
         if builtin_mods {
-            *self.catalog.write().unwrap() = catalog::builtin_modules().modules.clone();
-            *self.catalog_origin.write().unwrap() =
-                catalog::CatalogOrigin::BuiltIn(catalog::builtin_modules().version.clone());
+            let wanted = self.wanted_version.read().unwrap().clone();
+            // An unsupported release must not silently become the
+            // newest: the user would then read warnings about a
+            // release they did not ask for, with nothing saying so.
+            let chosen = match wanted {
+                Some(v) => match catalog::builtin_modules_at(&v) {
+                    Some(b) => b,
+                    None => {
+                        self.client
+                            .log_message(
+                                MessageType::WARNING,
+                                format!(
+                                    "opensips-lsp: no built-in catalogue for OpenSIPS {v} — \
+                                     supported: {}; using {}",
+                                    catalog::builtin_versioned().versions().join(", "),
+                                    catalog::builtin_versioned().newest()
+                                ),
+                            )
+                            .await;
+                        catalog::builtin_modules().clone()
+                    }
+                },
+                None => catalog::builtin_modules().clone(),
+            };
+            *self.catalog.write().unwrap() = chosen.modules;
+            *self.catalog_origin.write().unwrap() = catalog::CatalogOrigin::BuiltIn(chosen.version);
         }
         let n = self.catalog.read().unwrap().len();
         let c = self.core.read().unwrap().functions.len();

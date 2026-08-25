@@ -1355,6 +1355,27 @@ pub fn split_params(sig: &str) -> Vec<String> {
     out
 }
 
+/// The clause naming other supported releases that export this
+/// parameter, or nothing when there are none.
+///
+/// Only meaningful for the built-in catalogue: a configured source
+/// tree is one release by construction, and this server knows no
+/// others to compare it against.
+fn elsewhere(origin: &catalog::CatalogOrigin, module: &str, param: &str) -> String {
+    let catalog::CatalogOrigin::BuiltIn(current) = origin else {
+        return String::new();
+    };
+    let others: Vec<String> = catalog::builtin_versioned()
+        .versions_with_param(module, param)
+        .into_iter()
+        .filter(|v| v != current)
+        .collect();
+    if others.is_empty() {
+        return String::new();
+    }
+    format!(" — it exists in {}", others.join(", "))
+}
+
 /// Catalog-pinned validation: flag `modparam("m", "p", ...)` where
 /// the configured source tree documents module `m` but no parameter
 /// `p`.  Version-exact by construction — the catalog IS the user's
@@ -1391,15 +1412,17 @@ pub fn catalog_diagnostics(
             line: call.line,
             col_start: call.col,
             col_end: call.col + call.param.len() as u32,
-            // Name the catalogue. A parameter absent here may simply
-            // be one this version does not have, and the reader
-            // cannot tell that from a typo unless the message says
-            // which version it was judged against.
+            // Name the catalogue, and say when the name exists in
+            // another supported release. A parameter absent from the
+            // release in use but present in a neighbouring one is
+            // almost never a typo — it is a version mismatch, and
+            // that is a different thing for the reader to go and do.
             message: format!(
-                "parameter '{}' is not exported by module '{}' in {}",
+                "parameter '{}' is not exported by module '{}' in {}{}",
                 call.param,
                 call.module,
-                origin.describe()
+                origin.describe(),
+                elsewhere(origin, &call.module, &call.param)
             ),
         });
     }

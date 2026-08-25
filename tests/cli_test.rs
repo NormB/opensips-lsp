@@ -218,3 +218,80 @@ fn check_runs_the_catalogue_check_and_names_the_catalogue() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The release checked against is selectable, and selecting one the
+/// catalogue really covers changes the answer.
+///
+/// `proto_bin::bin_async_local_connect_timeout` exists in 3.5.9 and
+/// 3.6.8 and was dropped by 4.0: on the newest release it warns and
+/// says where it exists, and on 3.6.8 it is simply correct. A test
+/// that only checked the header would pass even if the selection
+/// changed nothing.
+#[test]
+fn the_checked_release_is_selectable() {
+    let dir = setup("version");
+    let cfg = dir.join("v.cfg");
+    std::fs::write(
+        &cfg,
+        "route {\n    xlog(\"x\");\n}\nmodparam(\"proto_bin\", \"bin_async_local_connect_timeout\", 5)\n",
+    )
+    .unwrap();
+    let run = |version: &str| {
+        let out = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .args(["check", cfg.to_str().unwrap()])
+            .env("OPENSIPS_LSP_BIN", "")
+            .env("OPENSIPS_LSP_SRC", "")
+            .env("OPENSIPS_LSP_VERSION", version)
+            .output()
+            .unwrap();
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+
+    // the newest release: warns, and says which releases do have it
+    let (newest_out, newest_err) = run("");
+    assert!(
+        newest_out.contains("bin_async_local_connect_timeout"),
+        "stdout: {newest_out}"
+    );
+    assert!(
+        newest_out.contains("it exists in"),
+        "a parameter another release exports must say so; stdout: {newest_out}"
+    );
+    assert!(newest_err.contains("4.0.1"), "stderr: {newest_err}");
+
+    // a release that really exports it: silent
+    let (older_out, older_err) = run("3.6.8");
+    assert!(older_err.contains("3.6.8"), "stderr: {older_err}");
+    assert!(
+        !older_out.contains("bin_async_local_connect_timeout"),
+        "3.6.8 exports it, so there is nothing to warn about; stdout: {older_out}"
+    );
+}
+
+/// An unsupported release must not quietly become the newest — the
+/// run would then report on a release nobody asked about.
+#[test]
+fn an_unsupported_release_is_reported_not_swallowed() {
+    let dir = setup("badversion");
+    let cfg = dir.join("b.cfg");
+    std::fs::write(&cfg, "route {\n    xlog(\"x\");\n}\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .args(["check", cfg.to_str().unwrap()])
+        .env("OPENSIPS_LSP_BIN", "")
+        .env("OPENSIPS_LSP_SRC", "")
+        .env("OPENSIPS_LSP_VERSION", "9.9.9")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("no built-in catalogue for OpenSIPS 9.9.9"),
+        "stderr: {stderr}"
+    );
+    // and it must say what it DID use, and what it could have used
+    assert!(stderr.contains("supported:"), "stderr: {stderr}");
+    assert!(stderr.contains("using"), "stderr: {stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

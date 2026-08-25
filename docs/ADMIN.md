@@ -71,6 +71,27 @@ module hover is unavailable.
 { "opensipsSrc": "/home/user/src/opensips" }
 ```
 
+#### opensipsVersion (string)
+
+Which built-in OpenSIPS release to check `modparam` names against.
+What a module exports moves between releases, so a configuration that
+is correct on one can look wrong when judged against another.
+
+Accepts any release the built-in catalogue covers — currently
+`3.5.9`, `3.6.8` and `4.0.1`. An unrecognised value is reported and
+the newest is used, rather than silently checking against a release
+you did not ask for.
+
+Ignored when `opensipsSrc` is set: your own tree is exact for your
+build, and this is a choice among the ones shipped here.
+
+*Default value is the newest release the catalogue covers.
+Environment fallback: `OPENSIPS_LSP_VERSION`.*
+
+```json title="Set opensipsVersion parameter"
+{ "opensipsVersion": "3.6.8" }
+```
+
 #### checkTimeoutMs (integer)
 
 Upper bound, in milliseconds, on one `opensips -C` run. A run that
