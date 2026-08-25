@@ -905,9 +905,249 @@ pub fn builtin_core() -> &'static BuiltinCore {
     })
 }
 
+/// What one release changed from the release before it.
+///
+/// Adds and updates share `upserted` deliberately: applying either is
+/// the same operation — replace the entry of that name, or insert it
+/// if absent — and whether a given upsert is an addition or an edit is
+/// a question about the previous release, not a fact worth storing
+/// twice.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ModuleDelta {
+    /// The release this delta produces.
+    pub version: String,
+    /// Modules this release introduces, in full.
+    pub modules_added: Vec<ModuleDoc>,
+    /// Modules this release drops.
+    pub modules_removed: Vec<String>,
+    /// What changed inside modules present in both releases.
+    pub changes: Vec<ModuleChange>,
+}
+
+/// How one surface — a module's parameters, or its functions —
+/// changed between two releases.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum SurfaceChange {
+    /// Item-level edits, keyed by name.
+    Edits {
+        /// Names the release no longer exports.
+        removed: Vec<String>,
+        /// Entries added or altered, applied by name.
+        upserted: Vec<Item>,
+    },
+    /// The whole list, replacing what was there.
+    ///
+    /// Names are not unique on every surface: `auth` documents
+    /// `append_rpid_hf()` and `append_rpid_hf(prefix, suffix)` as two
+    /// entries sharing a name, and keying by name would silently
+    /// merge the overloads into one. Four surfaces per release need
+    /// this; everything else stays item-level, which is why the
+    /// deltas are a third of what whole lists would cost.
+    Whole(Vec<Item>),
+}
+
+/// What one release changed inside one surviving module.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ModuleChange {
+    /// The module these changes apply to.
+    pub module: String,
+    /// How its parameters changed, if they did.
+    pub params: Option<SurfaceChange>,
+    /// How its functions changed, if they did.
+    pub functions: Option<SurfaceChange>,
+}
+
+/// The vendored catalogue: one release in full, plus a forward delta
+/// per later release.
+///
+/// Releases differ far less than they resemble each other — between
+/// 3.6.8 and 4.0.1, 1660 parameters are identical and 30 are not — so
+/// shipping each release whole would be mostly duplicated bytes, and
+/// the duplication would grow with every release added rather than
+/// shrink.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct VersionedModules {
+    /// The oldest supported release, in full.
+    pub base: BuiltinModules,
+    /// Later releases, oldest first, each relative to the one before.
+    pub deltas: Vec<ModuleDelta>,
+}
+
+/// Put a catalogue in canonical order: modules by name, and each
+/// module's parameters and functions by name.
+///
+/// Order is not information here. Left alone it would be treated as
+/// information by the delta: a README that merely reshuffled its
+/// headings would produce a delta rewriting every entry, and a
+/// reconstructed release would differ from a fresh harvest over
+/// nothing. Canonical order makes the round-trip exact and keeps a
+/// delta to what actually changed.
+pub fn canonicalize(modules: &mut [ModuleDoc]) {
+    modules.sort_by(|a, b| a.name.cmp(&b.name));
+    for m in modules.iter_mut() {
+        m.params.sort_by(|a, b| a.name.cmp(&b.name));
+        m.functions.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+}
+
+/// Whether a surface documents one name more than once.
+fn has_duplicate_names(items: &[Item]) -> bool {
+    let mut seen: Vec<&str> = Vec::with_capacity(items.len());
+    for it in items {
+        if seen.contains(&it.name.as_str()) {
+            return true;
+        }
+        seen.push(&it.name);
+    }
+    false
+}
+
+/// Apply one item list over another by name: replace what is there,
+/// append what is not.
+fn upsert_items(into: &mut Vec<Item>, items: &[Item]) {
+    for it in items {
+        match into.iter_mut().find(|x| x.name == it.name) {
+            Some(slot) => *slot = it.clone(),
+            None => into.push(it.clone()),
+        }
+    }
+}
+
+/// How `new` differs from `old`, or `None` if it does not.
+fn diff_surface(old: &[Item], new: &[Item]) -> Option<SurfaceChange> {
+    if old == new {
+        return None;
+    }
+    if has_duplicate_names(old) || has_duplicate_names(new) {
+        return Some(SurfaceChange::Whole(new.to_vec()));
+    }
+    let removed = old
+        .iter()
+        .filter(|o| !new.iter().any(|n| n.name == o.name))
+        .map(|o| o.name.clone())
+        .collect();
+    let upserted = new
+        .iter()
+        .filter(|n| old.iter().find(|o| o.name == n.name) != Some(n))
+        .cloned()
+        .collect();
+    Some(SurfaceChange::Edits { removed, upserted })
+}
+
+/// Apply one surface change in place.
+fn apply_surface(into: &mut Vec<Item>, change: &SurfaceChange) {
+    match change {
+        SurfaceChange::Whole(items) => *into = items.clone(),
+        SurfaceChange::Edits { removed, upserted } => {
+            into.retain(|i| !removed.contains(&i.name));
+            upsert_items(into, upserted);
+        }
+    }
+}
+
+/// Compute what `newer` changed from `older`.
+///
+/// Both must already be in canonical order. Kept beside the type it
+/// produces so the two cannot drift, and so a round-trip test can
+/// state its property directly: applying this delta to `older` must
+/// yield `newer`.
+pub fn diff_catalogues(older: &[ModuleDoc], newer: &[ModuleDoc], version: &str) -> ModuleDelta {
+    let mut delta = ModuleDelta {
+        version: version.to_string(),
+        ..Default::default()
+    };
+    for m in newer {
+        if !older.iter().any(|o| o.name == m.name) {
+            delta.modules_added.push(m.clone());
+        }
+    }
+    for o in older {
+        let Some(n) = newer.iter().find(|n| n.name == o.name) else {
+            delta.modules_removed.push(o.name.clone());
+            continue;
+        };
+        let change = ModuleChange {
+            module: o.name.clone(),
+            params: diff_surface(&o.params, &n.params),
+            functions: diff_surface(&o.functions, &n.functions),
+        };
+        if change.params.is_some() || change.functions.is_some() {
+            delta.changes.push(change);
+        }
+    }
+    delta
+}
+
+impl VersionedModules {
+    /// Every supported release, oldest first.
+    pub fn versions(&self) -> Vec<&str> {
+        std::iter::once(self.base.version.as_str())
+            .chain(self.deltas.iter().map(|d| d.version.as_str()))
+            .collect()
+    }
+
+    /// The newest supported release.
+    pub fn newest(&self) -> &str {
+        self.deltas
+            .last()
+            .map(|d| d.version.as_str())
+            .unwrap_or(self.base.version.as_str())
+    }
+
+    /// The catalogue as it stood at `version`, or `None` if that
+    /// release is not one of the supported ones.
+    pub fn at(&self, version: &str) -> Option<Vec<ModuleDoc>> {
+        if version == self.base.version {
+            return Some(self.base.modules.clone());
+        }
+        if !self.deltas.iter().any(|d| d.version == version) {
+            return None;
+        }
+        let mut modules = self.base.modules.clone();
+        for delta in &self.deltas {
+            modules.retain(|m| !delta.modules_removed.contains(&m.name));
+            for change in &delta.changes {
+                let Some(m) = modules.iter_mut().find(|m| m.name == change.module) else {
+                    continue;
+                };
+                if let Some(c) = &change.params {
+                    apply_surface(&mut m.params, c);
+                }
+                if let Some(c) = &change.functions {
+                    apply_surface(&mut m.functions, c);
+                }
+            }
+            modules.extend(delta.modules_added.iter().cloned());
+            if delta.version == version {
+                break;
+            }
+        }
+        canonicalize(&mut modules);
+        Some(modules)
+    }
+
+    /// Which supported releases export `param` from `module`.
+    ///
+    /// This is what turns "unknown parameter" into a version
+    /// mismatch: a name absent from the release in use but present in
+    /// another is almost never a typo.
+    pub fn versions_with_param(&self, module: &str, param: &str) -> Vec<String> {
+        self.versions()
+            .into_iter()
+            .filter(|v| {
+                self.at(v).is_some_and(|mods| {
+                    mods.iter()
+                        .any(|m| m.name == module && m.params.iter().any(|p| p.name == param))
+                })
+            })
+            .map(|v| v.to_string())
+            .collect()
+    }
+}
+
 /// The vendored module catalogue: every module the pinned release
 /// documents, with its exported functions and parameters.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BuiltinModules {
     /// The OpenSIPS version the docs were harvested from.
     pub version: String,

@@ -16,6 +16,11 @@
 set -euo pipefail
 
 TAG="${OPENSIPS_TAG:-4.0.1}"
+# The releases the versioned catalogue covers: the newest of each live
+# line, oldest first. Only $TAG is ever BUILT — the older ones are
+# harvested from source alone, which is all the catalogue needs, so
+# adding a release costs a shallow clone rather than a compile.
+OLDER_TAGS="${OPENSIPS_OLDER_TAGS:-3.5.9 3.6.8}"
 ROOT="${PROOF_ROOT:-${PWD}/.proof}"
 SRC="$ROOT/opensips-$TAG"
 INST="$ROOT/inst-$TAG"
@@ -56,7 +61,24 @@ TM="$(find "$INST" -name tm.so -print -quit)"
 }
 MPATH="$(dirname "$TM")/"
 
+# Source-only checkouts of the older supported releases. The
+# versioned catalogue is base-plus-deltas across these, and its
+# round-trip proof needs every one of them present.
+TREES=""
+for t in $OLDER_TAGS; do
+	d="$ROOT/opensips-$t"
+	if [ ! -d "$d/modules" ]; then
+		log "cloning OpenSIPS $t (source only) into $ROOT"
+		rm -rf "$d"
+		git clone -q --depth 1 --branch "$t" \
+			https://github.com/OpenSIPS/opensips.git "$d"
+	fi
+	TREES="${TREES:+$TREES,}$t=$d"
+done
+TREES="${TREES:+$TREES,}$TAG=$SRC"
+
 emit() {
+	printf 'OPENSIPS_LSP_TEST_TREES=%s\n' "$TREES"
 	printf 'OPENSIPS_LSP_TEST_TREE=%s\n' "$SRC"
 	printf 'OPENSIPS_LSP_TEST_BIN=%s\n' "$INST/sbin/opensips"
 	printf 'OPENSIPS_LSP_TEST_MPATH=%s\n' "$MPATH"
