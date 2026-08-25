@@ -11,8 +11,13 @@
 #   eval "$(scripts/proof-env.sh)"   # local shell
 #   scripts/proof-env.sh             # in CI: appends to $GITHUB_ENV
 #
-# Everything lands under .proof/ (gitignored) and is reused on the
-# next run; CI caches that directory keyed on the tag below.
+# Everything lands under .proof/ (gitignored). A local run reuses what
+# is already there, so the build happens once. CI does NOT: the only
+# cache in the workflow is Swatinem/rust-cache, which caches Cargo
+# artefacts and not this directory, so every CI run re-clones all
+# three trees and rebuilds $TAG from scratch. Said the other way
+# round, adding a release costs CI one shallow clone per run — which
+# is affordable precisely because the older ones are never built.
 set -euo pipefail
 
 TAG="${OPENSIPS_TAG:-4.0.1}"
