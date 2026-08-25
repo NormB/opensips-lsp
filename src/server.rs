@@ -640,7 +640,8 @@ impl Backend {
                     .show_message(
                         MessageType::WARNING,
                         format!(
-                            "opensips-lsp: '{src}' yields no module documentation —                              check that opensipsSrc points at an OpenSIPS source tree"
+                            "opensips-lsp: '{src}' yields no module documentation — \
+                             check that opensipsSrc points at an OpenSIPS source tree"
                         ),
                     )
                     .await;
@@ -1623,7 +1624,8 @@ impl LanguageServer for Backend {
             self.client
                 .log_message(
                     MessageType::INFO,
-                    "opensips-lsp: workspace diagnostics stopped at 500 configs;                      the sweep is incomplete",
+                    "opensips-lsp: workspace diagnostics stopped at 500 configs; \
+                     the sweep is incomplete",
                 )
                 .await;
         }
