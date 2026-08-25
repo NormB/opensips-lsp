@@ -1908,3 +1908,46 @@ fn state_survives_repeated_open_edit_close_cycles() {
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// A conditionally-guarded include, end to end — and OpenSIPS is not
+/// Kamailio here.
+///
+/// OpenSIPS 4.0.1 reads an `include_file` inside an unmet `#!ifdef`
+/// anyway (pinned by the proof suite against the real binary), so the
+/// file IS part of that configuration and must be claimed either way.
+/// The sibling server skips them, because Kamailio genuinely does not
+/// open them.  The rule was derived from one engine and would have
+/// been copied to the other unchecked.
+#[test]
+fn a_conditionally_guarded_include_is_still_claimed() {
+    for (defined, label) in [(true, "defined"), (false, "not-defined")] {
+        let base = std::env::temp_dir().join(format!("frag-cond-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("inc")).unwrap();
+        let def = if defined { "#!define FEATURE_ON\n" } else { "" };
+        std::fs::write(
+            base.join("opensips.cfg"),
+            format!(
+                "{def}#!ifdef FEATURE_ON\ninclude_file \"inc/on.cfg\"\n#!endif\nroute[ROOT_ROUTE] {{\n    exit;\n}}\nroute {{\n    exit;\n}}\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(base.join("inc/on.cfg"), "route[COND] {\n    exit;\n}\n").unwrap();
+        let frag_uri = format!("file://{}", base.join("inc/on.cfg").display());
+        let (mut child, rx, mut stdin) = start(&base, "");
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
+                "params":{"uri": frag_uri}}),
+        );
+        let v = wait_for(&rx, |v| v["id"] == 2, "analysisRoot");
+        assert!(
+            v["result"]
+                .as_str()
+                .is_some_and(|s| s.ends_with("opensips.cfg")),
+            "OpenSIPS reads this include whether or not the symbol is {label}: {v}"
+        );
+        let _ = child.kill();
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}

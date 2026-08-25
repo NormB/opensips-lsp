@@ -78,6 +78,11 @@ artefacts of opening it on its own.
   Workspace folders were read once, at startup, and never again, so
   everything in a folder you added stayed unrecognised until the
   window was reloaded.
+- **A file behind a `#!ifdef` is still part of your configuration**,
+  because OpenSIPS reads it either way. Verified against the 4.0.1
+  binary rather than assumed: Kamailio compiles such includes out and
+  its extension skips them, and copying that rule here would have
+  broken configurations that are fine.
 - **A failed check no longer invents a file and a line.** When
   `opensips -C` fails without positioning the error — a module it
   cannot load, a bad module path — the note read "check failed

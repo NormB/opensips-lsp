@@ -855,6 +855,13 @@ impl IncludeGraph {
         let mut parents: std::collections::BTreeMap<std::path::PathBuf, Vec<std::path::PathBuf>> =
             std::collections::BTreeMap::new();
         for (path, text) in configs {
+            // Every include, conditional or not: OpenSIPS 4.0.1 reads
+            // an `include_file` inside an unmet `#!ifdef` anyway —
+            // pinned by `the_real_parser_reads_a_conditional_include_anyway`
+            // in the proof suite.  Kamailio differs, and its sibling
+            // skips them for that reason; copying the rule across
+            // would stop claiming roots that genuinely do include the
+            // file.
             for inc in analyze::includes(text) {
                 let entry = parents.entry(resolve_include(path, &inc.name)).or_default();
                 if !entry.contains(path) {

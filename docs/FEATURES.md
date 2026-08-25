@@ -305,6 +305,14 @@ rebuilds the graph when one is added or removed; without that, "Add
 Folder to Workspace" left every fragment in the new folder
 unrecognised until the window was reloaded.
 
+**A conditionally-guarded include IS claimed.** OpenSIPS 4.0.1 reads
+an `include_file` inside an unmet `#!ifdef` anyway — the file is
+opened and its syntax errors are reported — so it really is part of
+that configuration and is claimed either way. Kamailio's preprocessor
+does compile such includes out, and the sibling server skips them for
+that reason; the difference is measured against both binaries in the
+proof suites rather than assumed from one of them.
+
 The scan behind the graph is bounded at 500 configs and **says so in
 the log** when it stops early. Past that bound a root is simply not
 seen and its fragments stop being recognised — no colours, no
