@@ -184,6 +184,72 @@ modules stay silent.
 opens the included file (relative paths resolve against the including
 file's directory; links are produced even for not-yet-created files).
 
+#### An included file opened on its own
+
+A config another config includes is a **fragment**, not a program.
+Checked on its own it flags every route its parent defines as
+undefined and reports every construct it continues as a syntax error,
+and `opensips -C` was never meant to be handed one. The workspace
+sweep has always known this and skipped fragments — but opening one
+directly used to produce exactly those errors, as artefacts of how
+the file was opened rather than of anything wrong with it.
+
+So a fragment is answered in its **root's** context. Given
+
+```
+/etc/opensips/
+├── opensips.cfg          include_file "modules.cfg"
+│                         include_file "routing/inbound.cfg"
+├── modules.cfg
+└── routing/
+    ├── inbound.cfg       route[inbound] { route(send_to_carrier); }
+    └── carriers.cfg      route[send_to_carrier] { … }
+```
+
+opening `routing/inbound.cfg` on its own resolves `send_to_carrier`,
+offers it in completion, and reports nothing about it — even though
+`inbound.cfg` neither defines it nor includes the file that does.
+
+**The only thing the user must do is open the folder** (in VS Code,
+`File → Open Folder…`), because the root is found by reading the
+configs under the client's workspace folders. A client that opened a
+single file has given the server nothing to read; the root could be
+any directory above it, and guessing is worse than saying so. With no
+folder, every config is a program of its own — the pre-0.20.0
+behaviour.
+
+The server keeps the workspace's include graph inverted — which
+config names which — and climbs it to the top of the chain that
+reaches the open document:
+
+- **Diagnostics.** The analyzer runs over the root's closure, so the
+  routes and modules the parent brings exist; only findings that land
+  in the fragment are reported. `opensips -C` is run on the ROOT, and
+  each error it reports is routed to the file it actually names — an
+  error inside the fragment lands on the fragment's own line. If the
+  program fails to compile for a reason that is not in this file, the
+  fragment says so on line 1 and names where: a failed check must
+  never render as clean.
+- **Navigation and completion.** Go to definition, references,
+  rename, call hierarchy, workspace symbols and route completion all
+  span the root's closure, so a `route()` the parent defines resolves
+  from inside the fragment and is offered while typing there.
+- **`opensips/analysisRoot`.** A non-LSP request answering "what is
+  this document a piece of": the root's URI, or `null` when the
+  document is a program in its own right — or a file the workspace
+  never includes. The VS Code client uses it to decide whether an
+  unassociated `.cfg` on screen is part of an OpenSIPS configuration
+  (see **Notes**).
+
+A fragment reached from more than one root has no single true answer;
+the lexicographically first parent is taken at each step, so the
+context cannot flicker between edits. Include cycles terminate at the
+last config not already visited. The graph is rebuilt when a config
+is created, deleted or changed on disk, when a document opens or
+closes, and when an edit adds or removes an include directive —
+nothing else can move a file from one root to another, so ordinary
+typing does not pay for it.
+
 #### Semantic highlighting
 
 Route names (definitions and call sites) and pseudo-variables get
@@ -371,11 +437,25 @@ clients that can't pass options.
 | `opensipsLsp.checkTimeoutMs` | `checkTimeoutMs` | `OPENSIPS_LSP_CHECK_TIMEOUT_MS` | `10000` | Kill a `-C` run after this many ms. |
 | `opensipsLsp.completion.snippets` | `snippetCompletions` | — | `true` | Function completions as tabstop snippets. |
 | `opensipsLsp.cacheDir` | `cacheDir` | `OPENSIPS_LSP_CACHE_DIR` | platform cache dir | Documentation-catalog cache location. |
+| `opensipsLsp.associateIncludedFiles` | — | — | `true` | Give a plain-text `.cfg` the workspace's configuration includes the OpenSIPS language (colours, completion, diagnostics). Files another extension already claims are left alone. |
 | `opensipsLsp.trace.server` | — | — | `off` | LSP traffic tracing in the output channel. |
 | — | — | `OPENSIPS_LSP_OUTPUT_CAP_BYTES` | `1048576` | Byte cap on captured `-C` output. |
 
 ## Notes
 
+- The extension claims `opensips.cfg`, `opensips*.cfg` and
+  `*.opensips.cfg` by name. The generic `.cfg` extension is
+  deliberately left alone so unrelated tools' config files are not
+  hijacked. A `.cfg` your configuration *includes* is picked up
+  anyway, at runtime: VS Code hands it over as plain text, the
+  extension asks the server whether anything includes it
+  (`opensips/analysisRoot`) and sets the language when something
+  does, so an include named `carrier-routes.cfg` gets the same
+  colours and the same server as the root that pulls it in. A file
+  another extension has already claimed is left to that extension.
+  Turn this off with `opensipsLsp.associateIncludedFiles`; anything
+  the server cannot reach through an include still needs a
+  `files.associations` entry mapping it to `opensips-cfg`.
 - Runtime toggles (`diagnostics.analyzer`, `completion.snippets`,
   `codeLens.references`, `inlayHints.parameterNames`,
   `diagnostics.maxProblems`, `checkTimeoutMs`)

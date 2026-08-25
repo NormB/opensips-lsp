@@ -52,6 +52,15 @@ extension and it just works.
   each documented call site.
 - **Include links** — Ctrl+Click an `include_file`/`import_file` path
   to open it.
+- **Included files opened on their own** — open the folder (not the
+  single file) and a fragment is answered in the context of the root
+  that includes it. Given `opensips.cfg` with
+  `include_file "routing/inbound.cfg"`, opening `routing/inbound.cfg`
+  colors it, resolves and completes routes defined anywhere else in
+  the configuration, stops calling them undefined, and runs
+  `opensips -C` on the root — putting each error back on the file it
+  actually names. Turn the coloring off with
+  **Opensips Lsp › Associate Included Files**.
 - **Pull diagnostics** — `textDocument/diagnostic` and a workspace
   sweep that reports problems across the project without opening
   every file. Only root configs are swept: a config another one
@@ -90,11 +99,16 @@ extension and it just works.
    `opensips.cfg`, `opensips*.cfg` (so `opensips-tls.cfg` and
    `opensips-local.cfg` work) or `*.opensips.cfg` are recognized
    automatically;
-   for other names (split configs, includes) add a
+   the generic `.cfg` extension is deliberately not claimed, so
+   unrelated tools' config files are left alone. A `.cfg` your
+   configuration **includes** is picked up anyway: the extension asks
+   the server what includes what and gives it the language, so a
+   split-out `carrier-routes.cfg` gets the same colors and the same
+   server as the root that pulls it in. A file another extension
+   already claims is left to that extension, and for anything the
+   includes do not reach, add a
    [`files.associations`](https://code.visualstudio.com/docs/languages/identifiers)
-   entry mapping them to `opensips-cfg` — the generic `.cfg`
-   extension is deliberately not claimed, so unrelated tools' config
-   files are left alone.
+   entry mapping it to `opensips-cfg`.
 3. For live error checking, point
    **Settings → Opensips Lsp: Opensips Path** at your `opensips`
    binary and save the file.

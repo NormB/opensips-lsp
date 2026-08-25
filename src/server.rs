@@ -7,6 +7,13 @@ use tower_lsp_server::{Client, LanguageServer};
 
 use crate::{analyze, catalog, diag, logic, memo};
 
+/// Parameters of the `opensips/analysisRoot` request.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct AnalysisRootParams {
+    /// The document to locate: `file:` URIs only.
+    pub uri: Uri,
+}
+
 /// LSP backend: document store, doc catalog, and the `-C` runner.
 pub struct Backend {
     client: Client,
@@ -47,6 +54,11 @@ pub struct Backend {
     workspace_roots: std::sync::RwLock<Vec<std::path::PathBuf>>,
     /// Per-(document, version) scanner memoization for hot handlers.
     memo: memo::AnalysisCache,
+    /// The workspace's include graph, inverted, so an open FRAGMENT
+    /// can be answered in the context of the root that includes it.
+    /// Built on demand and dropped whenever an include directive
+    /// anywhere could have moved.
+    include_graph: std::sync::RwLock<Option<std::sync::Arc<logic::IncludeGraph>>>,
 }
 
 impl Backend {
@@ -78,6 +90,7 @@ impl Backend {
             code_lens_refs: std::sync::RwLock::new(true),
             check_super: std::sync::Arc::new(DashMap::new()),
             memo: memo::AnalysisCache::default(),
+            include_graph: std::sync::RwLock::new(None),
         }
     }
 
@@ -114,14 +127,47 @@ impl Backend {
         }
     }
 
-    /// Analyzer diagnostics for `text`, mapped to LSP (UTF-16) ranges.
-    fn analyzer_lsp_diags(
+    /// The include closure a document is answered in, given the root
+    /// it belongs to.
+    ///
+    /// A root is its own closure.  An included FRAGMENT is answered in
+    /// its ROOT's closure: the routes, modules and defines the parent
+    /// brings are part of the one program the fragment is a piece of,
+    /// and without them every one of them reads as undefined.  The
+    /// current document is placed first — the completion engine reads
+    /// the closure in that order — and its own entry is the caller's
+    /// buffer, which is newer than anything on disk.
+    fn closure_rooted_at(
+        root: Option<&std::path::Path>,
         path: &std::path::Path,
         text: &str,
         loader: &dyn Fn(&std::path::Path) -> Option<String>,
+    ) -> Vec<(std::path::PathBuf, String)> {
+        let mut files = match root.and_then(|r| loader(r).map(|t| (r.to_path_buf(), t))) {
+            Some((r, rt)) => logic::include_closure(&r, &rt, loader),
+            // no root, or a root that has gone: the document's own
+            // closure is the best context there is
+            None => logic::include_closure(path, text, loader),
+        };
+        match files.iter().position(|(p, _)| p == path) {
+            Some(i) => {
+                files[i].1 = text.to_string();
+                let own = files.remove(i);
+                files.insert(0, own);
+            }
+            None => files.insert(0, (path.to_path_buf(), text.to_string())),
+        }
+        files
+    }
+
+    /// Analyzer diagnostics for `text`, mapped to LSP (UTF-16) ranges.
+    fn analyzer_lsp_diags(
+        files: &[(std::path::PathBuf, String)],
+        path: &std::path::Path,
+        text: &str,
         cat: &[catalog::ModuleDoc],
     ) -> Vec<Diagnostic> {
-        let mut all = logic::analyzer_diagnostics(path, text, loader);
+        let mut all = logic::analyzer_diagnostics_in_closure(files, path, text);
         all.extend(logic::catalog_diagnostics(cat, text));
         all.into_iter()
             .map(|d| {
@@ -158,6 +204,7 @@ impl Backend {
         open: std::collections::HashMap<std::path::PathBuf, String>,
         cat: &std::sync::Arc<std::sync::RwLock<Vec<catalog::ModuleDoc>>>,
         skip_if_empty: bool,
+        root: Option<&std::path::Path>,
     ) {
         // a client that pulls gets everything through
         // `textDocument/diagnostic`; pushing as well shows each
@@ -165,7 +212,8 @@ impl Backend {
         if !pushing {
             return;
         }
-        let merged = Self::merged_diags(check_map, analyzer_enabled, cap, uri, text, open, cat);
+        let merged =
+            Self::merged_diags(check_map, analyzer_enabled, cap, uri, text, open, cat, root);
         if merged.is_empty() && skip_if_empty {
             return;
         }
@@ -177,6 +225,7 @@ impl Backend {
     /// The diagnostics for one document: the last checker result plus
     /// a fresh analyzer pass, capped.  Shared by the push path and the
     /// pull one so both can never disagree about what is wrong.
+    #[allow(clippy::too_many_arguments)]
     fn merged_diags(
         check_map: &DashMap<Uri, Vec<Diagnostic>>,
         analyzer_enabled: bool,
@@ -185,12 +234,14 @@ impl Backend {
         text: &str,
         open: std::collections::HashMap<std::path::PathBuf, String>,
         cat: &std::sync::Arc<std::sync::RwLock<Vec<catalog::ModuleDoc>>>,
+        root: Option<&std::path::Path>,
     ) -> Vec<Diagnostic> {
         let mut merged = check_map.get(uri).map(|v| v.clone()).unwrap_or_default();
         if analyzer_enabled && let Some(path) = uri.to_file_path() {
             let loader = Self::make_loader(open);
             let cat = cat.read().unwrap().clone();
-            merged.extend(Self::analyzer_lsp_diags(&path, text, &loader, &cat));
+            let files = Self::closure_rooted_at(root, &path, text, &loader);
+            merged.extend(Self::analyzer_lsp_diags(&files, &path, text, &cat));
         }
         merged.truncate(cap.max(1));
         merged
@@ -551,15 +602,74 @@ impl Backend {
         cached
     }
 
-    /// The include closure rooted at an open document: the document
-    /// itself plus transitively included files (open buffers first,
-    /// disk fallback).  Non-file documents get a single-entry closure.
+    /// The workspace's include graph, from a bounded scan, cached
+    /// until something that could move an include directive happens.
+    ///
+    /// Rebuilding this on every keystroke would read the whole
+    /// workspace per character; never rebuilding it would pin a
+    /// fragment to a parent it no longer has.  The invalidation points
+    /// are [`Self::invalidate_include_graph`]'s callers.
+    fn include_graph(&self) -> std::sync::Arc<logic::IncludeGraph> {
+        if let Some(g) = self.include_graph.read().unwrap().clone() {
+            return g;
+        }
+        let (configs, _) = self.workspace_configs(500);
+        let open = self.open_docs_snapshot();
+        let scanned: Vec<(std::path::PathBuf, String)> = configs
+            .into_iter()
+            .filter_map(|p| {
+                let text = match open.get(&p) {
+                    Some(t) => t.clone(),
+                    None => std::fs::read_to_string(&p).ok()?,
+                };
+                Some((p, text))
+            })
+            .collect();
+        let g = std::sync::Arc::new(logic::IncludeGraph::build(&scanned));
+        *self.include_graph.write().unwrap() = Some(g.clone());
+        g
+    }
+
+    /// Drop the cached include graph; the next question rebuilds it.
+    fn invalidate_include_graph(&self) {
+        *self.include_graph.write().unwrap() = None;
+    }
+
+    /// The config `uri` must be analysed as part of, or `None` when it
+    /// is a program in its own right (or the workspace never saw it).
+    fn analysis_root_of(&self, uri: &Uri) -> Option<std::path::PathBuf> {
+        let path = uri.to_file_path()?;
+        self.include_graph().analysis_root(&path)
+    }
+
+    /// `opensips/analysisRoot`: the config the given document is
+    /// analysed as part of, or `null` when it is a program in its own
+    /// right — or a file this workspace has never included.
+    ///
+    /// This is how an editor tells a piece of an OpenSIPS
+    /// configuration from any other `.cfg` on disk.  The extension
+    /// cannot claim `*.cfg` statically without hijacking every
+    /// unrelated config file in the workspace, and an included
+    /// fragment is rarely named so a filename pattern could catch it
+    /// — but the configuration that includes it says exactly what it
+    /// is.
+    pub async fn analysis_root(&self, p: AnalysisRootParams) -> Result<Option<String>> {
+        Ok(self
+            .analysis_root_of(&p.uri)
+            .and_then(Uri::from_file_path)
+            .map(|u| u.as_str().to_string()))
+    }
+
+    /// The include closure an open document is answered in: its own
+    /// when it is a root, its ROOT's when it is an included fragment
+    /// (open buffers first, disk fallback).  Non-file documents get a
+    /// single-entry closure.
     fn closure_for(&self, uri: &Uri, text: &str) -> Vec<(std::path::PathBuf, String)> {
         let Some(path) = uri.to_file_path() else {
             return vec![(std::path::PathBuf::new(), text.to_string())];
         };
         let loader = Self::make_loader(self.open_docs_snapshot());
-        logic::include_closure(&path, text, &loader)
+        Self::closure_rooted_at(self.analysis_root_of(uri).as_deref(), &path, text, &loader)
     }
 
     /// The route name under an LSP (UTF-16) position with its
@@ -635,6 +745,16 @@ impl Backend {
             return;
         };
         let path_str = path.display().to_string();
+        // The checker is handed a PROGRAM.  When the document on
+        // screen is an included fragment that program is its root, not
+        // the fragment: checked on its own a fragment reports every
+        // construct it continues as a syntax error.
+        let root = self.analysis_root_of(uri);
+        let check_path: std::path::PathBuf = match &root {
+            Some(r) => r.clone(),
+            None => path.to_path_buf(),
+        };
+        let check_path_str = check_path.display().to_string();
         // snapshot the buffer BEFORE the subprocess runs: ranges are
         // mapped through exactly this text, and the publish carries
         // exactly this version
@@ -661,6 +781,7 @@ impl Backend {
                 self.open_docs_snapshot(),
                 &self.catalog,
                 quiet_when_clean,
+                root.as_deref(),
             )
             .await;
             return;
@@ -696,11 +817,11 @@ impl Backend {
             let mut child = tokio::process::Command::new(&bin)
                 .arg("-C")
                 .arg("-f")
-                .arg(&path_str)
+                .arg(&check_path_str)
                 // relative includes/module paths resolve against the
                 // checker's cwd — run from the cfg's dir like the CLI
                 .current_dir(
-                    std::path::Path::new(&path_str)
+                    check_path
                         .parent()
                         .filter(|p| !p.as_os_str().is_empty())
                         .unwrap_or_else(|| std::path::Path::new(".")),
@@ -761,7 +882,7 @@ impl Backend {
                     .log_message(
                         MessageType::WARNING,
                         format!(
-                            "opensips-lsp: '{bin} -C' timed out after {:?} on {path_str}",
+                            "opensips-lsp: '{bin} -C' timed out after {:?} on {check_path_str}",
                             check_timeout
                         ),
                     )
@@ -781,6 +902,7 @@ impl Backend {
                     self.open_docs_snapshot(),
                     &self.catalog,
                     false,
+                    root.as_deref(),
                 )
                 .await;
                 return;
@@ -807,6 +929,7 @@ impl Backend {
                 self.open_docs_snapshot(),
                 &self.catalog,
                 false,
+                root.as_deref(),
             )
             .await;
             return;
@@ -817,7 +940,7 @@ impl Backend {
                 .log_message(
                     MessageType::WARNING,
                     format!(
-                        "opensips-lsp: '{bin} -C' exceeded the output cap ({out_cap} bytes) on {path_str}; run discarded"
+                        "opensips-lsp: '{bin} -C' exceeded the output cap ({out_cap} bytes) on {check_path_str}; run discarded"
                     ),
                 )
                 .await;
@@ -835,6 +958,7 @@ impl Backend {
                 self.open_docs_snapshot(),
                 &self.catalog,
                 false,
+                root.as_deref(),
             )
             .await;
             return;
@@ -859,22 +983,31 @@ impl Backend {
         }
         // opensips reports byte columns; the client expects UTF-16 units
         let doc_text = snap_text.clone();
-        let diags: Vec<Diagnostic> = diag::parse_check_output(&text, rc)
-            .into_iter()
-            .map(|d| {
-                // errors inside include_file targets are re-attributed
-                // to the root (at the include directive) instead of
-                // being dropped: a broken config must never render as
-                // clean
-                let (line, c0, c1, message) = if logic::diag_matches_file(&d.file, &path) {
-                    (d.line, d.col_start, d.col_end, d.message)
+        let parsed = diag::parse_check_output(&text, rc);
+        let mut diags: Vec<Diagnostic> = parsed
+            .iter()
+            .filter_map(|d| {
+                let (line, c0, c1, message) = if root.is_some() {
+                    // a FRAGMENT shows the errors that name IT, at its
+                    // own lines; the root's and its siblings' belong to
+                    // their own buffers.  Nothing is lost by dropping
+                    // them here — the fallback below refuses to let a
+                    // failed check render as clean.
+                    let f = logic::fragment_check_diag(&check_path, &path, d)?;
+                    (f.line, f.col_start, f.col_end, f.message)
+                } else if logic::diag_matches_file(&d.file, &path) {
+                    (d.line, d.col_start, d.col_end, d.message.clone())
                 } else {
+                    // errors inside include_file targets are
+                    // re-attributed to the root (at the include
+                    // directive) instead of being dropped: a broken
+                    // config must never render as clean
                     let f = logic::attribute_foreign_diag(
                         &path, &doc_text, &d.file, d.line, &d.message,
                     );
                     (f.line, f.col_start, f.col_end, f.message)
                 };
-                Diagnostic {
+                Some(Diagnostic {
                     range: {
                         let lt = Self::doc_line(&doc_text, line);
                         Range {
@@ -889,10 +1022,28 @@ impl Backend {
                     source: Some("opensips -C".into()),
                     message,
                     ..Default::default()
-                }
+                })
             })
             .collect();
-        let mut diags = diags;
+        // the program this fragment belongs to does not compile, and
+        // nothing that failed is in this file: say so here rather than
+        // show a clean buffer, and name where the problem actually is
+        if diags.is_empty() && rc != 0 && root.is_some() {
+            let context = parsed
+                .first()
+                .map(|d| format!("{}, line {}: {}", d.file, d.line + 1, d.message))
+                .unwrap_or_else(|| format!("opensips -C failed (rc={rc})"));
+            diags.push(Diagnostic {
+                range: Range {
+                    start: Position::new(0, 0),
+                    end: Position::new(0, 1),
+                },
+                severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("opensips -C".into()),
+                message: format!("check failed in {context}"),
+                ..Default::default()
+            });
+        }
         if diags.len() > cap {
             self.client
                 .log_message(
@@ -919,6 +1070,7 @@ impl Backend {
             self.open_docs_snapshot(),
             &self.catalog,
             false,
+            root.as_deref(),
         )
         .await;
     }
@@ -1145,6 +1297,7 @@ impl LanguageServer for Backend {
                 self.open_docs_snapshot(),
                 &self.catalog,
                 false,
+                self.analysis_root_of(&uri).as_deref(),
             )
             .await;
         }
@@ -1154,6 +1307,8 @@ impl LanguageServer for Backend {
         let uri = p.text_document.uri;
         self.docs
             .insert(uri.clone(), (p.text_document.version, p.text_document.text));
+        // an opened buffer outranks the disk copy the scan read
+        self.invalidate_include_graph();
         self.check(&uri).await;
     }
 
@@ -1163,8 +1318,18 @@ impl LanguageServer for Backend {
         };
         let uri = p.text_document.uri;
         let version = p.text_document.version;
-        self.docs
+        let previous = self
+            .docs
             .insert(uri.clone(), (version, change.text.clone()));
+        // an edit that adds or removes an include directive changes
+        // which file is a fragment of which; nothing else does, so the
+        // graph survives ordinary typing
+        if previous
+            .map(|(_, old)| analyze::includes(&old))
+            .is_none_or(|old| old != analyze::includes(&change.text))
+        {
+            self.invalidate_include_graph();
+        }
         // debounced analyzer pass: fast feedback between saves
         if !*self.analyzer_enabled.read().unwrap() || uri.scheme().as_str() != "file" {
             return;
@@ -1186,6 +1351,7 @@ impl LanguageServer for Backend {
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(300);
         let text = change.text;
+        let root = self.analysis_root_of(&uri);
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(debounce)).await;
             // superseded by a newer edit: let the newest task publish
@@ -1194,8 +1360,18 @@ impl LanguageServer for Backend {
             }
             let pushing = !*pulled.read().unwrap();
             Backend::merge_and_publish(
-                pushing, &client, &check_map, true, cap, &uri, version, &text, open, &cat_arc,
+                pushing,
+                &client,
+                &check_map,
+                true,
+                cap,
+                &uri,
+                version,
+                &text,
+                open,
+                &cat_arc,
                 false,
+                root.as_deref(),
             )
             .await;
         });
@@ -1215,6 +1391,7 @@ impl LanguageServer for Backend {
             &text,
             self.open_docs_snapshot(),
             &self.catalog,
+            self.analysis_root_of(&uri).as_deref(),
         );
         let id = Self::result_id(&diags);
         if p.previous_result_id.as_deref() == Some(id.as_str()) {
@@ -1293,6 +1470,9 @@ impl LanguageServer for Backend {
                 &text,
                 open.clone(),
                 &self.catalog,
+                // the sweep reports ROOTS only, so each is its own
+                // analysis context by construction
+                None,
             );
             items.push(WorkspaceDocumentDiagnosticReport::Full(
                 WorkspaceFullDocumentDiagnosticReport {
@@ -1337,6 +1517,9 @@ impl LanguageServer for Backend {
         if changed.is_empty() {
             return;
         }
+        // a config appearing, vanishing or gaining an include directive
+        // changes which file is a fragment of which
+        self.invalidate_include_graph();
         // an open document whose include closure contains a changed
         // file is answering from a stale read: re-check it
         let open: Vec<(Uri, String)> = self
@@ -1367,6 +1550,8 @@ impl LanguageServer for Backend {
         self.check_diags.remove(&p.text_document.uri);
         self.change_gen.remove(&p.text_document.uri);
         self.memo.evict(p.text_document.uri.as_str());
+        // the buffer that outranked the disk copy is gone
+        self.invalidate_include_graph();
     }
 
     async fn completion(&self, p: CompletionParams) -> Result<Option<CompletionResponse>> {

@@ -27,6 +27,43 @@ NOT claim every `.cfg` on disk — that would hijack unrelated files.
 Configure your client to match the same set rather than a bare `.cfg`
 glob.
 
+### Files your configuration includes
+
+An `include_file`/`import_file` target is usually named something no
+pattern above would catch. The server handles this on its own once it
+sees the file: a fragment is analysed in the context of the root that
+includes it, `opensips -C` is run on that root, and navigation spans
+the root's closure — so nothing here needs configuring for the
+answers to be right.
+
+What the pattern decides is whether your client hands the file to the
+server at all. The VS Code extension asks the server and sets the
+language itself; every other client needs the fragment matched by
+whatever glob you configure, or opened through a link from the root.
+Clients that want to do the same thing can send the non-LSP request
+`opensips/analysisRoot`. It answers with the root's URI, or `null`
+when the file is a program in its own right — or when nothing in the
+workspace includes it:
+
+```json
+--> {"jsonrpc": "2.0", "id": 7, "method": "opensips/analysisRoot",
+     "params": {"uri": "file:///etc/opensips/routing/inbound.cfg"}}
+<-- {"jsonrpc": "2.0", "id": 7, "result": "file:///etc/opensips/opensips.cfg"}
+
+--> {"jsonrpc": "2.0", "id": 8, "method": "opensips/analysisRoot",
+     "params": {"uri": "file:///etc/opensips/opensips.cfg"}}
+<-- {"jsonrpc": "2.0", "id": 8, "result": null}
+```
+
+A non-`null` answer means "this is part of an OpenSIPS
+configuration", which is enough to decide whether to hand the file to
+the server.
+
+**Send `workspaceFolders` in `initialize`.** The include graph is
+built from the configs under those folders; a client that passes none
+gets `null` for everything and every fragment is analysed as a
+program of its own.
+
 ## VS Code / VSCodium
 
 **Novice?** Use the [Getting Started guide](GETTING_STARTED.md)

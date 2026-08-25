@@ -698,6 +698,111 @@ fn resolve_include(from: &std::path::Path, inc: &str) -> std::path::PathBuf {
     }
 }
 
+/// The workspace's include graph, inverted: for each config, the
+/// configs that name it in an `include_file`/`import_file` directive.
+///
+/// Transitivity needs no traversal to record: every config in the
+/// scan contributes its own directives, so a fragment three levels
+/// down has the fragment above it as a parent and
+/// [`Self::analysis_root`] climbs one edge at a time.
+#[derive(Debug, Default, Clone)]
+pub struct IncludeGraph {
+    parents: std::collections::BTreeMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+}
+
+impl IncludeGraph {
+    /// Build from a workspace scan: one `(path, text)` per config.
+    pub fn build(configs: &[(std::path::PathBuf, String)]) -> Self {
+        let mut parents: std::collections::BTreeMap<std::path::PathBuf, Vec<std::path::PathBuf>> =
+            std::collections::BTreeMap::new();
+        for (path, text) in configs {
+            for inc in analyze::includes(text) {
+                let entry = parents.entry(resolve_include(path, &inc.name)).or_default();
+                if !entry.contains(path) {
+                    entry.push(path.clone());
+                }
+            }
+        }
+        // sorted so the pick below cannot depend on scan order
+        for v in parents.values_mut() {
+            v.sort();
+        }
+        Self { parents }
+    }
+
+    /// The config `path` should be analysed as part of: the top of the
+    /// include chain that reaches it, or `None` when nothing includes
+    /// it — it is a program in its own right, or the scan never saw
+    /// it.
+    ///
+    /// A fragment reached from more than one root has no single true
+    /// answer; the lexicographically first parent is taken at every
+    /// step, so the context a fragment is analysed in cannot flicker
+    /// as the scan order changes.  A cycle stops the climb at the last
+    /// config not already visited.
+    pub fn analysis_root(&self, path: &std::path::Path) -> Option<std::path::PathBuf> {
+        let mut seen: std::collections::HashSet<std::path::PathBuf> =
+            std::collections::HashSet::new();
+        seen.insert(path.to_path_buf());
+        let mut best: Option<std::path::PathBuf> = None;
+        let mut cur = path.to_path_buf();
+        loop {
+            let Some(next) = self.parents.get(&cur).and_then(|v| v.first()) else {
+                return best;
+            };
+            if !seen.insert(next.clone()) {
+                return best;
+            }
+            cur = next.clone();
+            best = Some(next.clone());
+        }
+    }
+}
+
+/// Canonicalise a path when it exists, take it as written otherwise.
+fn norm_path(p: &std::path::Path) -> std::path::PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
+/// Route one `opensips -C` diagnostic to an open FRAGMENT.
+///
+/// The checker only accepts a whole program, so a fragment on screen
+/// is checked through its root ([`IncludeGraph::analysis_root`]) and
+/// `checked` is that root.  A diagnostic naming the fragment is the
+/// one the fragment's buffer should carry, at its own line — not
+/// folded onto an `include_file` directive the fragment does not
+/// contain.  Everything else belongs to the root or to a sibling
+/// fragment: `None`, so the caller can decide once, for the whole
+/// run, that the program is broken elsewhere.
+///
+/// The file spelling is resolved as written, against the checked
+/// file's directory (the subprocess runs there), and against our own
+/// cwd.  Empty and NUL-bearing spellings name nothing.
+pub fn fragment_check_diag(
+    checked: &std::path::Path,
+    reported: &std::path::Path,
+    d: &crate::diag::Diag,
+) -> Option<crate::diag::Diag> {
+    if d.file.is_empty() || d.file.contains('\0') {
+        return None;
+    }
+    let diag_path = std::path::Path::new(&d.file);
+    let mut cands: Vec<std::path::PathBuf> = vec![norm_path(diag_path)];
+    if diag_path.is_relative() {
+        let dir = checked.parent().unwrap_or_else(|| std::path::Path::new(""));
+        cands.push(norm_path(&dir.join(diag_path)));
+        if let Ok(cwd) = std::env::current_dir() {
+            cands.push(norm_path(&cwd.join(diag_path)));
+        }
+    }
+    cands
+        .contains(&norm_path(reported))
+        .then(|| crate::diag::Diag {
+            file: reported.display().to_string(),
+            ..d.clone()
+        })
+}
+
 /// The root document plus every transitively included file, loaded via
 /// `loader` (which lets callers prefer open editor buffers over disk).
 /// Cycle-safe, depth- and count-capped; unloadable files are skipped.
@@ -878,8 +983,23 @@ pub fn analyzer_diagnostics(
     text: &str,
     loader: &dyn Fn(&std::path::Path) -> Option<String>,
 ) -> Vec<AnalyzerDiag> {
-    let mut out = inert_directive_diagnostics(text);
     let files = include_closure(path, text, loader);
+    analyzer_diagnostics_in_closure(&files, path, text)
+}
+
+/// [`analyzer_diagnostics`] against a closure the caller already has.
+///
+/// The closure is the unit of truth and it need not be rooted at
+/// `path`: an included FRAGMENT is analysed in the closure of its
+/// root, which is the only context in which the routes its parent
+/// defines exist.  Reported positions still come from `text` and
+/// belong to `path` alone.
+pub fn analyzer_diagnostics_in_closure(
+    files: &[(std::path::PathBuf, String)],
+    path: &std::path::Path,
+    text: &str,
+) -> Vec<AnalyzerDiag> {
+    let mut out = inert_directive_diagnostics(text);
     let blocks: Vec<(std::path::PathBuf, analyze::Block)> = files
         .iter()
         .flat_map(|(p, t)| {

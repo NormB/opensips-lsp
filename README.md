@@ -22,6 +22,7 @@ script language (`opensips.cfg`).
 | **Refactorings** | Extract a selection into a `route[...]` of its own, leaving a call behind; remove duplicate `loadmodule` lines (a second load is a parse error, not untidiness). |
 | **Catalog-pinned validation** | Undocumented `modparam` parameters flagged against YOUR source tree's docs. |
 | **Include links** | `include_file`/`import_file` paths are Ctrl+Click document links. |
+| **Included files** | An `include_file`/`import_file` fragment opened on its own is answered in its ROOT's context: the analyzer runs over the root's closure and `opensips -C` is run on the root, with each error routed to the file it names. Otherwise a fragment reports every route its parent defines as undefined. The VS Code client also gives an unassociated `.cfg` the language when the workspace's configuration includes it. |
 | **Formatting** | Whole-document and range formatting re-indents by brace depth and strips trailing whitespace, honouring the editor's tab settings. Line-preserving: it never joins, splits or reorders lines, and never touches a string or comment body. |
 | **Semantic tokens** | Route names and pseudo-variables colored by analysis; editors that ask for a `semanticTokens/range` get exactly the tokens in view. |
 | **Inlay hints** | Parameter names from the documentation drawn at module-function call sites, for the visible range only. |

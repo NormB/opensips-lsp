@@ -46,6 +46,88 @@ fn binary_path_settings_are_restricted_in_untrusted_workspaces() {
     );
 }
 
+/// An included fragment is rarely named so a filename pattern could
+/// catch it, and claiming `*.cfg` outright would hijack every
+/// unrelated config file in the workspace — the one thing the
+/// association gate below deliberately refuses to allow.  What is
+/// left is to ask the server, which has read the configuration that
+/// says what includes what, and set the language at runtime.
+///
+/// Two things must hold for that to ever happen and neither is
+/// visible to `tsc` or to `cargo`:
+///
+///   * the extension has to be RUNNING in a workspace whose only
+///     OpenSIPS file on screen is an unassociated fragment, so
+///     activation cannot rest on the language association alone;
+///   * the method it asks with has to be the method the server
+///     registers.  A rename on either side compiles cleanly in both
+///     languages and fails only at runtime, in the one situation this
+///     feature exists for.
+#[test]
+fn an_included_fragment_is_associated_at_runtime() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let v: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(format!("{root}/client/package.json")).unwrap(),
+    )
+    .unwrap();
+    let ext = std::fs::read_to_string(format!("{root}/client/src/extension.ts")).unwrap();
+    let main = std::fs::read_to_string(format!("{root}/src/main.rs")).unwrap();
+
+    // the name is taken from the server's own registration, so
+    // retiring the request retires this requirement instead of
+    // leaving a gate demanding a dead method
+    let method = main
+        .split("custom_method(")
+        .nth(1)
+        .and_then(|t| t.split('"').nth(1))
+        .expect("the server registers a custom method");
+    assert!(
+        ext.contains(&format!("'{method}'")) || ext.contains(&format!("\"{method}\"")),
+        "the extension never asks for {method}"
+    );
+    assert!(
+        ext.contains("setTextDocumentLanguage"),
+        "the extension asks but does nothing with the answer"
+    );
+    // a contributed switch nothing reads is a promise the page keeps
+    // and the code breaks
+    assert!(
+        v["contributes"]["configuration"]["properties"]
+            .get("opensipsLsp.associateIncludedFiles")
+            .is_some(),
+        "the association must be switchable"
+    );
+    assert!(
+        ext.contains("associateIncludedFiles"),
+        "the setting is contributed but nothing reads it"
+    );
+
+    let events: Vec<&str> = v["activationEvents"]
+        .as_array()
+        .expect("activationEvents")
+        .iter()
+        .filter_map(|e| e.as_str())
+        .collect();
+    assert!(
+        events.iter().any(|e| e.starts_with("workspaceContains:")),
+        "nothing starts the extension when the only file open is an \
+         unassociated .cfg, so the runtime association can never run: {events:?}"
+    );
+    // every statically claimed pattern is also an activation trigger:
+    // a root matching it is what makes its fragments findable
+    for p in v["contributes"]["languages"][0]["filenamePatterns"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        let p = p.as_str().unwrap();
+        assert!(
+            events.contains(&format!("workspaceContains:**/{p}").as_str()),
+            "a workspace holding {p} must start the extension: {events:?}"
+        );
+    }
+}
+
 #[test]
 fn file_association_does_not_claim_every_cfg_file() {
     // ".cfg" is a generic extension (wpa_supplicant.cfg, mpv.cfg,

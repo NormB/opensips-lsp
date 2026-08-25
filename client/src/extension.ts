@@ -66,12 +66,60 @@ function buildClient(context: vscode.ExtensionContext): LanguageClient {
     );
 }
 
+/** Give an included fragment the language its root has.
+ *
+ *  VS Code cannot know that `carrier-routes.cfg` is part of an
+ *  OpenSIPS configuration. The extension deliberately does not claim
+ *  every `.cfg` — that would hijack unrelated config files — and a
+ *  fragment is named whatever its author felt like, so no filename
+ *  pattern reaches it. The configuration that includes it does know,
+ *  and the server has read it: ask.
+ *
+ *  Only files VS Code left as plain text are touched. A `.cfg` some
+ *  other extension has already claimed belongs to that extension, and
+ *  taking it would be exactly the hijack this avoids. */
+async function associateIfIncluded(doc: vscode.TextDocument): Promise<void> {
+    if (!client || doc.uri.scheme !== 'file') {
+        return;
+    }
+    if (doc.languageId !== 'plaintext' || !doc.fileName.endsWith('.cfg')) {
+        return;
+    }
+    if (!vscode.workspace
+        .getConfiguration('opensipsLsp')
+        .get<boolean>('associateIncludedFiles', true)) {
+        return;
+    }
+    let root: string | null = null;
+    try {
+        root = await client.sendRequest<string | null>('opensips/analysisRoot', {
+            uri: doc.uri.toString(),
+        });
+    } catch {
+        // server still starting, or an older one without the request:
+        // leaving the file as it is beats guessing
+        return;
+    }
+    if (root) {
+        await vscode.languages.setTextDocumentLanguage(doc, 'opensips-cfg');
+    }
+}
+
+/** Documents already on screen when the server came up: didOpen has
+ *  been and gone for those, so nothing else would ever revisit them. */
+function associateOpenDocuments(): void {
+    for (const doc of vscode.workspace.textDocuments) {
+        void associateIfIncluded(doc);
+    }
+}
+
 async function restart(context: vscode.ExtensionContext): Promise<void> {
     if (client) {
         await client.stop();
     }
     client = buildClient(context);
     await client.start();
+    associateOpenDocuments();
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -81,7 +129,10 @@ export function activate(context: vscode.ExtensionContext) {
         return;
     }
     client = buildClient(context);
-    client.start();
+    void client.start().then(associateOpenDocuments);
+    context.subscriptions.push(
+        vscode.workspace.onDidOpenTextDocument((d) => void associateIfIncluded(d)),
+    );
     // trust granted later: restart so diagnostics come alive with the
     // configured opensipsPath
     context.subscriptions.push(

@@ -131,11 +131,88 @@ is the point: mixing two versions is worse than either.
 - Press **Ctrl+Shift+O** to see every route in the file and jump
   between them.
 
+### Split configurations (`include_file`)
+
+Most real deployments split the config up:
+
+```
+/etc/opensips/
+├── opensips.cfg          <- the root: everything starts here
+├── modules.cfg           <- include_file "modules.cfg"
+└── routing/
+    ├── inbound.cfg       <- include_file "routing/inbound.cfg"
+    └── carriers.cfg      <- include_file "routing/carriers.cfg"
+```
+
+with `opensips.cfg` pulling the rest in:
+
+```
+include_file "modules.cfg"
+include_file "routing/inbound.cfg"
+include_file "routing/carriers.cfg"
+
+route {
+    route(inbound);
+}
+```
+
+**What you have to do: open the FOLDER, not the single file.**
+`File → Open Folder…` and pick `/etc/opensips` (or wherever your
+config lives). The extension finds the root by reading the configs in
+the folder you opened; with a single file open there is nothing to
+read, and every fragment is treated as a program of its own.
+
+Then open `routing/inbound.cfg` — a name no pattern could recognize
+— and it behaves like part of the whole:
+
+- It gets **syntax colors**, even though nothing about the filename
+  says "opensips". The extension asks the server whether anything in
+  the folder includes it, and sets the language when something does.
+- A `route(send_to_carrier)` defined over in `carriers.cfg`
+  **Ctrl+Clicks through** and is **offered while you type**.
+- It is **not** flagged for using routes it does not define. Before
+  0.20.0 every one of those was underlined as undefined — an artefact
+  of opening the file, not a problem with it.
+- Error checking runs `opensips -C` on `opensips.cfg` (the only file
+  that *is* a program) and puts each error on the file it belongs to.
+  A mistake on line 12 of `inbound.cfg` is underlined on line 12 of
+  `inbound.cfg`.
+
+Nothing above needs configuring. Two things you may want to change:
+
+**To turn the automatic coloring off** — `Ctrl+,`, search
+`opensips`, and untick **Opensips Lsp › Associate Included Files**.
+Or in `settings.json`:
+
+```json
+{ "opensipsLsp.associateIncludedFiles": false }
+```
+
+**If a file is still plain text**, the includes do not reach it — it
+is not included by anything in the folder you opened, or another
+extension already claimed `.cfg` and this one leaves those alone. Tell
+VS Code directly, in `settings.json` (`Ctrl+Shift+P` → *Preferences:
+Open User Settings (JSON)*):
+
+```json
+{
+  "files.associations": {
+    "routing/*.cfg": "opensips-cfg"
+  }
+}
+```
+
+To do it for the open file only, click the language name in the
+bottom-right status bar (it will say **Plain Text**) and pick
+**OpenSIPS config**.
+
 ## When something doesn't work
 
 | Symptom | Fix |
 |---|---|
 | No colors | The file has to match one of the claimed names: `opensips.cfg`, `opensips*.cfg` (so `opensips-proxy.cfg` works), or `*.opensips.cfg`. A plain `.cfg` is not enough — the extension deliberately does not claim every `.cfg` on your disk. |
+| No colors on an included file | Open the FOLDER (`File → Open Folder…`), not the single file — the root that includes it has to be somewhere the server can read. If you just added the `include_file` line, save the root and reopen the fragment. |
+| An included file reports routes its parent defines as undefined | Same cause: with no folder open the fragment is treated as a program of its own. Open the folder containing the root. |
 | No red squiggles | Set **Opensips Path** (step above), save the file, and make sure you trusted the folder. |
 | Squiggles on a correct file | The checker uses *your* OpenSIPS version — a config written for another version can legitimately fail. |
 | Completion has no documentation | Core and module entries both carry built-in documentation from 4.0.1, so an entry with none is one 4.0.1 does not document: set **Opensips Src** to an OpenSIPS source folder matching your build. |

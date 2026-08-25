@@ -2,7 +2,7 @@
   "name": "opensips-lsp",
   "displayName": "OpenSIPS Routing Script",
   "description": "Language support for opensips.cfg routing scripts (diagnostics via opensips -C, completion, hover, go-to-definition).",
-  "version": "0.19.2",
+  "version": "0.20.0",
   "publisher": "NormB",
   "license": "(MIT OR Apache-2.0)",
   "engines": {
@@ -12,7 +12,10 @@
     "Programming Languages",
     "Linters"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "workspaceContains:**/opensips*.cfg",
+    "workspaceContains:**/*.opensips.cfg"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "languages": [
@@ -61,6 +64,11 @@
           "type": "number",
           "default": 10000,
           "description": "Upper bound (ms) on one 'opensips -C' diagnostics run."
+        },
+        "opensipsLsp.associateIncludedFiles": {
+          "type": "boolean",
+          "default": true,
+          "description": "Treat a plain-text .cfg the workspace's configuration includes as an OpenSIPS config (colours, completion, diagnostics). Files another extension already claims are left alone."
         },
         "opensipsLsp.enable": {
           "type": "boolean",
