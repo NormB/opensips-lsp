@@ -1168,20 +1168,42 @@ pub struct BuiltinModules {
 pub fn builtin_modules() -> &'static BuiltinModules {
     static B: std::sync::OnceLock<BuiltinModules> = std::sync::OnceLock::new();
     B.get_or_init(|| {
-        let mut b: BuiltinModules = serde_json::from_str(include_str!("modules_builtin.json"))
-            .expect("the vendored module catalogue must parse");
-        let note = format!(
-            "\n\n*Built-in documentation from OpenSIPS {} — set `opensipsSrc` \
-             to your own source tree for version-exact docs.*",
-            b.version
-        );
-        for m in b.modules.iter_mut() {
-            for it in m.functions.iter_mut().chain(m.params.iter_mut()) {
-                it.doc.push_str(&note);
-            }
-        }
-        b
+        let newest = builtin_versioned().newest();
+        builtin_modules_at(newest).expect("the newest supported release must resolve")
     })
+}
+
+/// The vendored catalogue in full: the base release and every delta.
+pub fn builtin_versioned() -> &'static VersionedModules {
+    static V: std::sync::OnceLock<VersionedModules> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        serde_json::from_str(include_str!("modules_builtin.json"))
+            .expect("the vendored module catalogue must parse")
+    })
+}
+
+/// The catalogue as it stood at one supported release, `None` when
+/// that release is not one of them.
+///
+/// Reconstructing costs applying the deltas, so callers that need it
+/// repeatedly should hold on to the result rather than ask again.
+pub fn builtin_modules_at(version: &str) -> Option<BuiltinModules> {
+    let modules = builtin_versioned().at(version)?;
+    let mut out = BuiltinModules {
+        version: version.to_string(),
+        modules,
+    };
+    let note = format!(
+        "\n\n*Built-in documentation from OpenSIPS {} — set `opensipsSrc` \
+         to your own source tree for version-exact docs.*",
+        out.version
+    );
+    for m in out.modules.iter_mut() {
+        for it in m.functions.iter_mut().chain(m.params.iter_mut()) {
+            it.doc.push_str(&note);
+        }
+    }
+    Some(out)
 }
 
 /// Harvest the core-language docs from an OpenSIPS 4.x source tree;

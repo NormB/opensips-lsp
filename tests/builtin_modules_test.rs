@@ -57,30 +57,61 @@ fn every_built_in_module_entry_names_the_version_it_came_from() {
 }
 
 /// The freshness gate: the vendored file must still equal a harvest of
-/// the pinned tree.  Regenerate with
-/// `cargo run --example gen_module_catalog -- <tree> <version>`.
+/// every pinned tree it claims to cover.
+///
+/// `versioned_catalog_test.rs` proves that base-plus-deltas is a
+/// lossless encoding, building one from the trees at test time. That
+/// says nothing about the file actually SHIPPED — which is what a
+/// user gets, and what goes stale. This reads the vendored file and
+/// holds it against every release it names.
+///
+/// Regenerate with
+/// `cargo run --example gen_versioned_catalog -- $(echo "$OPENSIPS_LSP_TEST_TREES" | tr , " ") > src/modules_builtin.json`.
 #[test]
-fn the_vendored_module_catalogue_matches_a_fresh_harvest_of_the_pinned_tree() {
-    let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let fresh = catalog::harvest_tree(std::path::Path::new(&tree));
-    let b = catalog::builtin_modules();
+fn the_vendored_module_catalogue_matches_a_fresh_harvest_of_every_pinned_tree() {
+    let raw = common::required_env("OPENSIPS_LSP_TEST_TREES");
+    let trees: Vec<(String, std::path::PathBuf)> = raw
+        .split(',')
+        .filter_map(|e| {
+            let (v, p) = e.split_once('=')?;
+            Some((v.to_string(), std::path::PathBuf::from(p)))
+        })
+        .collect();
+    let vendored = catalog::builtin_versioned();
 
-    let names =
-        |v: &[catalog::ModuleDoc]| -> Vec<String> { v.iter().map(|m| m.name.clone()).collect() };
+    // the file must claim exactly the releases that were provisioned,
+    // or it is covering something nothing here checks
+    let provisioned: Vec<&str> = trees.iter().map(|(v, _)| v.as_str()).collect();
     assert_eq!(
-        names(&b.modules),
-        names(&fresh),
-        "vendored modules differ from the pinned tree — regenerate"
+        vendored.versions(),
+        provisioned,
+        "the vendored catalogue covers different releases than the proof environment provides"
     );
-    for (got, want) in b.modules.iter().zip(fresh.iter()) {
-        let f = |v: &[catalog::Item]| -> Vec<String> { v.iter().map(|i| i.name.clone()).collect() };
+
+    for (version, tree) in &trees {
+        let mut fresh = catalog::harvest_tree(tree);
+        // the vendored file is stored canonically; a harvest must be
+        // put in the same order before equality means anything
+        catalog::canonicalize(&mut fresh);
+        let got = vendored
+            .at(version)
+            .unwrap_or_else(|| panic!("{version} must resolve from the vendored file"));
+
+        let names = |v: &[catalog::ModuleDoc]| -> Vec<String> {
+            v.iter().map(|m| m.name.clone()).collect()
+        };
         assert_eq!(
-            f(&got.functions),
-            f(&want.functions),
-            "{} functions",
-            got.name
+            names(&got),
+            names(&fresh),
+            "{version}: vendored modules differ from the pinned tree — regenerate"
         );
-        assert_eq!(f(&got.params), f(&want.params), "{} params", got.name);
+        for (a, b) in got.iter().zip(fresh.iter()) {
+            assert_eq!(
+                a, b,
+                "{version}: module '{}' differs from the pinned tree — regenerate",
+                a.name
+            );
+        }
     }
 }
 
