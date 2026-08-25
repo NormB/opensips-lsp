@@ -447,29 +447,7 @@ impl Backend {
     /// The bound is announced rather than silent: a truncated sweep
     /// that looks complete is worse than one that says it stopped.
     fn workspace_configs(&self, limit: usize) -> (Vec<std::path::PathBuf>, bool) {
-        let mut out = Vec::new();
-        let mut stack: Vec<std::path::PathBuf> = self.workspace_roots.read().unwrap().clone();
-        while let Some(dir) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for e in entries.flatten() {
-                let path = e.path();
-                let name = e.file_name().to_string_lossy().into_owned();
-                if name.starts_with('.') {
-                    continue;
-                }
-                if path.is_dir() {
-                    stack.push(path);
-                } else if path.extension().is_some_and(|x| x == "cfg") {
-                    if out.len() >= limit {
-                        return (out, true);
-                    }
-                    out.push(path);
-                }
-            }
-        }
-        (out, false)
+        logic::scan_configs(&self.workspace_roots.read().unwrap(), limit)
     }
 
     /// Ask the client to watch the files whose contents this server
@@ -1231,6 +1209,17 @@ impl LanguageServer for Backend {
                 version: Some(env!("CARGO_PKG_VERSION").into()),
             }),
             capabilities: ServerCapabilities {
+                // A server that does not SAY it handles workspace
+                // folder changes is never told about them, and every
+                // fragment in a folder added after startup stays
+                // unrecognised until the window is reloaded.
+                workspace: Some(WorkspaceServerCapabilities {
+                    workspace_folders: Some(WorkspaceFoldersServerCapabilities {
+                        supported: Some(true),
+                        change_notifications: Some(OneOf::Left(true)),
+                    }),
+                    file_operations: None,
+                }),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
                         open_close: Some(true),
@@ -1606,6 +1595,28 @@ impl LanguageServer for Backend {
         Ok(WorkspaceDiagnosticReportResult::Report(
             WorkspaceDiagnosticReport { items },
         ))
+    }
+
+    async fn did_change_workspace_folders(&self, p: DidChangeWorkspaceFoldersParams) {
+        {
+            let mut roots = self.workspace_roots.write().unwrap();
+            for removed in &p.event.removed {
+                if let Some(path) = removed.uri.to_file_path() {
+                    roots.retain(|r| *r != *path);
+                }
+            }
+            for added in &p.event.added {
+                if let Some(path) = added.uri.to_file_path() {
+                    let path = path.into_owned();
+                    if !roots.contains(&path) {
+                        roots.push(path);
+                    }
+                }
+            }
+        }
+        // the graph is built from those folders and nothing else
+        self.invalidate_include_graph();
+        self.register_watchers().await;
     }
 
     async fn did_change_watched_files(&self, p: DidChangeWatchedFilesParams) {

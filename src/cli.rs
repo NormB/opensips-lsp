@@ -6,11 +6,52 @@
 use crate::{diag, logic};
 
 fn disk_loader(p: &std::path::Path) -> Option<String> {
-    let md = std::fs::metadata(p).ok()?;
-    if !md.is_file() || md.len() > 1_048_576 {
-        return None;
+    logic::read_config(p)
+}
+
+/// The include graph the given files sit in.
+///
+/// `check` is what a git hook and a CI job run, and it has to reach
+/// the same conclusion the editor does about which file is part of
+/// which — otherwise a configuration is green in one and red in the
+/// other.  The server scans the workspace folders; here the workspace
+/// is the directory holding the files that were named, so passing a
+/// fragment alone still finds the root sitting beside it.
+fn graph_for(files: &[String]) -> logic::IncludeGraph {
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    for f in files {
+        let p = std::path::Path::new(f);
+        let dir = p
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .map(|d| d.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        if !roots.contains(&dir) {
+            roots.push(dir);
+        }
     }
-    std::fs::read_to_string(p).ok()
+    let (mut configs, _) = logic::scan_configs(&roots, 500);
+    // and the directories above, without recursing into them: the
+    // root that includes `inc/routes.cfg` is almost always the config
+    // sitting one level up, and a hook is often handed the fragment
+    // alone because that is the file that changed
+    for dir in &roots {
+        let mut up = dir.parent();
+        for _ in 0..3 {
+            let Some(parent) = up else { break };
+            for c in logic::configs_in_dir(parent) {
+                if !configs.contains(&c) {
+                    configs.push(c);
+                }
+            }
+            up = parent.parent();
+        }
+    }
+    let scanned: Vec<(std::path::PathBuf, String)> = configs
+        .into_iter()
+        .filter_map(|p| logic::read_config(&p).map(|t| (p, t)))
+        .collect();
+    logic::IncludeGraph::build(&scanned)
 }
 
 /// Run the `check` subcommand over `args` (everything after `check`).
@@ -43,6 +84,8 @@ pub fn run_check(args: &[String]) -> i32 {
     }
     let bin = logic::resolve_bin(bin_flag.as_deref(), std::env::var("OPENSIPS_LSP_BIN").ok());
 
+    let graph = graph_for(&files);
+
     let mut errors = 0usize;
     let mut warnings = 0usize;
     for f in &files {
@@ -52,8 +95,38 @@ pub fn run_check(args: &[String]) -> i32 {
             return 2;
         };
         let mut findings: Vec<(u32, u32, bool, String)> = Vec::new();
+        // A file another config includes is a fragment, not a
+        // program: analysed on its own it reports every route its
+        // parent defines as undefined, and under `--strict` that
+        // fails the build for a configuration that is correct.
+        let root = graph.analysis_root(path);
+        let closure = match root.as_ref().and_then(|r| disk_loader(r).map(|t| (r, t))) {
+            Some((r, rt)) => {
+                let mut files = logic::include_closure(r, &rt, &disk_loader);
+                match files.iter().position(|(p, _)| p == path) {
+                    Some(i) => {
+                        files[i].1 = text.clone();
+                        let own = files.remove(i);
+                        files.insert(0, own);
+                        files
+                    }
+                    // past the closure's bounds: its own context still
+                    // counts, the root's is added to it
+                    None => {
+                        let mut merged = logic::include_closure(path, &text, &disk_loader);
+                        for (p, t) in files {
+                            if !merged.iter().any(|(q, _)| *q == p) {
+                                merged.push((p, t));
+                            }
+                        }
+                        merged
+                    }
+                }
+            }
+            None => logic::include_closure(path, &text, &disk_loader),
+        };
         // fast analyzer pass (warnings)
-        for d in logic::analyzer_diagnostics(path, &text, &disk_loader) {
+        for d in logic::analyzer_diagnostics_in_closure(&closure, path, &text) {
             findings.push((d.line, d.col_start, false, d.message));
         }
         // the real parser, when configured

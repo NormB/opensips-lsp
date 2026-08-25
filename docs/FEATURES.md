@@ -290,6 +290,21 @@ latin-1 accent in a comment does not erase a configuration and every
 fragment it includes along with it. A config the graph could not read
 is named in the log, not dropped in silence.
 
+The **CLI knows this too.** `opensips-lsp check` is what a git hook and a
+CI job run, and it reaches the same conclusion the editor does: the
+directory holding the files it was given is its workspace (plus the
+three directories above, read but not walked, because the root that
+includes `inc/routes.cfg` is usually the config one level up). Pass it
+a fragment alone and it still analyses it as part of its root —
+before, it reported the parent's routes as undefined, and `--strict`
+turned that into a failed build for a correct configuration.
+
+**Folders added to the workspace after startup count.** The server
+advertises `workspaceFolders` support with change notifications and
+rebuilds the graph when one is added or removed; without that, "Add
+Folder to Workspace" left every fragment in the new folder
+unrecognised until the window was reloaded.
+
 The scan behind the graph is bounded at 500 configs and **says so in
 the log** when it stops early. Past that bound a root is simply not
 seen and its fragments stop being recognised — no colours, no

@@ -68,6 +68,16 @@ artefacts of opening it on its own.
   and then could not be loaded, so its routes quietly left scope.
   One rule now, and any config it cannot read is named in the output
   channel.
+- **`check` no longer fails CI on a correct split configuration.**
+  The command a git hook and a CI job run had no idea a file might be
+  part of something larger, so it reported the parent's routes as
+  undefined — and `--strict` makes warnings errors, so a green
+  configuration failed the build. It now finds the root the same way
+  the editor does.
+- **A folder added to the workspace after startup is picked up.**
+  Workspace folders were read once, at startup, and never again, so
+  everything in a folder you added stayed unrecognised until the
+  window was reloaded.
 - **A failed check no longer invents a file and a line.** When
   `opensips -C` fails without positioning the error — a module it
   cannot load, a bad module path — the note read "check failed

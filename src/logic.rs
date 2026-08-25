@@ -739,6 +739,62 @@ fn resolve_include(from: &std::path::Path, inc: &str) -> std::path::PathBuf {
     lexically_normal(&joined)
 }
 
+/// The `*.cfg` files sitting DIRECTLY in `dir` — no recursion.
+///
+/// For looking one level up: a fragment in `inc/` is usually included
+/// by a config in the directory above it, and reading that directory's
+/// own files is cheap, while walking it recursively could be a scan of
+/// `/etc` or worse.
+pub fn configs_in_dir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x == "cfg"))
+        .take(200)
+        .collect()
+}
+
+/// Every `*.cfg` under `roots`, bounded.
+///
+/// The server scans the client's workspace folders; the CLI scans the
+/// directory holding the files it was given.  Same walk, so the two
+/// cannot come to different conclusions about which file is part of
+/// which — the bound is announced by the caller rather than applied
+/// silently.
+pub fn scan_configs(roots: &[std::path::PathBuf], limit: usize) -> (Vec<std::path::PathBuf>, bool) {
+    let mut out = Vec::new();
+    let mut stack: Vec<std::path::PathBuf> = roots.to_vec();
+    let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+    while let Some(dir) = stack.pop() {
+        // a directory symlink can point back up the tree
+        if !seen.insert(std::fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone())) {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for e in entries.flatten() {
+            let path = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
+                continue;
+            }
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|x| x == "cfg") {
+                if out.len() >= limit {
+                    return (out, true);
+                }
+                out.push(path);
+            }
+        }
+    }
+    (out, false)
+}
+
 /// The most a single config may contribute to an analysis.
 ///
 /// Documented as the per-file include bound, so it belongs to the

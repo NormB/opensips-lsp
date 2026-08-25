@@ -1541,3 +1541,370 @@ fn repeated_questions_do_not_drift() {
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// A folder added to the workspace after the server started.
+///
+/// The include graph is built from the client's workspace folders,
+/// and those were read once, at `initialize`, and never again.  "Add
+/// Folder to Workspace" is an ordinary thing to do — and every
+/// fragment in the folder you just added stayed unrecognised until
+/// the window was reloaded, with nothing to suggest why.
+#[test]
+fn a_workspace_folder_added_later_is_picked_up() {
+    let (base, _root_uri, frag_uri) = setup("addfolder");
+    // start with NO folder at all
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "")
+            .env(
+                "OPENSIPS_LSP_CACHE_DIR",
+                base.join("cache").display().to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "capabilities":{},
+            "initializationOptions":{"opensipsPath":""},
+            "workspaceFolders": []}}),
+    );
+    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    // a server that does not SAY it handles folder changes will not be
+    // told about them, so the capability is half the fix
+    assert_eq!(
+        init["result"]["capabilities"]["workspace"]["workspaceFolders"]["supported"], true,
+        "the server must advertise that it handles workspace folders: {init}"
+    );
+    assert_eq!(
+        init["result"]["capabilities"]["workspace"]["workspaceFolders"]["changeNotifications"],
+        true,
+        "and that it wants to be told when they change: {init}"
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
+            "params":{"uri": frag_uri}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "analysisRoot with no folder");
+    assert!(v["result"].is_null(), "nothing is open yet: {v}");
+
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders",
+            "params":{"event":{
+                "added":[{"uri": format!("file://{}", base.display()), "name":"w"}],
+                "removed":[]}}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"opensips/analysisRoot",
+            "params":{"uri": frag_uri}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| v["id"] == 3,
+        "analysisRoot after the folder was added",
+    );
+    assert!(
+        v["result"]
+            .as_str()
+            .is_some_and(|s| s.ends_with("opensips.cfg")),
+        "the folder was added; its fragments must be recognised: {v}"
+    );
+
+    // and removing it again takes them back out of scope
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders",
+            "params":{"event":{"added":[],
+                "removed":[{"uri": format!("file://{}", base.display()), "name":"w"}]}}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"opensips/analysisRoot",
+            "params":{"uri": frag_uri}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| v["id"] == 4,
+        "analysisRoot after the folder was removed",
+    );
+    assert!(v["result"].is_null(), "the folder is gone again: {v}");
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Edits, not shapes.
+///
+/// Everything so far asked whether a request ANSWERS from inside a
+/// fragment.  These ask whether the answer is right: that a rename
+/// produces edits which, applied, actually rename the thing in both
+/// files; that a reference count counts the call site in the other
+/// file; and that a generated stub lands in the buffer being edited
+/// rather than in its parent.
+#[test]
+fn the_edits_a_fragment_produces_are_correct_not_merely_present() {
+    let (base, root_uri, frag_uri) = setup("edits");
+    let (mut child, rx, mut stdin) = start(&base, "");
+    did_open(&mut stdin, &frag_uri, FRAG_TEXT);
+    // Take the publish BEFORE anything else asks a question:
+    // `wait_for` discards what it is not waiting for, so a request
+    // sent first eats the notification the quick fix needs.
+    let v = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
+        "diagnostics to drive the quick fix",
+    );
+    let published = v["params"]["diagnostics"].clone();
+    assert!(
+        published
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["message"].as_str().is_some_and(|m| m.contains("ghost"))),
+        "the fixture must produce the finding the fix is for: {published}"
+    );
+    did_open(&mut stdin, &root_uri, ROOT_TEXT);
+
+    // rename helper from its CALL SITE in the fragment
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{
+            "textDocument":{"uri":frag_uri},"position":{"line":1,"character":11},
+            "newName":"RENAMED"}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "rename");
+    let changes = v["result"]["changes"].as_object().expect("edits").clone();
+
+    /// Apply edits to text, last first so earlier offsets stay valid.
+    fn apply(text: &str, edits: &serde_json::Value) -> String {
+        let mut lines: Vec<String> = text.lines().map(str::to_string).collect();
+        let mut es: Vec<&serde_json::Value> = edits.as_array().unwrap().iter().collect();
+        es.sort_by_key(|e| {
+            (
+                std::cmp::Reverse(e["range"]["start"]["line"].as_u64().unwrap()),
+                std::cmp::Reverse(e["range"]["start"]["character"].as_u64().unwrap()),
+            )
+        });
+        for e in es {
+            let l = e["range"]["start"]["line"].as_u64().unwrap() as usize;
+            let s = e["range"]["start"]["character"].as_u64().unwrap() as usize;
+            let t = e["range"]["end"]["character"].as_u64().unwrap() as usize;
+            let line = &lines[l];
+            lines[l] = format!(
+                "{}{}{}",
+                &line[..s],
+                e["newText"].as_str().unwrap(),
+                &line[t..]
+            );
+        }
+        lines.join("\n")
+    }
+
+    let new_root = apply(ROOT_TEXT, &changes[&root_uri]);
+    let new_frag = apply(FRAG_TEXT, &changes[&frag_uri]);
+    assert!(
+        new_root.contains("route[RENAMED]") && !new_root.contains("route[helper]"),
+        "the DEFINITION lives in the root and must be rewritten there:\n{new_root}"
+    );
+    assert!(
+        new_frag.contains("route(RENAMED)") && !new_frag.contains("route(helper)"),
+        "the call site in the fragment must be rewritten too:\n{new_frag}"
+    );
+
+    // the fragment's own route is called once, from the root
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/codeLens",
+            "params":{"textDocument":{"uri":frag_uri}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 3, "codeLens");
+    let titles: Vec<String> = v["result"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|l| l["command"]["title"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        titles.iter().any(|t| t.starts_with('1')),
+        "entry is called once, from the root; the count must span the \
+         closure: {titles:?}"
+    );
+
+    // the quick fix for the undefined route goes into THIS file.
+    // A real client passes the diagnostics it is showing, and the
+    // action is offered against them — an empty context asks for
+    // nothing and gets nothing.
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"textDocument/codeAction","params":{
+            "textDocument":{"uri":frag_uri},
+            "range":{"start":{"line":2,"character":10},"end":{"line":2,"character":14}},
+            "context":{"diagnostics": published}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 4, "codeAction");
+    let actions = v["result"].as_array().cloned().unwrap_or_default();
+    assert!(!actions.is_empty(), "a stub must be offered for ghost: {v}");
+    for a in &actions {
+        if let Some(ch) = a["edit"]["changes"].as_object() {
+            for uri in ch.keys() {
+                assert_eq!(
+                    uri, &frag_uri,
+                    "a stub belongs in the file being edited, not in its parent: {a}"
+                );
+            }
+        }
+    }
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Every kind of watched-file event, not just "changed".
+///
+/// A root can appear, change and vanish, and the graph is built from
+/// what is on disk.  Only one of those three was ever exercised.
+#[test]
+fn a_root_appearing_and_vanishing_is_noticed() {
+    let (base, root_uri, frag_uri) = setup("events");
+    let root_path = base.join("opensips.cfg");
+    let saved = std::fs::read_to_string(&root_path).unwrap();
+    std::fs::remove_file(&root_path).unwrap();
+
+    let (mut child, rx, mut stdin) = start(&base, "");
+    let mut id = 10;
+    let ask = |stdin: &mut std::process::ChildStdin, id: &mut i32| {
+        *id += 1;
+        write_msg(
+            stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":*id,"method":"opensips/analysisRoot",
+                "params":{"uri": frag_uri}}),
+        );
+        let want = *id;
+        wait_for(&rx, |v| v["id"] == want, "analysisRoot")["result"].clone()
+    };
+    assert!(ask(&mut stdin, &mut id).is_null(), "no root on disk yet");
+
+    // CREATED
+    std::fs::write(&root_path, &saved).unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles",
+            "params":{"changes":[{"uri": root_uri, "type": 1}]}}),
+    );
+    assert!(
+        ask(&mut stdin, &mut id)
+            .as_str()
+            .is_some_and(|s| s.ends_with("opensips.cfg")),
+        "a root created on disk must be picked up"
+    );
+
+    // CHANGED, to stop including the fragment
+    std::fs::write(
+        &root_path,
+        saved.replace("include_file \"inc/routes.cfg\"\n", ""),
+    )
+    .unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles",
+            "params":{"changes":[{"uri": root_uri, "type": 2}]}}),
+    );
+    assert!(
+        ask(&mut stdin, &mut id).is_null(),
+        "the root no longer includes it"
+    );
+
+    // CHANGED back, then DELETED
+    std::fs::write(&root_path, &saved).unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles",
+            "params":{"changes":[{"uri": root_uri, "type": 2}]}}),
+    );
+    assert!(
+        ask(&mut stdin, &mut id).as_str().is_some(),
+        "and back again"
+    );
+    std::fs::remove_file(&root_path).unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles",
+            "params":{"changes":[{"uri": root_uri, "type": 3}]}}),
+    );
+    assert!(ask(&mut stdin, &mut id).is_null(), "a deleted root is gone");
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Churn: open, edit and close many documents, then check the server
+/// still answers the same thing it did at the start.
+///
+/// Per-document state is kept in several maps, evicted from several
+/// places.  A leak shows up as a slow drift rather than an error, and
+/// a wrong eviction shows up as an answer that was right once.
+#[test]
+fn state_survives_repeated_open_edit_close_cycles() {
+    let (base, root_uri, frag_uri) = setup("churn");
+    let (mut child, rx, mut stdin) = start(&base, "");
+    let mut id = 300;
+    let ask = |stdin: &mut std::process::ChildStdin, id: &mut i32| -> String {
+        *id += 1;
+        write_msg(
+            stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":*id,"method":"opensips/analysisRoot",
+                "params":{"uri": frag_uri}}),
+        );
+        let want = *id;
+        wait_for(&rx, |v| v["id"] == want, "analysisRoot")["result"].to_string()
+    };
+    let before = ask(&mut stdin, &mut id);
+    for round in 0..25 {
+        did_open(&mut stdin, &frag_uri, FRAG_TEXT);
+        did_open(&mut stdin, &root_uri, ROOT_TEXT);
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+                "textDocument":{"uri": frag_uri, "version": round + 2},
+                "contentChanges":[{"text": format!("{FRAG_TEXT}// {round}\n")}]}}),
+        );
+        for u in [&frag_uri, &root_uri] {
+            write_msg(
+                &mut stdin,
+                &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
+                    "textDocument":{"uri": u}}}),
+            );
+        }
+    }
+    let after = ask(&mut stdin, &mut id);
+    assert_eq!(before, after, "25 open/edit/close cycles moved the answer");
+    // and it still analyses, rather than merely answering
+    did_open(&mut stdin, &frag_uri, FRAG_TEXT);
+    let v = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
+        "diagnostics after the churn",
+    );
+    let msgs: Vec<&str> = v["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d["message"].as_str())
+        .collect();
+    assert!(msgs.iter().any(|m| m.contains("ghost")), "{msgs:?}");
+    assert!(!msgs.iter().any(|m| m.contains("helper")), "{msgs:?}");
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
