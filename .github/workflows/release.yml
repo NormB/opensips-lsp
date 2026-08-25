@@ -125,14 +125,24 @@ jobs:
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: |
+          # A release that quietly publishes nothing is worse than one
+          # that fails: the tag is cut, the GitHub assets are up, and
+          # every installer still resolves to the previous version
+          # with a green tick above it saying otherwise.
           if [ -z "$OVSX_PAT" ]; then
-            echo "OVSX_PAT secret not set — skipping Open VSX publish."
-            exit 0
+            echo "::error::OVSX_PAT is not set, so nothing can be published"
+            echo "The GitHub release is complete; only the Open VSX half"
+            echo "is missing.  Set the secret and re-run this job."
+            exit 1
           fi
-          # first publish needs the namespace (derived from the vsix
-          # manifest so it can never drift); idempotent afterwards
-          NS=$(python3 -c "import zipfile,json,glob; \
-            print(json.loads(zipfile.ZipFile(sorted(glob.glob('*.vsix'))[0]).read('extension/package.json'))['publisher'])")
+          # Publisher, name and version all read from the packaged
+          # manifest, so they cannot drift from what was actually
+          # built.  The namespace is needed for a first publish and is
+          # idempotent afterwards.
+          read -r NS NAME VERSION <<<"$(python3 -c "import zipfile,json,glob; \
+            m=json.loads(zipfile.ZipFile(sorted(glob.glob('*.vsix'))[0]).read('extension/package.json')); \
+            print(m['publisher'], m['name'], m['version'])")"
+          echo "publishing $NS.$NAME $VERSION"
           npx --yes ovsx create-namespace "$NS" -p "$OVSX_PAT" || true
           for f in *.vsix; do
             rc=0
@@ -142,8 +152,36 @@ jobs:
               # a rerun of an already-accepted publish is not a failure
               echo "$out" | grep -q "already published" || exit 1
               echo "skipping $f (already published)"
+              continue
             fi
+            # `ovsx` exits 0 having uploaded something; make it say it
+            # uploaded THIS version, so a packaging slip that ships the
+            # previous one cannot pass as a release
+            echo "$out" | grep -q "$VERSION" || {
+              echo "::error::publish of $f reported success without naming $VERSION"
+              exit 1
+            }
           done
+
+          # Uploaded is not installable.  The registry indexes
+          # asynchronously — minutes, sometimes twenty — and until it
+          # has, `install.sh` and every editor still offer the previous
+          # version.  Wait for the thing users actually see.
+          echo "waiting for the registry to serve $NS.$NAME $VERSION"
+          for _ in $(seq 1 90); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              "https://open-vsx.org/api/$NS/$NAME/$VERSION")
+            if [ "$code" = "200" ]; then
+              echo "visible after $SECONDS seconds"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::$VERSION was accepted but is still not served after 30 minutes"
+          echo "The GitHub release is complete and the upload was accepted;"
+          echo "this is the registry not indexing it.  Check"
+          echo "https://open-vsx.org/extension/$NS/$NAME before re-running."
+          exit 1
 
   publish:
     name: GitHub release
