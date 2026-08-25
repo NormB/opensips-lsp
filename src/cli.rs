@@ -3,7 +3,7 @@
 //! hooks.  Exit codes: 0 clean (warnings allowed), 1 findings
 //! (errors, or warnings under `--strict`), 2 usage/read failures.
 
-use crate::{diag, logic};
+use crate::{catalog, diag, logic};
 
 fn disk_loader(p: &std::path::Path) -> Option<String> {
     logic::read_config(p)
@@ -86,6 +86,42 @@ pub fn run_check(args: &[String]) -> i32 {
 
     let graph = graph_for(&files);
 
+    // The editor checks `modparam` against a catalogue; a CI job and a
+    // git hook running `check` were not, so the same configuration was
+    // green here and warned about in the editor. `OPENSIPS_LSP_SRC` is
+    // the same fallback the server reads, so both resolve one source.
+    let (modules, origin) = match std::env::var("OPENSIPS_LSP_SRC")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+    {
+        Some(src) => {
+            let harvested = catalog::harvest_tree(std::path::Path::new(&src));
+            if harvested.is_empty() {
+                eprintln!(
+                    "opensips-lsp: '{src}' yields no module documentation — \
+                     falling back to the built-in catalogue"
+                );
+                (
+                    catalog::builtin_modules().modules.clone(),
+                    catalog::CatalogOrigin::BuiltIn(catalog::builtin_modules().version.clone()),
+                )
+            } else {
+                (harvested, catalog::CatalogOrigin::ConfiguredTree)
+            }
+        }
+        None => (
+            catalog::builtin_modules().modules.clone(),
+            catalog::CatalogOrigin::BuiltIn(catalog::builtin_modules().version.clone()),
+        ),
+    };
+    // Findings go to stdout as `file:line:col: sev: msg` and are
+    // parsed by other tools; a header among them would break that, so
+    // what the run judged against goes to stderr.
+    eprintln!(
+        "opensips-lsp: modparam checks against {}",
+        origin.describe()
+    );
+
     let mut errors = 0usize;
     let mut warnings = 0usize;
     for f in &files {
@@ -127,6 +163,10 @@ pub fn run_check(args: &[String]) -> i32 {
         };
         // fast analyzer pass (warnings)
         for d in logic::analyzer_diagnostics_in_closure(&closure, path, &text) {
+            findings.push((d.line, d.col_start, false, d.message));
+        }
+        // the same catalogue check the editor runs
+        for d in logic::catalog_diagnostics(&modules, &origin, &text) {
             findings.push((d.line, d.col_start, false, d.message));
         }
         // the real parser, when configured
