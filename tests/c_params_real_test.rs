@@ -351,3 +351,28 @@ fn an_unresolved_splice_drops_nothing() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A conditional entry must not make a table look unresolved.
+///
+/// `rr` guards `ignore_user` behind `ENABLE_USER_CHECK`. Read without
+/// skipping the directive, `ifdef` parses as a bare identifier — a
+/// macro splice this parser cannot find — and the table is marked
+/// incomplete. Every name is still collected, so a test that only
+/// checks names passes; what is lost is the authority to drop a
+/// phantom from that module.
+#[test]
+fn conditional_tables_still_resolve_completely() {
+    let root = tree();
+    let root = Path::new(&root);
+    let dir = root.join("modules").join("rr");
+    let found = param_names_from_c(&dir, root);
+    assert!(
+        found.names.iter().any(|n| n == "ignore_user"),
+        "rr::ignore_user sits behind a `#ifdef` and must still be collected, got {:?}",
+        found.names
+    );
+    assert!(
+        found.complete,
+        "rr: a `#ifdef` inside the table must not read as an unresolved splice"
+    );
+}
