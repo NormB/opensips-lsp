@@ -1,7 +1,7 @@
 //! Editor-feature logic, pure and testable.
 
 use crate::analyze::{self, Located};
-use crate::catalog::ModuleDoc;
+use crate::catalog::{self, ModuleDoc};
 
 /// What a completion item is, mapped to an LSP `CompletionItemKind`.
 #[derive(Debug, Clone, PartialEq)]
@@ -1362,7 +1362,11 @@ pub fn split_params(sig: &str) -> Vec<String> {
 /// never harvested, stay silent (the catalog may simply not cover
 /// them).  Doc-derived, so kept separate from the grammar-derived
 /// [`analyzer_diagnostics`].
-pub fn catalog_diagnostics(catalog: &[ModuleDoc], text: &str) -> Vec<AnalyzerDiag> {
+pub fn catalog_diagnostics(
+    catalog: &[ModuleDoc],
+    origin: &catalog::CatalogOrigin,
+    text: &str,
+) -> Vec<AnalyzerDiag> {
     if catalog.is_empty() {
         return Vec::new();
     }
@@ -1387,9 +1391,15 @@ pub fn catalog_diagnostics(catalog: &[ModuleDoc], text: &str) -> Vec<AnalyzerDia
             line: call.line,
             col_start: call.col,
             col_end: call.col + call.param.len() as u32,
+            // Name the catalogue. A parameter absent here may simply
+            // be one this version does not have, and the reader
+            // cannot tell that from a typo unless the message says
+            // which version it was judged against.
             message: format!(
-                "parameter '{}' is not documented for module '{}' in the configured source tree",
-                call.param, call.module
+                "parameter '{}' is not exported by module '{}' in {}",
+                call.param,
+                call.module,
+                origin.describe()
             ),
         });
     }

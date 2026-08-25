@@ -3,6 +3,31 @@
 
 use std::path::Path;
 
+/// Where a module catalogue came from.
+///
+/// What a module exports moves between releases, so a diagnostic that
+/// does not say which version it judged against cannot be acted on:
+/// the reader cannot tell a typo from a parameter their build has and
+/// this catalogue does not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CatalogOrigin {
+    /// The vendored catalogue, at this upstream version.
+    BuiltIn(String),
+    /// A source tree the user pointed `opensipsSrc` at. It is exact
+    /// for their build by construction, so it names no version.
+    ConfiguredTree,
+}
+
+impl CatalogOrigin {
+    /// How to name this catalogue inside a sentence.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::BuiltIn(v) => format!("OpenSIPS {v} (built in)"),
+            Self::ConfiguredTree => "the configured source tree".to_string(),
+        }
+    }
+}
+
 /// One documented module symbol: a parameter or a function.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Item {

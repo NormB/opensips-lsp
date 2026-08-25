@@ -20,6 +20,11 @@ pub struct Backend {
     /// Open documents: (version, full text).
     docs: DashMap<Uri, (i32, String)>,
     catalog: std::sync::Arc<std::sync::RwLock<Vec<catalog::ModuleDoc>>>,
+    /// Which catalogue the modparam check judges against, so a
+    /// diagnostic can name it. What a module exports moves between
+    /// releases, and a parameter absent from a built-in catalogue
+    /// may simply be one that version does not have.
+    catalog_origin: std::sync::Arc<std::sync::RwLock<catalog::CatalogOrigin>>,
     core: std::sync::RwLock<catalog::CoreDocs>,
     src: std::sync::RwLock<Option<String>>,
     opensips_bin: std::sync::RwLock<Option<String>>,
@@ -74,6 +79,9 @@ impl Backend {
             client,
             docs: DashMap::new(),
             catalog: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+            catalog_origin: std::sync::Arc::new(std::sync::RwLock::new(
+                catalog::CatalogOrigin::BuiltIn(catalog::builtin_modules().version.clone()),
+            )),
             core: std::sync::RwLock::new(catalog::CoreDocs::default()),
             src: std::sync::RwLock::new(None),
             opensips_bin: std::sync::RwLock::new(None),
@@ -186,9 +194,10 @@ impl Backend {
         path: &std::path::Path,
         text: &str,
         cat: &[catalog::ModuleDoc],
+        origin: &catalog::CatalogOrigin,
     ) -> Vec<Diagnostic> {
         let mut all = logic::analyzer_diagnostics_in_closure(files, path, text);
-        all.extend(logic::catalog_diagnostics(cat, text));
+        all.extend(logic::catalog_diagnostics(cat, origin, text));
         all.into_iter()
             .map(|d| {
                 let lt = Self::doc_line(text, d.line);
@@ -223,6 +232,7 @@ impl Backend {
         text: &str,
         open: std::collections::HashMap<std::path::PathBuf, String>,
         cat: &std::sync::Arc<std::sync::RwLock<Vec<catalog::ModuleDoc>>>,
+        origin: &std::sync::Arc<std::sync::RwLock<catalog::CatalogOrigin>>,
         skip_if_empty: bool,
         root: Option<&std::path::Path>,
     ) {
@@ -232,8 +242,17 @@ impl Backend {
         if !pushing {
             return;
         }
-        let merged =
-            Self::merged_diags(check_map, analyzer_enabled, cap, uri, text, open, cat, root);
+        let merged = Self::merged_diags(
+            check_map,
+            analyzer_enabled,
+            cap,
+            uri,
+            text,
+            open,
+            cat,
+            origin,
+            root,
+        );
         if merged.is_empty() && skip_if_empty {
             return;
         }
@@ -254,6 +273,7 @@ impl Backend {
         text: &str,
         open: std::collections::HashMap<std::path::PathBuf, String>,
         cat: &std::sync::Arc<std::sync::RwLock<Vec<catalog::ModuleDoc>>>,
+        origin: &std::sync::Arc<std::sync::RwLock<catalog::CatalogOrigin>>,
         root: Option<&std::path::Path>,
     ) -> Vec<Diagnostic> {
         let mut merged = check_map.get(uri).map(|v| v.clone()).unwrap_or_default();
@@ -261,7 +281,8 @@ impl Backend {
             let loader = Self::make_loader(open);
             let cat = cat.read().unwrap().clone();
             let files = Self::closure_rooted_at(root, &path, text, &loader);
-            merged.extend(Self::analyzer_lsp_diags(&files, &path, text, &cat));
+            let origin = origin.read().unwrap().clone();
+            merged.extend(Self::analyzer_lsp_diags(&files, &path, text, &cat, &origin));
         }
         merged.truncate(cap.max(1));
         merged
@@ -589,6 +610,11 @@ impl Backend {
             .await
             .unwrap_or_default();
             let empty = harvested.is_empty();
+            // a tree the user configured is exact for their build, so
+            // its diagnostics name the tree rather than a version
+            if !empty {
+                *self.catalog_origin.write().unwrap() = catalog::CatalogOrigin::ConfiguredTree;
+            }
             *self.catalog.write().unwrap() = harvested;
             *self.core.write().unwrap() = core;
             cached = hit;
@@ -855,6 +881,7 @@ impl Backend {
                 &snap_text,
                 self.open_docs_snapshot(),
                 &self.catalog,
+                &self.catalog_origin,
                 quiet_when_clean,
                 root.as_deref(),
             )
@@ -976,6 +1003,7 @@ impl Backend {
                     &snap_text,
                     self.open_docs_snapshot(),
                     &self.catalog,
+                    &self.catalog_origin,
                     false,
                     root.as_deref(),
                 )
@@ -1003,6 +1031,7 @@ impl Backend {
                 &snap_text,
                 self.open_docs_snapshot(),
                 &self.catalog,
+                &self.catalog_origin,
                 false,
                 root.as_deref(),
             )
@@ -1032,6 +1061,7 @@ impl Backend {
                 &snap_text,
                 self.open_docs_snapshot(),
                 &self.catalog,
+                &self.catalog_origin,
                 false,
                 root.as_deref(),
             )
@@ -1140,6 +1170,7 @@ impl Backend {
             &snap_text,
             self.open_docs_snapshot(),
             &self.catalog,
+            &self.catalog_origin,
             false,
             root.as_deref(),
         )
@@ -1318,6 +1349,8 @@ impl LanguageServer for Backend {
         let builtin_mods = self.catalog.read().unwrap().is_empty();
         if builtin_mods {
             *self.catalog.write().unwrap() = catalog::builtin_modules().modules.clone();
+            *self.catalog_origin.write().unwrap() =
+                catalog::CatalogOrigin::BuiltIn(catalog::builtin_modules().version.clone());
         }
         let n = self.catalog.read().unwrap().len();
         let c = self.core.read().unwrap().functions.len();
@@ -1378,6 +1411,7 @@ impl LanguageServer for Backend {
                 &text,
                 self.open_docs_snapshot(),
                 &self.catalog,
+                &self.catalog_origin,
                 false,
                 self.analysis_root_of(&uri).as_deref(),
             )
@@ -1450,6 +1484,7 @@ impl LanguageServer for Backend {
         let pulled = self.diagnostics_pulled.clone();
         let check_map = self.check_diags.clone();
         let cat_arc = self.catalog.clone();
+        let origin_arc = self.catalog_origin.clone();
         let client = self.client.clone();
         let open = self.open_docs_snapshot();
         let cap = *self.max_diagnostics.read().unwrap();
@@ -1477,6 +1512,7 @@ impl LanguageServer for Backend {
                 &text,
                 open,
                 &cat_arc,
+                &origin_arc,
                 false,
                 root.as_deref(),
             )
@@ -1498,6 +1534,7 @@ impl LanguageServer for Backend {
             &text,
             self.open_docs_snapshot(),
             &self.catalog,
+            &self.catalog_origin,
             self.analysis_root_of(&uri).as_deref(),
         );
         let id = Self::result_id(&diags);
@@ -1577,6 +1614,7 @@ impl LanguageServer for Backend {
                 &text,
                 open.clone(),
                 &self.catalog,
+                &self.catalog_origin,
                 // the sweep reports ROOTS only, so each is its own
                 // analysis context by construction
                 None,

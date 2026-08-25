@@ -710,17 +710,18 @@ fn catalog_diagnostics_flag_undocumented_modparams() {
     let cat = catalog(); // tm has fr_timeout; cachedb_nats has kv_bucket
     // unknown param of a KNOWN module → warning at the param
     let text = "modparam(\"tm\", \"fr_timeot\", 5)\n";
-    let ds = catalog_diagnostics(&cat, text);
+    let origin = opensips_lsp::catalog::CatalogOrigin::BuiltIn("4.0.1".to_string());
+    let ds = catalog_diagnostics(&cat, &origin, text);
     assert_eq!(ds.len(), 1, "{ds:?}");
     assert!(ds[0].message.contains("fr_timeot") && ds[0].message.contains("tm"));
     assert_eq!(ds[0].line, 0);
     assert!(ds[0].col_start < ds[0].col_end);
     // documented param → clean
-    assert!(catalog_diagnostics(&cat, "modparam(\"tm\", \"fr_timeout\", 5)\n").is_empty());
+    assert!(catalog_diagnostics(&cat, &origin, "modparam(\"tm\", \"fr_timeout\", 5)\n").is_empty());
     // UNKNOWN module → silent (the catalog may simply not cover it)
-    assert!(catalog_diagnostics(&cat, "modparam(\"nope\", \"x\", 1)\n").is_empty());
+    assert!(catalog_diagnostics(&cat, &origin, "modparam(\"nope\", \"x\", 1)\n").is_empty());
     // empty catalog → silent everywhere
-    assert!(catalog_diagnostics(&[], text).is_empty());
+    assert!(catalog_diagnostics(&[], &origin, text).is_empty());
 }
 
 #[test]
@@ -1278,8 +1279,9 @@ fn a_module_documenting_no_parameters_at_all_stays_silent() {
         functions: Vec::new(),
     }];
     let text = "modparam(\"auth_web3\", \"authentication_rpc_url\", \"https://x\")\n";
+    let origin = opensips_lsp::catalog::CatalogOrigin::BuiltIn("4.0.1".to_string());
     assert!(
-        catalog_diagnostics(&cat, text).is_empty(),
+        catalog_diagnostics(&cat, &origin, text).is_empty(),
         "an unharvested parameter list must not accuse the config"
     );
 
@@ -1291,7 +1293,7 @@ fn a_module_documenting_no_parameters_at_all_stays_silent() {
         doc: String::new(),
     });
     assert_eq!(
-        catalog_diagnostics(&cat, text).len(),
+        catalog_diagnostics(&cat, &origin, text).len(),
         1,
         "a module that does document parameters is still checked"
     );
@@ -1308,7 +1310,12 @@ fn a_module_documenting_no_parameters_at_all_stays_silent() {
         }],
     }];
     assert_eq!(
-        catalog_diagnostics(&functions_only, "modparam(\"sipmsgops\", \"nope\", 1)\n").len(),
+        catalog_diagnostics(
+            &functions_only,
+            &origin,
+            "modparam(\"sipmsgops\", \"nope\", 1)\n"
+        )
+        .len(),
         1,
         "a module with functions but no parameters was read, and exports none"
     );
