@@ -37,7 +37,7 @@ jobs:
         run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
   client:
-    name: VS Code client (tsc)
+    name: VS Code client (tsc + behaviour)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -52,6 +52,10 @@ jobs:
       # something else
       - run: npm ci
       - run: npm run compile
+      # what the extension DOES: `tsc` cannot see whether an included
+      # fragment is actually re-associated, and the Rust gate can only
+      # see that the strings are there
+      - run: npm test
 
   grammar:
     name: tree-sitter grammar

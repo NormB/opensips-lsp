@@ -1029,10 +1029,6 @@ impl Backend {
         // nothing that failed is in this file: say so here rather than
         // show a clean buffer, and name where the problem actually is
         if diags.is_empty() && rc != 0 && root.is_some() {
-            let context = parsed
-                .first()
-                .map(|d| format!("{}, line {}: {}", d.file, d.line + 1, d.message))
-                .unwrap_or_else(|| format!("opensips -C failed (rc={rc})"));
             diags.push(Diagnostic {
                 range: Range {
                     start: Position::new(0, 0),
@@ -1040,7 +1036,7 @@ impl Backend {
                 },
                 severity: Some(DiagnosticSeverity::ERROR),
                 source: Some("opensips -C".into()),
-                message: format!("check failed in {context}"),
+                message: logic::check_failure_note(parsed.first(), rc),
                 ..Default::default()
             });
         }

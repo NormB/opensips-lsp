@@ -764,6 +764,27 @@ fn norm_path(p: &std::path::Path) -> std::path::PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
+/// The one line a document carries when a `opensips -C` run FAILED but
+/// nothing it reported belongs to that document.
+///
+/// The parser does not always position an error — a module it cannot
+/// load, a bad module path — and a note built from a diagnostic that
+/// carries no file renders as `check failed in , line 1: ...`, which
+/// names an empty file and sends the reader to a line the parser
+/// never mentioned.  Say only what is known.
+pub fn check_failure_note(first: Option<&crate::diag::Diag>, rc: i32) -> String {
+    match first {
+        Some(d) if !d.file.is_empty() => format!(
+            "check failed in {}, line {}: {}",
+            d.file,
+            d.line + 1,
+            d.message
+        ),
+        Some(d) => format!("check failed: {}", d.message),
+        None => format!("check failed (rc={rc})"),
+    }
+}
+
 /// Route one `opensips -C` diagnostic to an open FRAGMENT.
 ///
 /// The checker only accepts a whole program, so a fragment on screen

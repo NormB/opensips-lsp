@@ -240,3 +240,125 @@ fn formatting_never_changes_what_the_real_parser_accepts() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An included FRAGMENT, opened on its own, against the REAL checker.
+///
+/// The stdio test for this uses a stub checker, and a stub can only
+/// echo back what its author expected.  Two things only the real
+/// parser decides: that a fragment handed to `-C` on its own is
+/// rejected, and how it spells the path of a file reached through
+/// `include_file`.
+///
+/// The fixture is built so the two possible behaviours cannot look
+/// alike.  The fragment calls `t_relay()`, a command that exists only
+/// because the ROOT loads `tm`; checked on its own the parser says
+/// "unknown command <t_relay>, missing loadmodule?" AT THE CALL.  A
+/// syntax error inside the fragment would NOT discriminate — it
+/// reports at the same place either way — so a positioned checker
+/// error on that line is the signal.  The unpositioned note the proof
+/// install always produces (it ships no transport module) sits on
+/// line 1 and is not one.
+#[test]
+fn a_fragment_is_checked_through_its_root_by_the_real_parser() {
+    let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
+    let mpath = common::required_env("OPENSIPS_LSP_TEST_MPATH");
+
+    let dir = std::env::temp_dir().join(format!("oslsp-fragproof-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("inc")).unwrap();
+    std::fs::write(
+        dir.join("opensips.cfg"),
+        format!(
+            "log_level=2\nmpath=\"{mpath}\"\nloadmodule \"tm.so\"\ninclude_file \"inc/routes.cfg\"\nroute[parent_only] {{\n    exit;\n}}\nroute {{\n    route(handle);\n}}\n"
+        ),
+    )
+    .unwrap();
+    let frag_text =
+        "route[handle] {\n    t_relay();\n    route(parent_only);\n    route(no_such_route);\n}\n";
+    let frag = dir.join("inc/routes.cfg");
+    std::fs::write(&frag, frag_text).unwrap();
+    let frag_uri = format!("file://{}", frag.display());
+
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", &bin)
+            .env(
+                "OPENSIPS_LSP_CACHE_DIR",
+                dir.join("cache").display().to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "capabilities":{},
+            "initializationOptions":{"opensipsPath": bin},
+            "workspaceFolders":[{"uri": format!("file://{}", dir.display()), "name":"w"}]}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "init");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
+            "params":{"uri": frag_uri}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "analysisRoot");
+    assert!(
+        v["result"]
+            .as_str()
+            .is_some_and(|s| s.ends_with("opensips.cfg")),
+        "the real workspace's root must be found: {v}"
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+            "textDocument":{"uri":frag_uri,"languageId":"opensips-cfg","version":1,
+                            "text":frag_text}}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "textDocument/publishDiagnostics"
+                && v["params"]["uri"] == frag_uri
+                && !v["params"]["diagnostics"].as_array().unwrap().is_empty()
+        },
+        "diagnostics on the fragment",
+    );
+    let items = v["params"]["diagnostics"].as_array().unwrap().clone();
+    let at_the_call: Vec<&serde_json::Value> = items
+        .iter()
+        .filter(|d| d["source"] == "opensips -C" && d["range"]["start"]["line"] == 1)
+        .collect();
+    assert!(
+        at_the_call.is_empty(),
+        "`t_relay()` resolves through the root that loads tm; an error \
+         on it means the FRAGMENT was handed to `-C`: {at_the_call:?}"
+    );
+    // the route the ROOT defines is in scope...
+    assert!(
+        !items.iter().any(|d| d["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("parent_only"))),
+        "a route the root defines must not read as undefined: {items:?}"
+    );
+    // ...and a route nothing defines is still reported, so the absence
+    // above is a decision and not a silenced analyzer
+    assert!(
+        items.iter().any(|d| d["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("no_such_route"))),
+        "a genuinely undefined route must still be flagged: {items:?}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+}

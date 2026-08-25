@@ -31,6 +31,12 @@ artefacts of opening it on its own.
 - **New request `opensips/analysisRoot`** for other clients: what is
   this document a piece of? The root's URI, or `null` when it is a
   program in its own right.
+- **A failed check no longer invents a file and a line.** When
+  `opensips -C` fails without positioning the error — a module it
+  cannot load, a bad module path — the note read "check failed
+  in , line 1: ...", naming an empty file and sending you to a
+  line the parser never mentioned. It now says only what is
+  known.
 
 Open the FOLDER, not the single file — the root is found by reading
 the configs under the workspace folders your client sends.
