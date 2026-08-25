@@ -150,11 +150,13 @@ pub fn harvest_tree(tree_root: &Path) -> Vec<ModuleDoc> {
         // is the fallback for older trees (and for placeholder
         // READMEs carrying no exported sections).
         let readme = e.path().join("README.md");
-        if let Ok(md) = std::fs::read_to_string(&readme)
-            && let Ok(m) = parse_readme_md(&name, &md)
+        let from_md = std::fs::read_to_string(&readme)
+            .ok()
+            .and_then(|md| parse_readme_md(&name, &md).ok());
+        if let Some(m) = &from_md
             && (!m.params.is_empty() || !m.functions.is_empty())
         {
-            out.push(m);
+            out.push(m.clone());
             continue;
         }
         let admin = e.path().join("doc").join(format!("{name}_admin.xml"));
@@ -162,10 +164,49 @@ pub fn harvest_tree(tree_root: &Path) -> Vec<ModuleDoc> {
             && let Ok(m) = parse_admin_xml(&name, &xml)
         {
             out.push(m);
+            continue;
+        }
+        // `xml` and `event_datagram` really do export nothing —
+        // documented as `*None*.` — and dropping them left seven
+        // modules of the tree missing from `loadmodule` completion.
+        // An empty harvest is what falls through to docbook; with no
+        // docbook to fall through to, it is the answer.
+        if let Some(m) = from_md {
+            out.push(m);
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
+}
+
+/// The parameter names one heading documents.
+///
+/// `osp` writes `private_key, local_certificate, ca_certificates`
+/// under a single heading and `tls_mgm` writes `server_domain,
+/// client_domain`; read as one name the entry matched no `modparam`
+/// at all.  Only a plain identifier counts: `sp1_uri, sp2_uri, ...,
+/// sp16_uri` elides the middle and the elision is not a parameter,
+/// and `app[index]_call_state_column` is a template rather than a
+/// list, so it is left whole.
+fn param_names(heading: &str) -> Vec<String> {
+    if !heading.contains(',') {
+        return vec![heading.to_string()];
+    }
+    let names: Vec<String> = heading
+        .split(',')
+        .map(str::trim)
+        .filter(|p| {
+            !p.is_empty()
+                && p.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+                && p.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+        .map(str::to_string)
+        .collect();
+    if names.is_empty() {
+        vec![heading.to_string()]
+    } else {
+        names
+    }
 }
 
 /// Parse a 4.x-style `modules/<name>/README.md` (markdown docs).
@@ -181,62 +222,112 @@ pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, String> {
         return Err("empty input".into());
     }
 
-    #[derive(PartialEq)]
+    #[derive(PartialEq, Clone, Copy)]
     enum Section {
         Params,
         Functions,
         Other,
+    }
+    /// The section a heading opens, whatever depth it is written at.
+    fn section_of(heading: &str) -> Option<Section> {
+        match heading {
+            "Exported Parameters" => Some(Section::Params),
+            "Exported Functions" => Some(Section::Functions),
+            _ => None,
+        }
     }
     let mut section = Section::Other;
     let mut out = ModuleDoc {
         name: module.to_string(),
         ..Default::default()
     };
-    // (is_param, name, detail, doc-lines, doc-finished)
-    let mut cur: Option<(bool, String, String, Vec<String>, bool)> = None;
+    /// The heading being read, and the prose accumulating under it.
+    /// One heading can document several parameters, and they share
+    /// everything but the name.
+    struct Pending {
+        is_param: bool,
+        names: Vec<String>,
+        detail: String,
+        lines: Vec<String>,
+        /// the first paragraph is the summary; the rest is skipped
+        finished: bool,
+    }
+    let mut cur: Option<Pending> = None;
 
-    let flush = |cur: &mut Option<(bool, String, String, Vec<String>, bool)>,
-                 out: &mut ModuleDoc| {
-        if let Some((is_param, name, detail, lines, _)) = cur.take() {
+    let flush = |cur: &mut Option<Pending>, out: &mut ModuleDoc| {
+        if let Some(p) = cur.take() {
             let doc = sanitize_doc(
-                &lines
+                &p.lines
                     .join(" ")
                     .split_whitespace()
                     .collect::<Vec<_>>()
                     .join(" "),
             );
-            let item = Item { name, detail, doc };
-            if is_param {
-                out.params.push(item);
-            } else {
-                out.functions.push(item);
+            for name in p.names {
+                let item = Item {
+                    name,
+                    detail: p.detail.clone(),
+                    doc: doc.clone(),
+                };
+                if p.is_param {
+                    out.params.push(item);
+                } else {
+                    out.functions.push(item);
+                }
             }
         }
     };
 
+    let mut in_fence = false;
     for line in md.lines() {
+        // Every parameter in a real README is followed by a fenced
+        // `modparam` example, and those examples carry `#` comments.
+        // Read as headings they closed the section, and everything
+        // documented below the first example was thrown away.
+        let start = line.trim_start();
+        if start.starts_with("```") || start.starts_with("~~~") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
         if let Some(h3) = line.strip_prefix("### ") {
             flush(&mut cur, &mut out);
-            section = match h3.trim() {
-                "Exported Parameters" => Section::Params,
-                "Exported Functions" => Section::Functions,
-                _ => Section::Other,
-            };
+            section = section_of(h3.trim()).unwrap_or(Section::Other);
             continue;
         }
         if let Some(h4) = line.strip_prefix("#### ") {
             flush(&mut cur, &mut out);
             let heading = h4.trim();
+            // three cachedb modules nest `#### Exported Functions`
+            // inside the parameters chapter rather than beside it.
+            // Read as an item it became a PARAMETER called `Exported
+            // Functions`; it is a section wherever it is written.
+            if let Some(s) = section_of(heading) {
+                section = s;
+                continue;
+            }
             match section {
                 Section::Params => {
-                    let (name, detail) = match heading.split_once(" (") {
+                    // `fr_timeout (integer)` and `db_url(str)` are the
+                    // same heading written two ways; the name is what a
+                    // `modparam` would write, which is everything before
+                    // the type, space or no space
+                    let (name, detail) = match heading.split_once('(') {
                         Some((n, rest)) => (
-                            n.trim().to_string(),
-                            rest.trim_end_matches(')').trim().to_string(),
+                            n.trim(),
+                            rest.trim_end().trim_end_matches(')').trim().to_string(),
                         ),
-                        None => (heading.to_string(), String::new()),
+                        None => (heading, String::new()),
                     };
-                    cur = Some((true, name, detail, Vec::new(), false));
+                    cur = Some(Pending {
+                        is_param: true,
+                        names: param_names(name),
+                        detail,
+                        lines: Vec::new(),
+                        finished: false,
+                    });
                 }
                 Section::Functions => {
                     let name = heading
@@ -245,10 +336,22 @@ pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, String> {
                         .unwrap_or(heading)
                         .trim()
                         .to_string();
-                    cur = Some((false, name, heading.to_string(), Vec::new(), false));
+                    cur = Some(Pending {
+                        is_param: false,
+                        names: vec![name],
+                        detail: heading.to_string(),
+                        lines: Vec::new(),
+                        finished: false,
+                    });
                 }
                 Section::Other => {}
             }
+            continue;
+        }
+        if line.starts_with("#####") {
+            // deeper than an item: a sub-heading inside one entry's
+            // prose (`##### Authentication` under `cachedb_url`), so
+            // the entry — and the section — continue past it
             continue;
         }
         if line.starts_with('#') {
@@ -257,14 +360,14 @@ pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, String> {
             section = Section::Other;
             continue;
         }
-        if let Some((_, _, _, lines, finished)) = cur.as_mut() {
+        if let Some(p) = cur.as_mut() {
             let trimmed = line.trim();
             if trimmed.is_empty() {
-                if !lines.is_empty() {
-                    *finished = true; // first paragraph complete
+                if !p.lines.is_empty() {
+                    p.finished = true; // first paragraph complete
                 }
-            } else if !*finished {
-                lines.push(trimmed.to_string());
+            } else if !p.finished {
+                p.lines.push(trimmed.to_string());
             }
         }
     }

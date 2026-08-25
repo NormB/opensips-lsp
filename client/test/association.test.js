@@ -122,8 +122,28 @@ const fire = async (d) => {
     assert.deepStrictEqual(calls.setLanguage, [], 'claimed file hijacked');
     assert.deepStrictEqual(calls.requests, [], 'claimed file asked about');
 
+    // A fragment is named whatever its author felt like, and a split
+    // OpenSIPS tree usually names them `.inc`. The extension test
+    // therefore cannot be the filename — the server is the one that
+    // knows, so ask it and let the answer decide.
+    await fire(doc('/w/inc/globals.inc', 'plaintext'));
+    assert.deepStrictEqual(
+        calls.setLanguage,
+        [['/w/inc/globals.inc', LANGUAGE_ID]],
+        'an included fragment not named .cfg must get the language',
+    );
+
     await fire(doc('/w/notes.txt', 'plaintext'));
-    assert.deepStrictEqual(calls.requests, [], 'a non-.cfg must not be asked about');
+    assert.deepStrictEqual(
+        calls.requests,
+        [[METHOD, 'file:///w/notes.txt']],
+        'a plaintext file must be asked about — the answer decides, not the suffix',
+    );
+    assert.deepStrictEqual(
+        calls.setLanguage,
+        [],
+        'a plaintext file nothing includes is not ours to claim',
+    );
 
     // Re-associating closes and reopens the document, so the handler
     // sees its own result: it must not ask again, or every fragment
@@ -136,7 +156,7 @@ const fire = async (d) => {
     assert.deepStrictEqual(calls.setLanguage, [], 'the switch must turn it off');
     assert.deepStrictEqual(calls.requests, [], 'the switch must stop the request too');
 
-    console.log('association: 9 assertions passed');
+    console.log('association: 11 assertions passed');
 })().catch((e) => {
     console.error(e);
     process.exit(1);

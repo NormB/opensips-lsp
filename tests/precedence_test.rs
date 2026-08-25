@@ -79,3 +79,42 @@ fn empty_readme_falls_back_to_docbook() {
     assert_eq!(mixed.params[0].name, "real_param");
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// A module that exports nothing is still a module.
+///
+/// `xml`, `event_datagram`, `db_perlvdb`, `presence_mwi`,
+/// `presence_xcapdiff`, `tls_openssl` and `auth_web3` all document
+/// their exported sections as `*None*.` — and were dropped from the
+/// catalogue entirely, so `loadmodule "` offered seven fewer modules
+/// than the tree has.  The empty result is what falls through to
+/// docbook; with nothing to fall through to, it is the answer.
+#[test]
+fn a_module_that_exports_nothing_is_still_in_the_catalogue() {
+    let root = std::env::temp_dir().join(format!("oslsp-prec-empty-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    write(
+        &root.join("modules").join("xml").join("README.md"),
+        "# xml\n\n### Exported Parameters\n\n*None*.\n\n### Exported Functions\n\n*None*.\n",
+    );
+    // and one that still prefers the docbook it does have
+    let legacy = root.join("modules").join("legacy");
+    write(
+        &legacy.join("README.md"),
+        "# legacy\n\n### Exported Parameters\n\n*None*.\n",
+    );
+    write(
+        &legacy.join("doc").join("legacy_admin.xml"),
+        r#"<chapter><section id="param_old_param" xreflabel="x">
+             <title><varname>old_param</varname> (string)</title>
+             <para>Docbook-only doc.</para></section></chapter>"#,
+    );
+
+    let mods = harvest_tree(&root);
+    let names: Vec<&str> = mods.iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, vec!["legacy", "xml"], "{names:?}");
+    let x = mods.iter().find(|m| m.name == "xml").unwrap();
+    assert!(x.params.is_empty() && x.functions.is_empty());
+    let l = mods.iter().find(|m| m.name == "legacy").unwrap();
+    assert_eq!(l.params[0].name, "old_param", "docbook must still win here");
+    let _ = std::fs::remove_dir_all(&root);
+}

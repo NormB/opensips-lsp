@@ -1,10 +1,10 @@
 use opensips_lsp::catalog::{Item, ModuleDoc};
 use opensips_lsp::logic::{
     CompKind, SemKind, analyzer_diagnostics, attribute_foreign_diag, catalog_diagnostics,
-    completions, completions_with_core, definition_of, encode_semantic_tokens, hover_markdown,
-    include_closure, loaded_modules_multi, pvar_tail, quick_fixes, route_defs_multi,
-    route_occurrences, route_symbol_at, semantic_spans, signature_at, split_params,
-    valid_route_name,
+    completions, completions_with_core, configs_in_dir, definition_of, encode_semantic_tokens,
+    hover_markdown, include_closure, loaded_modules_multi, pvar_tail, quick_fixes,
+    route_defs_multi, route_occurrences, route_symbol_at, scan_configs, semantic_spans,
+    signature_at, split_params, valid_route_name,
 };
 
 fn catalog() -> Vec<ModuleDoc> {
@@ -1207,4 +1207,109 @@ fn the_graph_tracks_a_model_through_random_edits() {
             );
         }
     }
+}
+
+/// The workspace sweep must reach a configuration that is not named
+/// `*.cfg`.
+///
+/// A tree whose root is `proxy.inc` — or an `.m4` template — was
+/// invisible to the sweep, so no fragment under it ever resolved a
+/// root and every one of them was analysed alone.  The sweep still
+/// must not read the whole tree: it looks for configurations, not for
+/// every file in the folder.
+#[test]
+fn the_workspace_sweep_reaches_configs_not_named_cfg() {
+    let dir = std::env::temp_dir().join(format!("oslsp-sweep-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("include")).unwrap();
+    std::fs::write(
+        dir.join("proxy.inc"),
+        "include_file \"include/routes.inc\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("opensips.m4"),
+        "include_file \"include/routes.inc\"\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("include/routes.inc"), "route { exit; }\n").unwrap();
+    std::fs::write(dir.join("notes.md"), "not a config\n").unwrap();
+
+    let (found, _) = scan_configs(std::slice::from_ref(&dir), 500);
+    let names: Vec<String> = found
+        .iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+    for want in ["proxy.inc", "opensips.m4", "routes.inc"] {
+        assert!(
+            names.contains(&want.to_string()),
+            "{want} missing: {names:?}"
+        );
+    }
+    assert!(
+        !names.contains(&"notes.md".to_string()),
+        "the sweep must not collect every file: {names:?}"
+    );
+
+    let here: Vec<String> = configs_in_dir(&dir)
+        .iter()
+        .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .collect();
+    assert!(here.contains(&"proxy.inc".to_string()), "{here:?}");
+    assert!(!here.contains(&"notes.md".to_string()), "{here:?}");
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A module whose parameters were never harvested documents nothing,
+/// and an empty list is not evidence that a parameter does not exist.
+///
+/// `auth_web3` writes its README with `## Parameters` and `### name`
+/// rather than the `### Exported Parameters` / `#### name` every
+/// other module uses, so nothing of it is harvested but the name.
+/// Once the module itself was in the catalogue — it is a module a
+/// config can load — every `modparam` for it would have been reported
+/// as undocumented, turning a silence into ten false warnings.
+#[test]
+fn a_module_documenting_no_parameters_at_all_stays_silent() {
+    let cat = vec![ModuleDoc {
+        name: "auth_web3".into(),
+        params: Vec::new(),
+        functions: Vec::new(),
+    }];
+    let text = "modparam(\"auth_web3\", \"authentication_rpc_url\", \"https://x\")\n";
+    assert!(
+        catalog_diagnostics(&cat, text).is_empty(),
+        "an unharvested parameter list must not accuse the config"
+    );
+
+    // anything harvested makes the list evidence again
+    let mut cat = cat;
+    cat[0].params.push(Item {
+        name: "rpc_timeout".into(),
+        detail: "integer".into(),
+        doc: String::new(),
+    });
+    assert_eq!(
+        catalog_diagnostics(&cat, text).len(),
+        1,
+        "a module that does document parameters is still checked"
+    );
+
+    // and a module that exports functions but no parameters really
+    // exports none — `sdpops` is that, and setting one is an error
+    let functions_only = vec![ModuleDoc {
+        name: "sipmsgops".into(),
+        params: Vec::new(),
+        functions: vec![Item {
+            name: "is_method".into(),
+            detail: String::new(),
+            doc: String::new(),
+        }],
+    }];
+    assert_eq!(
+        catalog_diagnostics(&functions_only, "modparam(\"sipmsgops\", \"nope\", 1)\n").len(),
+        1,
+        "a module with functions but no parameters was read, and exports none"
+    );
 }

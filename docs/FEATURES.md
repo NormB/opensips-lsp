@@ -506,7 +506,7 @@ clients that can't pass options.
 | `opensipsLsp.checkTimeoutMs` | `checkTimeoutMs` | `OPENSIPS_LSP_CHECK_TIMEOUT_MS` | `10000` | Kill a `-C` run after this many ms. |
 | `opensipsLsp.completion.snippets` | `snippetCompletions` | — | `true` | Function completions as tabstop snippets. |
 | `opensipsLsp.cacheDir` | `cacheDir` | `OPENSIPS_LSP_CACHE_DIR` | platform cache dir | Documentation-catalog cache location. |
-| `opensipsLsp.associateIncludedFiles` | — | — | `true` | Give a plain-text `.cfg` the workspace's configuration includes the OpenSIPS language (colours, completion, diagnostics). Files another extension already claims are left alone. |
+| `opensipsLsp.associateIncludedFiles` | — | — | `true` | Give a plain-text file the workspace's configuration includes the OpenSIPS language (colours, completion, diagnostics), whatever it is named. Files another extension already claims are left alone. |
 | `opensipsLsp.trace.server` | — | — | `off` | LSP traffic tracing in the output channel. |
 | — | — | `OPENSIPS_LSP_OUTPUT_CAP_BYTES` | `1048576` | Byte cap on captured `-C` output. |
 
@@ -515,13 +515,14 @@ clients that can't pass options.
 - The extension claims `opensips.cfg`, `opensips*.cfg` and
   `*.opensips.cfg` by name. The generic `.cfg` extension is
   deliberately left alone so unrelated tools' config files are not
-  hijacked. A `.cfg` your configuration *includes* is picked up
-  anyway, at runtime: VS Code hands it over as plain text, the
-  extension asks the server whether anything includes it
+  hijacked. A file your configuration *includes* is picked up anyway,
+  at runtime, whatever it is named: VS Code hands it over as plain
+  text, the extension asks the server whether anything includes it
   (`opensips/analysisRoot`) and sets the language when something
-  does, so an include named `carrier-routes.cfg` gets the same
-  colours and the same server as the root that pulls it in. A file
-  another extension has already claimed is left to that extension.
+  does, so `carrier-routes.cfg` and `include/globals.inc` both get
+  the same colours and the same server as the root that pulls them
+  in. A file another extension has already claimed is left to that
+  extension.
   Turn this off with `opensipsLsp.associateIncludedFiles`; anything
   the server cannot reach through an include still needs a
   `files.associations` entry mapping it to `opensips-cfg`.

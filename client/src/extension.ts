@@ -75,14 +75,20 @@ function buildClient(context: vscode.ExtensionContext): LanguageClient {
  *  pattern reaches it. The configuration that includes it does know,
  *  and the server has read it: ask.
  *
- *  Only files VS Code left as plain text are touched. A `.cfg` some
+ *  Asking is the whole point, so there is no suffix test here either:
+ *  a split tree usually names its fragments `.inc`, and requiring
+ *  `.cfg` was the same filename guess this exists to avoid. The
+ *  server answers from an include graph it has already built, and a
+ *  file nothing includes gets `null` and is left alone.
+ *
+ *  Only files VS Code left as plain text are touched. A file some
  *  other extension has already claimed belongs to that extension, and
  *  taking it would be exactly the hijack this avoids. */
 async function associateIfIncluded(doc: vscode.TextDocument): Promise<void> {
     if (!client || doc.uri.scheme !== 'file') {
         return;
     }
-    if (doc.languageId !== 'plaintext' || !doc.fileName.endsWith('.cfg')) {
+    if (doc.languageId !== 'plaintext') {
         return;
     }
     if (!vscode.workspace

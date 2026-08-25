@@ -83,3 +83,57 @@ fn the_vendored_module_catalogue_matches_a_fresh_harvest_of_the_pinned_tree() {
         assert_eq!(f(&got.params), f(&want.params), "{} params", got.name);
     }
 }
+
+/// Parameters documented AFTER a module's first fenced example.
+///
+/// The harvester read any line starting with `#` as a heading, so the
+/// `# single rtproxy` comment inside rtpengine's first example closed
+/// the Exported Parameters section and the other thirteen parameters
+/// were never harvested.  A configuration setting one of them was
+/// told, in a warning, that the parameter does not exist.
+#[test]
+fn parameters_documented_after_an_example_are_in_the_catalogue() {
+    let b = catalog::builtin_modules();
+    for (module, param) in [
+        ("rtpengine", "db_url"),
+        ("rtpengine", "ping_enabled"),
+        ("cachedb_redis", "connect_timeout"),
+        ("cachedb_redis", "query_timeout"),
+        ("dispatcher", "partition"),
+        ("mid_registrar", "mode"),
+        ("registrar", "max_contacts"),
+        ("acc", "db_url"),
+        ("presence", "db_url"),
+    ] {
+        let m = b
+            .modules
+            .iter()
+            .find(|m| m.name == module)
+            .unwrap_or_else(|| panic!("{module} missing from the catalogue"));
+        assert!(
+            m.params.iter().any(|p| p.name == param),
+            "{module} has no {param}: {:?}",
+            m.params.iter().map(|p| &p.name).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// A catalogue name is what a config writes in `modparam`.
+///
+/// `#### db_url(str)` — no space before the type — was harvested with
+/// the type inside the name, so the entry could never match the call
+/// site it was supposed to document.
+#[test]
+fn no_catalogue_entry_carries_its_type_in_its_name() {
+    let b = catalog::builtin_modules();
+    for m in &b.modules {
+        for p in &m.params {
+            assert!(
+                !p.name.contains('(') && !p.name.contains(' '),
+                "{}::{} is not a name a modparam could write",
+                m.name,
+                p.name
+            );
+        }
+    }
+}

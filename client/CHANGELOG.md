@@ -2,6 +2,54 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.20.1] — 2026-08-25
+
+**A split configuration whose fragments are named `.inc` now works,
+and its `modparam` lines stop being contradicted.** 0.20.0 taught the
+server to analyse an included file in the context of its root, but
+both halves of the feature still guessed at filenames, and the module
+catalogue behind the `modparam` check was missing a third of what the
+documentation says.
+
+- **A fragment gets the language whatever it is called.** The
+  extension asked the server about a plain-text file only when it was
+  named `*.cfg` — the same filename guess the request exists to avoid.
+  A tree of `include/*.inc` fragments got no colours, no completion
+  and no diagnostics. The suffix test is gone: any plain-text file is
+  asked about, and one nothing includes is still left alone.
+- **The workspace sweep looks for `.inc` and `.m4` too.** It collected
+  `*.cfg` only, so in a tree whose root or fragments are named
+  anything else no fragment ever resolved a root and every one of them
+  was analysed alone. It is still a search for configurations, not a
+  read of every file in the folder.
+- **52 wrong `modparam` warnings, on one real configuration.** The
+  documentation harvester read any line starting with `#` as a
+  heading, so the `# single rtproxy` comment inside rtpengine's first
+  example closed the Exported Parameters section and the thirteen
+  parameters below it were never harvested. Presence, dispatcher,
+  registrar, tracer, prometheus and eleven other modules lost
+  parameters the same way. A `##### ` sub-heading inside one
+  parameter's prose ended the section too, and `db_url(str)` — the
+  type written with no space — was harvested with the type inside the
+  name, where no `modparam` could ever match it.
+- **A heading that lists several parameters documents each of them.**
+  `osp` writes `private_key, local_certificate, ca_certificates` under
+  one heading and `tls_mgm` writes `server_domain, client_domain`;
+  sixteen parameters were unreachable between them.
+- **Seven more modules complete after `loadmodule "`.** `xml`,
+  `event_datagram`, `db_perlvdb`, `presence_mwi`, `presence_xcapdiff`,
+  `tls_openssl` and `auth_web3` export nothing, and a module that
+  exports nothing was being dropped from the catalogue entirely.
+- **A module whose documentation could not be read no longer accuses
+  your configuration.** `auth_web3` writes its README in a shape the
+  harvester does not read; an empty parameter list is not evidence
+  that a parameter does not exist.
+
+The catalogue is now checked against the READMEs' own `modparam`
+examples — 1,749 of them across the pinned 4.0.1 tree — so a harvest
+that silently loses parameters fails CI rather than reaching you as a
+warning about a parameter that exists.
+
 ## [0.20.0] — 2026-08-25
 
 **Opening an included file on its own now works.** A configuration
