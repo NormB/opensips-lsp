@@ -685,17 +685,71 @@ pub fn valid_route_name(s: &str) -> bool {
 const INCLUDE_MAX_DEPTH: usize = 8;
 const INCLUDE_MAX_FILES: usize = 64;
 
+/// Fold `.` and `..` components textually.
+///
+/// A split-by-site layout reaches shared routing as
+/// `../common/routing.cfg`, which resolves to
+/// `<ws>/sites/../common/routing.cfg` — the same file the editor
+/// opens as `<ws>/common/routing.cfg`, under a different name.  Two
+/// names for one file mean a fragment with no root and an include
+/// closure that visits it twice, so every route it defines reads as
+/// defined more than once.
+///
+/// Folded textually rather than through `canonicalize`, because an
+/// include may name a file that does not exist yet (document links
+/// are produced for those) and because canonicalising would replace
+/// the path the user sees with the target of any symlink on it.  The
+/// cost is the one case where the two differ: if `sites` is itself a
+/// symlink, the OS reads `sites/../common` relative to the LINK's
+/// target and this does not.
+fn lexically_normal(p: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => match out.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                // `/..` is `/` on POSIX; anything else (nothing yet, or
+                // a `..` already kept) has nothing to fold into
+                Some(Component::RootDir) => {}
+                _ => out.push(c.as_os_str()),
+            },
+            _ => out.push(c.as_os_str()),
+        }
+    }
+    out
+}
+
 /// Resolve an `include_file`/`import_file` path: absolute paths as
 /// written, relative paths against the INCLUDING file's directory.
+/// `.` and `..` are folded so one file has one name — see
+/// [`lexically_normal`].
 fn resolve_include(from: &std::path::Path, inc: &str) -> std::path::PathBuf {
     let p = std::path::Path::new(inc);
-    if p.is_absolute() {
+    let joined = if p.is_absolute() {
         p.to_path_buf()
     } else {
         from.parent()
             .unwrap_or_else(|| std::path::Path::new(""))
             .join(p)
-    }
+    };
+    lexically_normal(&joined)
+}
+
+/// The files one config includes DIRECTLY, resolved against it.
+///
+/// Callers use this to notice that an edit added or removed an
+/// include: which file is a fragment of which is the only thing an
+/// edit can change about the graph, and it is far cheaper to compare
+/// two of these than to rebuild it.
+pub fn resolved_includes(path: &std::path::Path, text: &str) -> Vec<std::path::PathBuf> {
+    analyze::includes(text)
+        .into_iter()
+        .map(|inc| resolve_include(path, &inc.name))
+        .collect()
 }
 
 /// The workspace's include graph, inverted: for each config, the
@@ -743,9 +797,12 @@ impl IncludeGraph {
     pub fn analysis_root(&self, path: &std::path::Path) -> Option<std::path::PathBuf> {
         let mut seen: std::collections::HashSet<std::path::PathBuf> =
             std::collections::HashSet::new();
-        seen.insert(path.to_path_buf());
+        // the keys were folded when the graph was built; a caller's
+        // path has to be folded the same way or it cannot match
+        let path = lexically_normal(path);
+        seen.insert(path.clone());
         let mut best: Option<std::path::PathBuf> = None;
-        let mut cur = path.to_path_buf();
+        let mut cur = path;
         loop {
             let Some(next) = self.parents.get(&cur).and_then(|v| v.first()) else {
                 return best;

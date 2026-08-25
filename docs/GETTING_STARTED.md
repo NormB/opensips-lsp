@@ -213,6 +213,7 @@ bottom-right status bar (it will say **Plain Text**) and pick
 | No colors | The file has to match one of the claimed names: `opensips.cfg`, `opensips*.cfg` (so `opensips-proxy.cfg` works), or `*.opensips.cfg`. A plain `.cfg` is not enough — the extension deliberately does not claim every `.cfg` on your disk. |
 | No colors on an included file | Open the FOLDER (`File → Open Folder…`), not the single file — the root that includes it has to be somewhere the server can read. If you just added the `include_file` line, save the root and reopen the fragment. |
 | An included file reports routes its parent defines as undefined | Same cause: with no folder open the fragment is treated as a program of its own. Open the folder containing the root. |
+| A huge folder: includes stop being recognised | The scan behind this stops at 500 `.cfg` files and says so in **View → Output → OpenSIPS LSP**. Open a folder closer to your configuration instead of the whole tree. |
 | No red squiggles | Set **Opensips Path** (step above), save the file, and make sure you trusted the folder. |
 | Squiggles on a correct file | The checker uses *your* OpenSIPS version — a config written for another version can legitimately fail. |
 | Completion has no documentation | Core and module entries both carry built-in documentation from 4.0.1, so an entry with none is one 4.0.1 does not document: set **Opensips Src** to an OpenSIPS source folder matching your build. |

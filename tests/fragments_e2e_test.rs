@@ -289,3 +289,105 @@ fn without_a_workspace_folder_there_is_nothing_to_find_the_root_in() {
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// Adding the `include_file` line is the FIX for a fragment that was
+/// reporting its parent's routes as undefined.  The warning has to go
+/// when the fix is typed, not when the fragment is next touched —
+/// otherwise the fix looks like it did not work, and the next thing
+/// the user tries is something that will not help.
+#[test]
+fn adding_an_include_clears_the_fragment_it_now_belongs_to() {
+    let (base, root_uri, frag_uri) = setup("live");
+    // start from a root that does NOT include the fragment
+    let root_without = ROOT_TEXT.replace("include_file \"inc/routes.cfg\"\n", "");
+    std::fs::write(base.join("opensips.cfg"), &root_without).unwrap();
+    let (mut child, rx, mut stdin) = start(&base, "");
+    did_open(&mut stdin, &frag_uri, FRAG_TEXT);
+    let v = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
+        "fragment diagnostics before the include exists",
+    );
+    assert!(
+        v["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["message"].as_str().is_some_and(|m| m.contains("helper"))),
+        "nothing includes it yet, so its parent's route really is \
+         undefined here: {v}"
+    );
+    // the user opens the root and types the include line
+    did_open(&mut stdin, &root_uri, &root_without);
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri":root_uri,"version":2},
+            "contentChanges":[{"text": ROOT_TEXT}]}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "textDocument/publishDiagnostics"
+                && v["params"]["uri"] == frag_uri
+                && !v["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|d| d["message"].as_str().is_some_and(|m| m.contains("helper")))
+        },
+        "the fragment must be re-published once its root includes it",
+    );
+    // the route that is genuinely undefined is still reported, so the
+    // clearing above is a re-analysis and not a wipe
+    assert!(
+        v["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("GHOST") || m.contains("ghost"))),
+        "{v}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// The include graph is built from a BOUNDED scan of the workspace.
+/// Past the bound a root simply is not seen, and the fragment stops
+/// being recognised: no colours, no context, nothing on screen and —
+/// until this gate — nothing in the log either.  A cap the user
+/// cannot see is a cap they cannot work around.
+#[test]
+fn a_truncated_workspace_scan_says_so() {
+    let (base, _root_uri, frag_uri) = setup("cap");
+    let noise = base.join("noise");
+    std::fs::create_dir_all(&noise).unwrap();
+    for i in 0..520 {
+        std::fs::write(noise.join(format!("n{i:04}.cfg")), "# unrelated\n").unwrap();
+    }
+    let (mut child, rx, mut stdin) = start(&base, "");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
+            "params":{"uri": frag_uri}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "window/logMessage"
+                && v["params"]["message"]
+                    .as_str()
+                    .is_some_and(|m| m.contains("500") && m.contains("include"))
+        },
+        "a log line naming the scan bound",
+    );
+    let msg = v["params"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("opensips-lsp"),
+        "the line must say who is speaking: {msg}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}

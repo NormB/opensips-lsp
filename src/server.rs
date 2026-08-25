@@ -59,6 +59,10 @@ pub struct Backend {
     /// Built on demand and dropped whenever an include directive
     /// anywhere could have moved.
     include_graph: std::sync::RwLock<Option<std::sync::Arc<logic::IncludeGraph>>>,
+    /// Whether the bounded scan behind that graph has already been
+    /// reported as incomplete.  Said once: the graph is rebuilt often
+    /// and the same line every time would bury the log it is in.
+    graph_truncation_logged: std::sync::atomic::AtomicBool,
 }
 
 impl Backend {
@@ -91,6 +95,7 @@ impl Backend {
             check_super: std::sync::Arc::new(DashMap::new()),
             memo: memo::AnalysisCache::default(),
             include_graph: std::sync::RwLock::new(None),
+            graph_truncation_logged: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -613,7 +618,28 @@ impl Backend {
         if let Some(g) = self.include_graph.read().unwrap().clone() {
             return g;
         }
-        let (configs, _) = self.workspace_configs(500);
+        let (configs, truncated) = self.workspace_configs(500);
+        // A silent bound is the worst of the three options: the
+        // fragment stops being recognised and nothing anywhere says
+        // why.  `include_graph` is not async, so the line goes out on
+        // its own task.
+        if truncated
+            && !self
+                .graph_truncation_logged
+                .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            let client = self.client.clone();
+            tokio::spawn(async move {
+                client
+                    .log_message(
+                        MessageType::WARNING,
+                        "opensips-lsp: the include graph was built from the first 500 configs \
+                         under the workspace; a file included by a config outside that \
+                         set will not be recognised as part of it",
+                    )
+                    .await;
+            });
+        }
         let open = self.open_docs_snapshot();
         let scanned: Vec<(std::path::PathBuf, String)> = configs
             .into_iter()
@@ -1317,14 +1343,39 @@ impl LanguageServer for Backend {
         let previous = self
             .docs
             .insert(uri.clone(), (version, change.text.clone()));
-        // an edit that adds or removes an include directive changes
+        // An edit that adds or removes an include directive changes
         // which file is a fragment of which; nothing else does, so the
-        // graph survives ordinary typing
-        if previous
-            .map(|(_, old)| analyze::includes(&old))
-            .is_none_or(|old| old != analyze::includes(&change.text))
-        {
+        // graph survives ordinary typing.
+        let targets = |text: &str| -> std::collections::HashSet<std::path::PathBuf> {
+            uri.to_file_path()
+                .map(|p| logic::resolved_includes(&p, text).into_iter().collect())
+                .unwrap_or_default()
+        };
+        let before = previous.map(|(_, old)| targets(&old)).unwrap_or_default();
+        let after = targets(&change.text);
+        if before != after {
             self.invalidate_include_graph();
+            // A file that just gained or lost an include is a file
+            // whose analysis root just changed, and typing the
+            // `include_file` line is the FIX for the warnings it was
+            // showing.  Leaving them up until that buffer is next
+            // touched makes the fix look like it did not work.
+            let moved: Vec<std::path::PathBuf> =
+                before.symmetric_difference(&after).cloned().collect();
+            let stale: Vec<Uri> = self
+                .docs
+                .iter()
+                .filter(|e| e.key() != &uri)
+                .filter(|e| {
+                    e.key()
+                        .to_file_path()
+                        .is_some_and(|p| moved.iter().any(|t| *t == *p))
+                })
+                .map(|e| e.key().clone())
+                .collect();
+            for u in stale {
+                self.check_publishing(&u, false).await;
+            }
         }
         // debounced analyzer pass: fast feedback between saves
         if !*self.analyzer_enabled.read().unwrap() || uri.scheme().as_str() != "file" {

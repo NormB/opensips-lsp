@@ -916,3 +916,66 @@ fn the_check_failure_note_never_invents_a_file_or_a_line() {
     assert!(n.contains("255"), "{n}");
     assert!(!n.contains("line"), "{n}");
 }
+
+#[test]
+fn the_include_graph_folds_a_path_that_climbs_out_of_its_directory() {
+    use opensips_lsp::logic::IncludeGraph;
+    use std::path::{Path, PathBuf};
+    // A per-site split: `sites/site-a.cfg` reaches shared routing
+    // through `../common/`, which is the only spelling the directive
+    // CAN use.  The editor opens `/w/common/routing.cfg`; the
+    // directive resolves to `/w/sites/../common/routing.cfg`.  One
+    // file, two names — keyed apart, the fragment has no root and the
+    // whole feature silently does nothing for that layout.
+    let g = IncludeGraph::build(&ws(&[
+        (
+            "/w/sites/site-a.cfg",
+            "include_file \"../common/routing.cfg\"\n",
+        ),
+        ("/w/common/routing.cfg", "route[R] { exit; }\n"),
+    ]));
+    assert_eq!(
+        g.analysis_root(Path::new("/w/common/routing.cfg")),
+        Some(PathBuf::from("/w/sites/site-a.cfg")),
+        "a sibling directory reached through .. is the same file"
+    );
+    // `..` at the filesystem root is the root (POSIX), not a level above it
+    let g = IncludeGraph::build(&ws(&[("/a.cfg", "include_file \"../x.cfg\"\n")]));
+    assert_eq!(
+        g.analysis_root(Path::new("/x.cfg")),
+        Some(PathBuf::from("/a.cfg"))
+    );
+    // a `..` with nothing to fold into is kept rather than dropped,
+    // or the path would name a different file entirely
+    let g = IncludeGraph::build(&ws(&[("rel.cfg", "include_file \"../up.cfg\"\n")]));
+    assert_eq!(
+        g.analysis_root(Path::new("../up.cfg")),
+        Some(PathBuf::from("rel.cfg"))
+    );
+}
+
+#[test]
+fn the_closure_visits_a_doubly_named_include_once() {
+    use opensips_lsp::logic::include_closure;
+    use std::path::Path;
+    // The same file named twice — once directly, once through a
+    // round trip — must not appear twice, or every route it defines
+    // reads as "defined more than once".
+    // the loader resolves BOTH spellings, as the filesystem does —
+    // otherwise the second is skipped for being unloadable and the
+    // test proves nothing
+    let loader = |p: &Path| -> Option<String> {
+        let resolved = p.to_str()?.replace("/inc/../inc/", "/inc/");
+        match resolved.as_str() {
+            "/w/opensips.cfg" => Some(
+                "include_file \"inc/routes.cfg\"\ninclude_file \"inc/../inc/routes.cfg\"\n".into(),
+            ),
+            "/w/inc/routes.cfg" => Some("route[R] { exit; }\n".into()),
+            _ => None,
+        }
+    };
+    let root_text = loader(Path::new("/w/opensips.cfg")).unwrap();
+    let files = include_closure(Path::new("/w/opensips.cfg"), &root_text, &loader);
+    let paths: Vec<&str> = files.iter().map(|(p, _)| p.to_str().unwrap()).collect();
+    assert_eq!(paths.len(), 2, "one root and one include: {paths:?}");
+}

@@ -31,6 +31,24 @@ artefacts of opening it on its own.
 - **New request `opensips/analysisRoot`** for other clients: what is
   this document a piece of? The root's URI, or `null` when it is a
   program in its own right.
+- **A split-by-site layout works.** A config that reaches shared
+  routing as `../common/routing.cfg` names the same file the editor
+  opens as `common/routing.cfg`; keyed apart, the fragment had no
+  root and the feature silently did nothing for that layout. `.` and
+  `..` are now folded when an include is resolved, which also stops
+  the closure visiting one file twice and calling every route it
+  defines a duplicate.
+- **Typing the `include_file` line clears the warnings it fixes.**
+  Adding the include is the fix for a fragment reporting its parent's
+  routes as undefined — but the warnings stayed on screen until that
+  buffer was next touched, so the fix looked like it had not worked.
+  The file an include names is re-checked as soon as the line is
+  typed.
+- **A workspace too large to scan says so.** The include graph is
+  built from the first 500 configs under the workspace; past that a
+  root is not seen and its fragments stop being recognised. That now
+  produces a warning in the output channel instead of an unexplained
+  disappearance.
 - **A failed check no longer invents a file and a line.** When
   `opensips -C` fails without positioning the error — a module it
   cannot load, a bad module path — the note read "check failed

@@ -244,11 +244,35 @@ reaches the open document:
 A fragment reached from more than one root has no single true answer;
 the lexicographically first parent is taken at each step, so the
 context cannot flicker between edits. Include cycles terminate at the
-last config not already visited. The graph is rebuilt when a config
-is created, deleted or changed on disk, when a document opens or
-closes, and when an edit adds or removes an include directive —
-nothing else can move a file from one root to another, so ordinary
-typing does not pay for it.
+last config not already visited.
+
+`.` and `..` are folded when an include is resolved, so one file has
+one name: a per-site layout that reaches shared routing as
+`../common/routing.cfg` names the same file the editor opens as
+`common/routing.cfg`. Without that they are two keys — the fragment
+has no root and the closure visits it twice, so every route it
+defines reads as defined more than once. The folding is textual, not
+`canonicalize`: an include may name a file that does not exist yet,
+and canonicalising would replace the path you see with the target of
+any symlink on it. The one case where the two differ is a symlinked
+directory, where the OS reads `sites/../common` relative to the
+link's target and this does not.
+
+The graph is rebuilt when a config is created, deleted or changed on
+disk, when a document opens or closes, and when an edit adds or
+removes an include directive — nothing else can move a file from one
+root to another, so ordinary typing does not pay for it. **Typing the
+`include_file` line re-checks the file it names**, if that file is
+open: adding the include is the fix for the warnings that file was
+showing, and leaving them up until it is next touched makes the fix
+look like it did not work. A deeper change than one level corrects
+itself on save, through the watched-files path.
+
+The scan behind the graph is bounded at 500 configs and **says so in
+the log** when it stops early. Past that bound a root is simply not
+seen and its fragments stop being recognised — no colours, no
+context — so a silent bound would be a disappearance with no
+explanation anywhere.
 
 #### Semantic highlighting
 
