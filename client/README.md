@@ -100,11 +100,12 @@ extension and it just works.
    `opensips-local.cfg` work) or `*.opensips.cfg` are recognized
    automatically;
    the generic `.cfg` extension is deliberately not claimed, so
-   unrelated tools' config files are left alone. A `.cfg` your
-   configuration **includes** is picked up anyway: the extension asks
-   the server what includes what and gives it the language, so a
-   split-out `carrier-routes.cfg` gets the same colors and the same
-   server as the root that pulls it in. A file another extension
+   unrelated tools' config files are left alone. A file your
+   configuration **includes** is picked up anyway, whatever it is
+   named: the extension asks the server what includes what and gives
+   it the language, so `carrier-routes.cfg` and `include/globals.inc`
+   both get the same colors and the same server as the root that
+   pulls them in. A file another extension
    already claims is left to that extension, and for anything the
    includes do not reach, add a
    [`files.associations`](https://code.visualstudio.com/docs/languages/identifiers)
