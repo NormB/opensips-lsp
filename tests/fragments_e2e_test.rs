@@ -391,3 +391,568 @@ fn a_truncated_workspace_scan_says_so() {
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// The call graph, asked from inside a fragment.
+///
+/// `prepareCallHierarchy` on a route the PARENT defines yields an item
+/// whose file is the root — a file the client has not opened, because
+/// the user is editing the include.  Answering the follow-up from the
+/// open-buffer map alone reads that file as empty, so the closure is
+/// empty, so the call graph is empty: "nobody calls this" for a route
+/// the file on screen calls two lines up.
+#[test]
+fn call_hierarchy_from_a_fragment_sees_the_whole_closure() {
+    let (base, root_uri, frag_uri) = setup("callh");
+    let (mut child, rx, mut stdin) = start(&base, "");
+    did_open(&mut stdin, &frag_uri, FRAG_TEXT);
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/prepareCallHierarchy",
+            "params":{"textDocument":{"uri":frag_uri},"position":{"line":1,"character":11}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "prepareCallHierarchy");
+    let item = v["result"][0].clone();
+    assert_eq!(
+        item["data"]["route"], "helper",
+        "the item is the route the PARENT defines: {v}"
+    );
+    assert_eq!(
+        item["uri"], root_uri,
+        "and it lives in the root, which is not open: {v}"
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"callHierarchy/incomingCalls",
+            "params":{"item": item}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 3, "incomingCalls");
+    let froms: Vec<&str> = v["result"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|x| x["from"]["uri"].as_str()).collect())
+        .unwrap_or_default();
+    assert!(
+        froms.contains(&frag_uri.as_str()),
+        "the caller is the open fragment, two lines up: {v}"
+    );
+    let names: Vec<&str> = v["result"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x["from"]["data"]["route"].as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(names.contains(&"entry"), "{v}");
+    // and the other direction answers with a list rather than nothing
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"callHierarchy/outgoingCalls",
+            "params":{"item": item}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 4, "outgoingCalls");
+    assert!(
+        v["result"].is_array(),
+        "a route whose body calls nothing has NO outgoing calls; that is \
+         an empty list, not an unanswerable question: {v}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// A fragment the ROOT's closure cannot reach.
+///
+/// The closure is capped for safety — depth 8, 64 files — and a
+/// deployment with one include per carrier passes 64 without trying.
+/// Past the cap the fragment is not IN the closure built from the
+/// root, and answering from that closure alone drops the fragment's
+/// OWN includes: routes that were in scope before the root was ever
+/// consulted start reading as undefined.  Analysing in the root's
+/// context must only ever ADD to what the file could already see.
+#[test]
+fn a_fragment_outside_the_roots_closure_keeps_its_own_includes() {
+    let base = std::env::temp_dir().join(format!("frag-wide-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    const N: usize = 90;
+    let mut root = String::from("");
+    for i in 0..N {
+        root.push_str(&format!("include_file \"c{i}.cfg\"\n"));
+    }
+    root.push_str("route[TOP] {\n    exit;\n}\n");
+    std::fs::write(base.join("opensips.cfg"), &root).unwrap();
+    for i in 0..N - 1 {
+        std::fs::write(
+            base.join(format!("c{i}.cfg")),
+            format!("route[C{i}] {{ exit; }}\n"),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        base.join("helpers.cfg"),
+        "route[OWN_HELPER] {\n    exit;\n}\n",
+    )
+    .unwrap();
+    // the last sibling is past the cap, and includes a helper of its own
+    let leaf_text = format!(
+        "include_file \"helpers.cfg\"\nroute[C{}] {{\n    route(OWN_HELPER);\n    route(NOWHERE);\n}}\n",
+        N - 1
+    );
+    let leaf = base.join(format!("c{}.cfg", N - 1));
+    std::fs::write(&leaf, &leaf_text).unwrap();
+    let leaf_uri = format!("file://{}", leaf.display());
+
+    let (mut child, rx, mut stdin) = start(&base, "");
+    did_open(&mut stdin, &leaf_uri, &leaf_text);
+    let v = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == leaf_uri,
+        "diagnostics on a fragment past the cap",
+    );
+    let msgs: Vec<&str> = v["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d["message"].as_str())
+        .collect();
+    assert!(
+        !msgs.iter().any(|m| m.contains("OWN_HELPER")),
+        "the fragment includes the file defining OWN_HELPER itself; the \
+         root's closure being full must not take that away: {msgs:?}"
+    );
+    assert!(
+        msgs.iter().any(|m| m.contains("NOWHERE")),
+        "a route defined nowhere is still reported, so the absence \
+         above is analysis and not silence: {msgs:?}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Differential: the same question, asked of the same text, laid out
+/// two ways.
+///
+/// One workspace holds the whole configuration in one file; the other
+/// holds exactly the same routes with the middle block moved into an
+/// `include_file`.  Every positional request must answer the same
+/// SHAPE in both — a fragment is a layout, not a different language.
+///
+/// This is the check that caught call hierarchy returning "nobody
+/// calls this" from inside a fragment: every hand-written test agreed
+/// with the code, and only asking the identical question of the
+/// identical text in the other layout disagreed.
+#[test]
+fn every_request_answers_the_same_shape_split_as_whole() {
+    let base = std::env::temp_dir().join(format!("frag-diff-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let whole_dir = base.join("whole");
+    let split_dir = base.join("split");
+    std::fs::create_dir_all(&whole_dir).unwrap();
+    std::fs::create_dir_all(split_dir.join("inc")).unwrap();
+
+    let head = "";
+    let whole = format!(
+        "{head}route[helper] {{\n    exit;\n}}\nroute[entry] {{\n    route(helper);\n}}\nroute {{\n    route(entry);\n}}\n"
+    );
+    let root = format!(
+        "{head}include_file \"inc/routes.cfg\"\nroute[helper] {{\n    exit;\n}}\nroute {{\n    route(entry);\n}}\n"
+    );
+    let frag = "route[entry] {\n    route(helper);\n}\n".to_string();
+    std::fs::write(whole_dir.join("opensips.cfg"), &whole).unwrap();
+    std::fs::write(split_dir.join("opensips.cfg"), &root).unwrap();
+    std::fs::write(split_dir.join("inc/routes.cfg"), &frag).unwrap();
+    let whole_uri = format!("file://{}", whole_dir.join("opensips.cfg").display());
+    let frag_uri = format!("file://{}", split_dir.join("inc/routes.cfg").display());
+
+    // the position of the `route(helper);` call, COMPUTED in each
+    // layout: the two differ in header length, and a hardcoded line
+    // silently turns every answer into null on one side
+    let call_pos = |text: &str| -> (u32, u32) {
+        let needle = "route(helper);";
+        for (i, line) in text.lines().enumerate() {
+            if let Some(col) = line.find(needle) {
+                // INSIDE the route name.  Landing on the `)` instead
+                // makes every request answer null on both sides, and
+                // a differential test where both sides are null
+                // passes while proving nothing.
+                return (i as u32, (col + "route(".len() + 1) as u32);
+            }
+        }
+        panic!("fixture has no {needle} call");
+    };
+    let (wl, wc) = call_pos(&whole);
+    let (fl, fc) = call_pos(&frag);
+
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("opensips_LSP_BIN", "")
+            .env("opensips_LSP_ANALYZER_DEBOUNCE_MS", "10")
+            .env(
+                "opensips_LSP_CACHE_DIR",
+                base.join("cache").display().to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "capabilities":{},
+            "initializationOptions":{"opensipsPath":""},
+            "workspaceFolders":[
+                {"uri": format!("file://{}", whole_dir.display()), "name":"whole"},
+                {"uri": format!("file://{}", split_dir.display()), "name":"split"}]}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "init");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    did_open(&mut stdin, &whole_uri, &whole);
+    did_open(&mut stdin, &frag_uri, &frag);
+
+    /// What an answer IS, ignoring the paths — those differ by
+    /// construction.  A null where the other side has an object is
+    /// the disagreement worth failing on.
+    fn shape(v: &serde_json::Value) -> String {
+        match v {
+            serde_json::Value::Null => "null".into(),
+            serde_json::Value::Array(a) => format!("array[{}]", a.len()),
+            serde_json::Value::Object(o) => {
+                let mut k: Vec<&str> = o.keys().map(|s| s.as_str()).collect();
+                k.sort();
+                format!("object[{}]", k.join(","))
+            }
+            other => format!("scalar[{other}]"),
+        }
+    }
+
+    let mut answered = 0usize;
+    let mut id = 10;
+    let mut ask = |uri: &str, line: u32, ch: u32, method: &str, extra: serde_json::Value| {
+        id += 1;
+        let mut params = serde_json::json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": line, "character": ch}
+        });
+        if let Some(o) = extra.as_object() {
+            for (k, v) in o {
+                params[k] = v.clone();
+            }
+        }
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
+        );
+        let want = id;
+        wait_for(&rx, |v| v["id"] == want, method)["result"].clone()
+    };
+
+    for (method, extra) in [
+        ("textDocument/hover", serde_json::json!({})),
+        ("textDocument/definition", serde_json::json!({})),
+        (
+            "textDocument/references",
+            serde_json::json!({"context": {"includeDeclaration": true}}),
+        ),
+        ("textDocument/prepareRename", serde_json::json!({})),
+        ("textDocument/rename", serde_json::json!({"newName": "ZZZ"})),
+        ("textDocument/signatureHelp", serde_json::json!({})),
+        ("textDocument/prepareCallHierarchy", serde_json::json!({})),
+    ] {
+        let w = ask(&whole_uri, wl, wc, method, extra.clone());
+        let f = ask(&frag_uri, fl, fc, method, extra.clone());
+        // `null == null` would agree while proving nothing; at least
+        // one request has to have actually answered
+        if !w.is_null() {
+            answered += 1;
+        }
+        assert_eq!(
+            shape(&w),
+            shape(&f),
+            "{method} answers differently once the block is an include\n  whole: {w}\n  split: {f}"
+        );
+    }
+
+    assert!(
+        answered >= 5,
+        "only {answered} of the positional requests answered at all — the \
+         cursor is not on a route name and the comparison is vacuous"
+    );
+
+    // the call-hierarchy follow-ups, which is where the difference was
+    let mut w_shapes: Vec<String> = Vec::new();
+    let mut f_shapes: Vec<String> = Vec::new();
+    let w_item = ask(
+        &whole_uri,
+        wl,
+        wc,
+        "textDocument/prepareCallHierarchy",
+        serde_json::json!({}),
+    )[0]
+    .clone();
+    let f_item = ask(
+        &frag_uri,
+        fl,
+        fc,
+        "textDocument/prepareCallHierarchy",
+        serde_json::json!({}),
+    )[0]
+    .clone();
+    for method in ["callHierarchy/incomingCalls", "callHierarchy/outgoingCalls"] {
+        for (label, item) in [("whole", &w_item), ("split", &f_item)] {
+            id += 1;
+            write_msg(
+                &mut stdin,
+                &serde_json::json!({"jsonrpc":"2.0","id":id,"method":method,
+                    "params":{"item": item}}),
+            );
+            let want = id;
+            let r = wait_for(&rx, |v| v["id"] == want, method)["result"].clone();
+            if label == "whole" {
+                w_shapes.push(shape(&r));
+            } else {
+                f_shapes.push(shape(&r));
+            }
+        }
+    }
+    assert_eq!(
+        w_shapes, f_shapes,
+        "the call graph must not depend on which file a route lives in"
+    );
+
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Hostile and malformed URIs to `opensips/analysisRoot`.
+///
+/// It is answered before a document has a language, which means it is
+/// answered for whatever the editor happens to have open — and an
+/// editor will hand over `untitled:`, a directory, a percent-encoded
+/// NUL, a path that climbs above the workspace.  A panic in a request
+/// this early takes the whole server down for every open file.
+#[test]
+fn analysis_root_survives_whatever_the_editor_hands_it() {
+    let (base, _root_uri, frag_uri) = setup("hostile");
+    let (mut child, rx, mut stdin) = start(&base, "");
+    let dir = base.display().to_string();
+    let hostile = [
+        String::new(),
+        "not-a-uri".into(),
+        "http://example.com/x.cfg".into(),
+        "file://".into(),
+        "file:///".into(),
+        "untitled:Untitled-1".into(),
+        format!("file://{dir}"),
+        format!("file://{dir}/does-not-exist.cfg"),
+        format!("file://{dir}/inc/routes.cfg/"),
+        format!("file://{dir}/../{}", "x".repeat(64)),
+        "file:///%00".into(),
+        "file:///%2e%2e/%2e%2e/etc/passwd".into(),
+        format!("file://{dir}/{}.cfg", "deep/".repeat(40)),
+    ];
+    let mut id = 100;
+    for uri in &hostile {
+        id += 1;
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
+                "params":{"uri": uri}}),
+        );
+        let want = id;
+        // an answer OR a protocol error is fine; silence is not
+        let v = wait_for(&rx, |v| v["id"] == want, "analysisRoot on a hostile uri");
+        assert!(
+            v.get("result").is_some() || v.get("error").is_some(),
+            "neither answered nor refused {uri:?}: {v}"
+        );
+    }
+    // and it is still correct afterwards, so nothing was left wedged
+    id += 1;
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
+            "params":{"uri": frag_uri}}),
+    );
+    let want = id;
+    let v = wait_for(
+        &rx,
+        |v| v["id"] == want,
+        "analysisRoot after the hostile batch",
+    );
+    assert!(
+        v["result"]
+            .as_str()
+            .is_some_and(|s| s.ends_with("opensips.cfg")),
+        "the server must still answer correctly after that: {v}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// The two diagnostic channels must not disagree about a fragment.
+///
+/// A client that pulls is answered by `textDocument/diagnostic`; one
+/// that does not is pushed to.  They are separate code paths with
+/// separate call sites for the analysis root, so a fragment is
+/// exactly the shape of thing that ends up analysed one way on one
+/// channel and another way on the other.
+#[test]
+fn pull_and_push_agree_about_a_fragment() {
+    let (base, root_uri, frag_uri) = setup("channels");
+
+    // push: a client that declares no diagnostic support
+    let (mut pusher, rx, mut stdin) = start(&base, "");
+    did_open(&mut stdin, &frag_uri, FRAG_TEXT);
+    let v = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
+        "pushed diagnostics",
+    );
+    let mut pushed: Vec<String> = v["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d["message"].as_str().map(str::to_string))
+        .collect();
+    pushed.sort();
+    let _ = pusher.kill();
+
+    // pull: the same workspace, a client that declares it
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("opensips_LSP_BIN", "")
+            .env("opensips_LSP_ANALYZER_DEBOUNCE_MS", "10")
+            .env(
+                "opensips_LSP_CACHE_DIR",
+                base.join("cache2").display().to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "capabilities":{"textDocument":{"diagnostic":{"dynamicRegistration":false}}},
+            "initializationOptions":{"opensipsPath":""},
+            "workspaceFolders":[{"uri": format!("file://{}", base.display()), "name":"w"}]}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "init");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    did_open(&mut stdin, &frag_uri, FRAG_TEXT);
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/diagnostic",
+            "params":{"textDocument":{"uri":frag_uri}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "pulled diagnostics");
+    let mut pulled: Vec<String> = v["result"]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|d| d["message"].as_str().map(str::to_string))
+        .collect();
+    pulled.sort();
+    assert!(!pushed.is_empty(), "the fixture must produce something");
+    assert_eq!(pushed, pulled, "the two channels disagree about a fragment");
+
+    // and the workspace sweep reports the ROOT, never the fragment
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"workspace/diagnostic",
+            "params":{"previousResultIds":[]}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 3, "workspace sweep");
+    let uris: Vec<String> = v["result"]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|i| i["uri"].as_str().map(str::to_string))
+        .collect();
+    assert!(uris.contains(&root_uri), "the root is a program: {uris:?}");
+    assert!(
+        !uris.contains(&frag_uri),
+        "a fragment is not a program and must not be swept: {uris:?}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Many fragments open at once, edited in a burst.
+///
+/// The include graph is a single cached structure behind an
+/// `RwLock`, invalidated from didOpen, didChange, didClose and the
+/// watcher.  Rebuilding it while another request reads it is exactly
+/// the shape of thing that deadlocks or serves a half-built answer,
+/// and it would do so only under load — never in a test that opens
+/// one file.
+#[test]
+fn many_fragments_open_and_edited_at_once_stay_correct() {
+    let base = std::env::temp_dir().join(format!("frag-load-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("inc")).unwrap();
+    const N: usize = 12;
+    let mut root = String::new();
+    for i in 0..N {
+        root.push_str(&format!("include_file \"inc/f{i}.cfg\"\n"));
+    }
+    root.push_str("route[SHARED] {\n    exit;\n}\n");
+    std::fs::write(base.join("opensips.cfg"), &root).unwrap();
+    let text = |i: usize| format!("route[F{i}] {{\n    route(SHARED);\n    route(ghost);\n}}\n");
+    for i in 0..N {
+        std::fs::write(base.join(format!("inc/f{i}.cfg")), text(i)).unwrap();
+    }
+    let (mut child, rx, mut stdin) = start(&base, "");
+    let uri = |i: usize| format!("file://{}", base.join(format!("inc/f{i}.cfg")).display());
+    for i in 0..N {
+        did_open(&mut stdin, &uri(i), &text(i));
+    }
+    // a burst of edits across all of them, interleaved
+    for round in 2..5 {
+        for i in 0..N {
+            write_msg(
+                &mut stdin,
+                &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+                    "textDocument":{"uri": uri(i), "version": round},
+                    "contentChanges":[{"text": format!("{}// r{round}\n", text(i))}]}}),
+            );
+        }
+    }
+    // every one of them must still answer, and answer correctly
+    let mut id = 200;
+    for i in 0..N {
+        id += 1;
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
+                "params":{"uri": uri(i)}}),
+        );
+        let want = id;
+        let v = wait_for(&rx, |v| v["id"] == want, "analysisRoot under load");
+        assert!(
+            v["result"]
+                .as_str()
+                .is_some_and(|s| s.ends_with("opensips.cfg")),
+            "fragment {i} lost its root under load: {v}"
+        );
+    }
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}

@@ -979,3 +979,137 @@ fn the_closure_visits_a_doubly_named_include_once() {
     let paths: Vec<&str> = files.iter().map(|(p, _)| p.to_str().unwrap()).collect();
     assert_eq!(paths.len(), 2, "one root and one include: {paths:?}");
 }
+
+/// Randomised include graphs: the invariants, not the answers.
+///
+/// A hand-written fixture proves the cases its author thought of, and
+/// every defect found in this feature so far lived in a case nobody
+/// had thought of.  These build thousands of graphs from a fixed seed
+/// — chains, diamonds, cycles, self-includes, orphans, files reached
+/// by two spellings — and assert what has to hold for every one.
+/// Fixed seed, so a failure is reproducible rather than a rumour.
+#[test]
+fn include_graph_invariants_hold_over_random_graphs() {
+    use opensips_lsp::logic::IncludeGraph;
+    use std::path::{Path, PathBuf};
+
+    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let mut rng = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+
+    for case in 0..3000u32 {
+        let n = 2 + (rng() % 7) as usize;
+        let names: Vec<String> = (0..n).map(|i| format!("/w/c{i}.cfg")).collect();
+        let mut texts = vec![String::new(); n];
+        for text in texts.iter_mut() {
+            // each config includes a random subset of the others,
+            // written in a random spelling of the same path
+            for j in 0..n {
+                if rng() % 3 != 0 {
+                    continue;
+                }
+                let spelling = match rng() % 4 {
+                    0 => format!("c{j}.cfg"),
+                    1 => format!("./c{j}.cfg"),
+                    2 => format!("../w/c{j}.cfg"),
+                    _ => format!("/w/c{j}.cfg"),
+                };
+                text.push_str(&format!("include_file \"{spelling}\"\n"));
+            }
+        }
+        let configs: Vec<(PathBuf, String)> = names
+            .iter()
+            .map(PathBuf::from)
+            .zip(texts.iter().cloned())
+            .collect();
+        let g = IncludeGraph::build(&configs);
+        // scan order must not decide anything: a fragment's context
+        // cannot depend on which file the directory walk saw first
+        let mut shuffled = configs.clone();
+        shuffled.reverse();
+        let g2 = IncludeGraph::build(&shuffled);
+
+        for name in &names {
+            let p = Path::new(name);
+            // terminates (a hang fails the suite by timeout), and
+            // never claims a file is its own root
+            let root = g.analysis_root(p);
+            assert_ne!(
+                root.as_deref(),
+                Some(p),
+                "case {case}: {name} is its own root"
+            );
+            assert_eq!(
+                root,
+                g2.analysis_root(p),
+                "case {case}: scan order changed the answer for {name}"
+            );
+            // whatever comes back must be reachable by walking
+            // parents from the fragment — not merely plausible
+            if let Some(r) = root {
+                let mut cur = p.to_path_buf();
+                let mut seen = std::collections::HashSet::new();
+                let mut reached = false;
+                while seen.insert(cur.clone()) {
+                    match g.analysis_root(&cur) {
+                        Some(up) => {
+                            if up == r {
+                                reached = true;
+                                break;
+                            }
+                            cur = up;
+                        }
+                        None => break,
+                    }
+                }
+                assert!(reached, "case {case}: {r:?} is not an ancestor of {name}");
+            }
+        }
+    }
+}
+
+/// Every spelling of one path resolves to one key, and folding is
+/// idempotent — otherwise "the same file" depends on how it was
+/// written, which is how a fragment ends up with no root and a
+/// closure that visits it twice.
+#[test]
+fn resolved_includes_fold_every_spelling_to_one_key() {
+    use opensips_lsp::logic::resolved_includes;
+    use std::path::{Component, Path};
+    let from = Path::new("/w/sites/site.cfg");
+    let spellings = [
+        "../common/r.cfg",
+        ".././common/r.cfg",
+        "../common/./r.cfg",
+        "../common/x/../r.cfg",
+        "/w/common/r.cfg",
+        "./../common/r.cfg",
+    ];
+    let text: String = spellings
+        .iter()
+        .map(|s| format!("include_file \"{s}\"\n"))
+        .collect();
+    let got = resolved_includes(from, &text);
+    assert_eq!(got.len(), spellings.len(), "one entry per directive");
+    for (spelling, path) in spellings.iter().zip(&got) {
+        assert_eq!(
+            path,
+            Path::new("/w/common/r.cfg"),
+            "{spelling} names the same file as the others"
+        );
+        // nothing foldable is left behind
+        assert!(
+            !path
+                .components()
+                .any(|c| matches!(c, Component::CurDir | Component::ParentDir)),
+            "{path:?} still carries a . or .. component"
+        );
+    }
+    // folding what is already folded changes nothing
+    let again = resolved_includes(from, "include_file \"/w/common/r.cfg\"\n");
+    assert_eq!(again, vec![std::path::PathBuf::from("/w/common/r.cfg")]);
+}

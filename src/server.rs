@@ -159,10 +159,26 @@ impl Backend {
                 files[i].1 = text.to_string();
                 let own = files.remove(i);
                 files.insert(0, own);
+                files
             }
-            None => files.insert(0, (path.to_path_buf(), text.to_string())),
+            // The document is not IN the closure built from its root:
+            // the closure is capped (depth 8, 64 files) and a
+            // configuration with one include per carrier passes 64
+            // without trying.  Adding the document alone here would
+            // drop ITS includes — routes that were in scope before the
+            // root was ever consulted.  Analysing in the root's
+            // context must only ADD to what the file could already
+            // see, so its own closure leads and the root's follows.
+            None => {
+                let mut merged = logic::include_closure(path, text, loader);
+                for (p, t) in files {
+                    if !merged.iter().any(|(q, _)| *q == p) {
+                        merged.push((p, t));
+                    }
+                }
+                merged
+            }
         }
-        files
     }
 
     /// Analyzer diagnostics for `text`, mapped to LSP (UTF-16) ranges.
@@ -310,7 +326,25 @@ impl Backend {
     /// open — a call-hierarchy follow-up can name a file the client
     /// never opened.
     fn text_for(&self, uri: &Uri) -> String {
-        self.docs.get(uri).map(|d| d.1.clone()).unwrap_or_default()
+        if let Some(d) = self.docs.get(uri) {
+            return d.1.clone();
+        }
+        // Not open — and for a call-hierarchy follow-up that is the
+        // NORMAL case: the item names the file a route is DEFINED in,
+        // which is the root while the user is editing an include.
+        // Reading it as empty makes its closure empty and the call
+        // graph with it, so "nobody calls this" comes back for a route
+        // the buffer on screen calls two lines up.  Same cap as the
+        // include loader: a hostile file must stay cheap.
+        let Some(path) = uri.to_file_path() else {
+            return String::new();
+        };
+        match std::fs::metadata(&path) {
+            Ok(m) if m.is_file() && m.len() <= 1_048_576 => {
+                std::fs::read_to_string(&path).unwrap_or_default()
+            }
+            _ => String::new(),
+        }
     }
 
     /// A call-hierarchy item for one route block.

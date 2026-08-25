@@ -49,6 +49,15 @@ artefacts of opening it on its own.
   root is not seen and its fragments stop being recognised. That now
   produces a warning in the output channel instead of an unexplained
   disappearance.
+- **The call graph works from inside an included file.** Asking who
+  calls a route the parent defines answered "nobody" — the follow-up
+  needs the root's text, and while you are editing an include the
+  root is not a file the editor has opened, so it was read as empty.
+- **A configuration with more than 64 includes keeps working.** The
+  include closure is bounded for safety, and a fragment past the
+  bound was analysed without its OWN includes — routes it could see
+  before started reading as undefined. Its own closure now leads and
+  the root's follows.
 - **A failed check no longer invents a file and a line.** When
   `opensips -C` fails without positioning the error — a module it
   cannot load, a bad module path — the note read "check failed

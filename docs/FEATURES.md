@@ -268,6 +268,20 @@ showing, and leaving them up until it is next touched makes the fix
 look like it did not work. A deeper change than one level corrects
 itself on save, through the watched-files path.
 
+The closure itself is bounded too — depth 8, 64 files — and a
+configuration with one include per carrier passes 64 without trying.
+A fragment past the bound is not in the closure built from its root,
+so its OWN closure leads and the root's follows: analysing a file in
+its parent's context must only ever ADD to what that file could
+already see, never take its own includes away.
+
+Answering a follow-up about a route defined in the root needs the
+root's text, and while you are editing an include the root is not a
+file the editor has opened. It is read from disk (same 1 MiB cap as
+the include loader) rather than treated as empty — reading it as
+empty is how call hierarchy came to answer "nobody calls this" for a
+route the buffer on screen calls two lines up.
+
 The scan behind the graph is bounded at 500 configs and **says so in
 the log** when it stops early. Past that bound a root is simply not
 seen and its fragments stop being recognised — no colours, no
