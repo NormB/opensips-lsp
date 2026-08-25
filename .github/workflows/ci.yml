@@ -53,8 +53,10 @@ jobs:
       - run: npm ci
       - run: npm run compile
       # what the extension DOES: `tsc` cannot see whether an included
-      # fragment is actually re-associated, and the Rust gate can only
-      # see that the strings are there
+      # fragment is actually re-associated, whether an untrusted folder
+      # is denied a checker to run, or whether a runtime toggle
+      # restarts the server when it should not — and the Rust gate can
+      # only see that the strings are there
       - run: npm test
 
   grammar:

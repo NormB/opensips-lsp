@@ -2053,3 +2053,162 @@ fn a_configuration_split_into_many_cross_calling_fragments_is_clean() {
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// Every setting, with a FRAGMENT open.
+///
+/// The settings were all tested against a single-file config, and the
+/// fragment path reaches the analyzer, the cap and the code lens by a
+/// different route — `merge_and_publish` and the pull handler each
+/// resolve the analysis root at their own call site.  A toggle that
+/// works on a whole config and not on an include is exactly the kind
+/// of gap this feature keeps producing.
+#[test]
+fn every_setting_behaves_the_same_for_a_fragment() {
+    let mk = |tag: &str| {
+        let base = std::env::temp_dir().join(format!("frag-set-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("inc")).unwrap();
+        std::fs::write(
+            base.join("opensips.cfg"),
+            "include_file \"inc/f.cfg\"\nroute[helper] {\n    exit;\n}\nroute {\n    route(entry);\n}\n",
+        )
+        .unwrap();
+        let frag = "route[entry] {\n    route(helper);\n    route(G1);\n    route(G2);\n    route(G3);\n}\n";
+        std::fs::write(base.join("inc/f.cfg"), frag).unwrap();
+        let uri = format!("file://{}", base.join("inc/f.cfg").display());
+        (base, uri, frag)
+    };
+
+    let boot = |base: &std::path::Path, opts: serde_json::Value| {
+        let mut child = Server::new(
+            Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+                .env("OPENSIPS_LSP_BIN", "")
+                .env("OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS", "10")
+                .env(
+                    "OPENSIPS_LSP_CACHE_DIR",
+                    base.join("cache").display().to_string(),
+                )
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+            base,
+        );
+        let rx = spawn_reader(&mut child);
+        let mut stdin = child.stdin.take().unwrap();
+        let mut init = serde_json::json!({"opensipsPath": ""});
+        for (k, v) in opts.as_object().unwrap() {
+            init[k] = v.clone();
+        }
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+                "capabilities":{},
+                "initializationOptions": init,
+                "workspaceFolders":[{"uri": format!("file://{}", base.display()), "name":"w"}]}}),
+        );
+        wait_for(&rx, |v| v["id"] == 1, "init");
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+        );
+        (child, rx, stdin)
+    };
+
+    // the analyzer ON: three undefined routes reported, the parent's not
+    let (base, uri, frag) = mk("on");
+    let (mut child, rx, mut stdin) = boot(&base, serde_json::json!({"analyzerDiagnostics": true}));
+    did_open(&mut stdin, &uri, frag);
+    let v = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == uri,
+        "diagnostics",
+    );
+    let msgs: Vec<&str> = v["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d["message"].as_str())
+        .collect();
+    assert_eq!(
+        msgs.iter()
+            .filter(|m| m.contains("G1") || m.contains("G2") || m.contains("G3"))
+            .count(),
+        3,
+        "{msgs:?}"
+    );
+    assert!(!msgs.iter().any(|m| m.contains("helper")), "{msgs:?}");
+    let full = msgs.len();
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+
+    // maxDiagnostics caps what a fragment publishes
+    let (base, uri, frag) = mk("cap");
+    let (mut child, rx, mut stdin) = boot(&base, serde_json::json!({"maxDiagnostics": 2}));
+    did_open(&mut stdin, &uri, frag);
+    let v = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == uri,
+        "capped diagnostics",
+    );
+    let n = v["params"]["diagnostics"].as_array().unwrap().len();
+    assert!(
+        n <= 2 && n < full,
+        "the cap applies to a fragment too: {n} of {full}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+
+    // live reconfiguration, with the fragment open: off, then on again
+    let (base, uri, frag) = mk("live");
+    let (mut child, rx, mut stdin) = boot(&base, serde_json::json!({"analyzerDiagnostics": true}));
+    did_open(&mut stdin, &uri, frag);
+    wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == uri,
+        "initial diagnostics",
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration",
+            "params":{"settings":{"opensipsLsp":{"analyzerDiagnostics": false}}}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "textDocument/publishDiagnostics"
+                && v["params"]["uri"] == uri
+                && v["params"]["diagnostics"].as_array().unwrap().is_empty()
+        },
+        "the fragment cleared when the analyzer went off",
+    );
+    assert!(v["params"]["diagnostics"].as_array().unwrap().is_empty());
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration",
+            "params":{"settings":{"opensipsLsp":{"analyzerDiagnostics": true}}}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "textDocument/publishDiagnostics"
+                && v["params"]["uri"] == uri
+                && !v["params"]["diagnostics"].as_array().unwrap().is_empty()
+        },
+        "and came back when it went on",
+    );
+    let msgs: Vec<&str> = v["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d["message"].as_str())
+        .collect();
+    assert_eq!(msgs.len(), full, "the same findings return: {msgs:?}");
+    assert!(
+        !msgs.iter().any(|m| m.contains("helper")),
+        "and still in the ROOT's context, not the fragment's own: {msgs:?}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}

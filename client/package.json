@@ -132,7 +132,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "node test/association.test.js"
+    "test": "node test/association.test.js && node test/lifecycle.test.js"
   },
   "dependencies": {
     "vscode-languageclient": "^10.1.0"
