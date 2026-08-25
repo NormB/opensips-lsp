@@ -150,7 +150,7 @@ fn a_pulling_client_is_not_also_pushed_to() {
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
             "textDocument":{"uri":uri,"version":2},
-            "contentChanges":[{"text":"route {\\n    route(STILL_MISSING);\\n}\\n"}]}}),
+            "contentChanges":[{"text":"route {\n    route(STILL_MISSING);\n}\n"}]}}),
     );
     // give the debounce time to fire, then prove nothing was pushed by
     // asking for something else and seeing that answer arrive first
@@ -192,7 +192,7 @@ fn a_pushing_client_still_gets_pushed_diagnostics() {
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
             "textDocument":{"uri":uri,"version":2},
-            "contentChanges":[{"text":"route {\\n    route(STILL_MISSING);\\n}\\n"}]}}),
+            "contentChanges":[{"text":"route {\n    route(STILL_MISSING);\n}\n"}]}}),
     );
     let d = wait_for(
         &rx,

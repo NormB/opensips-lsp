@@ -63,6 +63,8 @@ pub struct Backend {
     /// reported as incomplete.  Said once: the graph is rebuilt often
     /// and the same line every time would bury the log it is in.
     graph_truncation_logged: std::sync::atomic::AtomicBool,
+    /// Whether a config the graph could not read has been reported.
+    unreadable_logged: std::sync::atomic::AtomicBool,
 }
 
 impl Backend {
@@ -96,6 +98,7 @@ impl Backend {
             memo: memo::AnalysisCache::default(),
             include_graph: std::sync::RwLock::new(None),
             graph_truncation_logged: std::sync::atomic::AtomicBool::new(false),
+            unreadable_logged: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -124,11 +127,7 @@ impl Backend {
             if let Some(t) = open.get(p) {
                 return Some(t.clone());
             }
-            let md = std::fs::metadata(p).ok()?;
-            if !md.is_file() || md.len() > 1_048_576 {
-                return None;
-            }
-            std::fs::read_to_string(p).ok()
+            logic::read_config(p)
         }
     }
 
@@ -675,16 +674,54 @@ impl Backend {
             });
         }
         let open = self.open_docs_snapshot();
+        let mut unreadable: Vec<std::path::PathBuf> = Vec::new();
         let scanned: Vec<(std::path::PathBuf, String)> = configs
             .into_iter()
             .filter_map(|p| {
+                // the same reading the closure will do, so the graph
+                // cannot hand out a root the closure then refuses
                 let text = match open.get(&p) {
                     Some(t) => t.clone(),
-                    None => std::fs::read_to_string(&p).ok()?,
+                    None => match logic::read_config(&p) {
+                        Some(t) => t,
+                        None => {
+                            unreadable.push(p);
+                            return None;
+                        }
+                    },
                 };
                 Some((p, text))
             })
             .collect();
+        // Same principle as the scan bound: a config the graph could
+        // not read is a config whose fragments quietly stop being
+        // recognised, so it is named rather than dropped in silence.
+        if !unreadable.is_empty()
+            && !self
+                .unreadable_logged
+                .swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            let client = self.client.clone();
+            let names: Vec<String> = unreadable
+                .iter()
+                .take(5)
+                .map(|p| p.display().to_string())
+                .collect();
+            let n = unreadable.len();
+            tokio::spawn(async move {
+                client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!(
+                            "opensips-lsp: {n} config(s) could not be read for the include \
+                             graph — too large (over 1 MiB) or not readable; files \
+                             they include will not be recognised as part of them: {}",
+                            names.join(", ")
+                        ),
+                    )
+                    .await;
+            });
+        }
         let g = std::sync::Arc::new(logic::IncludeGraph::build(&scanned));
         *self.include_graph.write().unwrap() = Some(g.clone());
         g

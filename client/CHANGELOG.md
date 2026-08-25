@@ -58,6 +58,16 @@ artefacts of opening it on its own.
   bound was analysed without its OWN includes — routes it could see
   before started reading as undefined. Its own closure now leads and
   the root's follows.
+- **A stray byte no longer erases a configuration.** A comment
+  written in latin-1 — an accent, a name — made the whole config
+  unreadable to the include graph, so every file it includes silently
+  stopped being recognised. Bytes are decoded leniently now.
+- **A large config is skipped consistently, and said out loud.** The
+  workspace scan and the include loader each decided for themselves
+  what they could read and disagreed above 1 MiB: the root was found
+  and then could not be loaded, so its routes quietly left scope.
+  One rule now, and any config it cannot read is named in the output
+  channel.
 - **A failed check no longer invents a file and a line.** When
   `opensips -C` fails without positioning the error — a module it
   cannot load, a bad module path — the note read "check failed

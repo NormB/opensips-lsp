@@ -1113,3 +1113,98 @@ fn resolved_includes_fold_every_spelling_to_one_key() {
     let again = resolved_includes(from, "include_file \"/w/common/r.cfg\"\n");
     assert_eq!(again, vec![std::path::PathBuf::from("/w/common/r.cfg")]);
 }
+
+/// Model-based: random operation sequences against an independent
+/// model of the same question.
+///
+/// The graph is rebuilt from four places and read from many more.  A
+/// stale answer is not an error — it is a correct-looking answer for
+/// a workspace that no longer exists, which no single-step test can
+/// see.  Here a plain model computes the root by climbing
+/// first-parents, a sequence of random edits is applied to both, and
+/// every file is compared after every step.
+#[test]
+fn the_graph_tracks_a_model_through_random_edits() {
+    use opensips_lsp::logic::IncludeGraph;
+    use std::collections::{BTreeMap, BTreeSet, HashSet};
+    use std::path::{Path, PathBuf};
+
+    /// The answer, computed the obvious slow way.
+    fn model_root(inc: &BTreeMap<String, BTreeSet<String>>, f: &str) -> Option<String> {
+        let mut parents: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for (src, tgts) in inc {
+            for t in tgts {
+                parents.entry(t.as_str()).or_default().push(src.as_str());
+            }
+        }
+        for v in parents.values_mut() {
+            v.sort();
+        }
+        let mut seen: HashSet<&str> = HashSet::new();
+        seen.insert(f);
+        let mut best: Option<String> = None;
+        let mut cur = f;
+        loop {
+            let Some(next) = parents.get(cur).and_then(|v| v.first()).copied() else {
+                return best;
+            };
+            if !seen.insert(next) {
+                return best;
+            }
+            best = Some(next.to_string());
+            cur = next;
+        }
+    }
+
+    let names: Vec<String> = (0..6).map(|i| format!("/w/c{i}.cfg")).collect();
+    let mut inc: BTreeMap<String, BTreeSet<String>> =
+        names.iter().map(|n| (n.clone(), BTreeSet::new())).collect();
+
+    let mut state = 0xDEAD_BEEF_CAFE_F00Du64;
+    let mut rng = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+
+    for step in 0..600u32 {
+        let f = names[(rng() % names.len() as u64) as usize].clone();
+        let t = names[(rng() % names.len() as u64) as usize].clone();
+        if rng() % 2 == 0 {
+            if f != t {
+                inc.get_mut(&f).unwrap().insert(t);
+            }
+        } else {
+            let victim = inc[&f].iter().next().cloned();
+            if let Some(v) = victim {
+                inc.get_mut(&f).unwrap().remove(&v);
+            }
+        }
+        let configs: Vec<(PathBuf, String)> = names
+            .iter()
+            .map(|n| {
+                let body: String = inc[n]
+                    .iter()
+                    // every spelling of the same target, in turn
+                    .enumerate()
+                    .map(|(k, t)| match k % 3 {
+                        0 => format!("include_file \"{t}\"\n"),
+                        1 => format!("include_file \"{}\"\n", t.replace("/w/", "./")),
+                        _ => format!("include_file \"{}\"\n", t.replace("/w/", "../w/")),
+                    })
+                    .collect();
+                (PathBuf::from(n), body)
+            })
+            .collect();
+        let g = IncludeGraph::build(&configs);
+        for n in &names {
+            assert_eq!(
+                g.analysis_root(Path::new(n))
+                    .map(|p| p.display().to_string()),
+                model_root(&inc, n),
+                "step {step}: {n} disagrees with the model; includes = {inc:?}"
+            );
+        }
+    }
+}

@@ -362,3 +362,82 @@ fn a_fragment_is_checked_through_its_root_by_the_real_parser() {
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Oracle: the REAL parser must see the same configuration whether it
+/// is one file or many.
+///
+/// Everything else here compares this server against itself.  This
+/// compares the layout against the thing that decides — `opensips -C`
+/// on a whole config, and on the same text split across
+/// `include_file`s.  If the parser's own findings move when a
+/// configuration is split, then "a fragment is a layout, not a
+/// different program" is false and this whole feature rests on a
+/// wrong premise.
+#[test]
+fn the_real_parser_sees_the_same_program_whole_or_split() {
+    let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
+    let mpath = common::required_env("OPENSIPS_LSP_TEST_MPATH");
+
+    let dir = std::env::temp_dir().join(format!("oslsp-oracle-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("inc")).unwrap();
+
+    // three blocks, the middle one carrying a real syntax error
+    let blocks = [
+        "route[ONE] {\n    exit;\n}\n",
+        "route[TWO] {\n    exit\n}\n",
+        "route[THREE] {\n    exit;\n}\n",
+    ];
+    let head = if mpath.is_empty() {
+        String::new()
+    } else {
+        format!("mpath=\"{mpath}\"\n")
+    };
+
+    // OpenSIPS takes the module path from `mpath` in the config, not
+    // from a flag; passing one the binary does not know makes it exit
+    // before it parses anything, and the comparison below would then
+    // be between two empty lists
+    let run = |cfg: &std::path::Path| -> Vec<String> {
+        let mut cmd = Command::new(&bin);
+        cmd.arg("-C");
+        let out = cmd
+            .arg("-f")
+            .arg(cfg)
+            .current_dir(cfg.parent().unwrap())
+            .output()
+            .expect("the checker runs");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        opensips_lsp::diag::parse_check_output(&stderr, out.status.code().unwrap_or(0))
+            .into_iter()
+            .filter(|d| !d.file.is_empty())
+            // the message and the column, NOT the file or the
+            // absolute line: those move by construction
+            .map(|d| format!("{}:{}", d.col_start, d.message))
+            .collect()
+    };
+
+    let whole = dir.join("whole.cfg");
+    std::fs::write(&whole, format!("{head}{}", blocks.concat())).unwrap();
+    let from_whole = run(&whole);
+    assert!(
+        !from_whole.is_empty(),
+        "the fixture must make the real parser complain, or this proves nothing"
+    );
+
+    let root = dir.join("opensips.cfg");
+    let mut root_text = head.clone();
+    for (i, b) in blocks.iter().enumerate() {
+        root_text.push_str(&format!("include_file \"inc/b{i}.cfg\"\n"));
+        std::fs::write(dir.join(format!("inc/b{i}.cfg")), b).unwrap();
+    }
+    std::fs::write(&root, &root_text).unwrap();
+    let from_split = run(&root);
+
+    assert_eq!(
+        from_whole, from_split,
+        "the real parser reports something different once the same text \
+         is split across includes — the premise this feature rests on"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

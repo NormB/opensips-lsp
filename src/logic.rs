@@ -739,6 +739,35 @@ fn resolve_include(from: &std::path::Path, inc: &str) -> std::path::PathBuf {
     lexically_normal(&joined)
 }
 
+/// The most a single config may contribute to an analysis.
+///
+/// Documented as the per-file include bound, so it belongs to the
+/// reading, not to one caller of it.
+pub const MAX_CONFIG_BYTES: u64 = 1_048_576;
+
+/// Read a config for analysis: one definition, used by the workspace
+/// scan and the include loader alike.
+///
+/// Two definitions are a disagreement, and this one disagreed twice.
+/// The scan read any size and demanded valid UTF-8; the loader capped
+/// at 1 MiB and demanded the same.  So an oversized root was FOUND by
+/// the scan and then could not be loaded — its routes silently left
+/// scope while its fragments still claimed it — and one byte that is
+/// not UTF-8, a latin-1 accent in a comment, erased a config from the
+/// graph along with every fragment it includes.
+///
+/// Bytes are decoded lossily on purpose.  A comment nobody will parse
+/// is not a reason to lose the file, and the text whose columns are
+/// ever REPORTED comes from the editor's own buffer, never from here.
+pub fn read_config(path: &std::path::Path) -> Option<String> {
+    let md = std::fs::metadata(path).ok()?;
+    if !md.is_file() || md.len() > MAX_CONFIG_BYTES {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// The files one config includes DIRECTLY, resolved against it.
 ///
 /// Callers use this to notice that an edit added or removed an

@@ -956,3 +956,588 @@ fn many_fragments_open_and_edited_at_once_stay_correct() {
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// One definition of "a config this server can read".
+///
+/// The workspace scan behind the include graph and the loader behind
+/// the include closure each decided for themselves, and they
+/// disagreed twice over.  A root larger than the loader's cap was
+/// FOUND by the scan and then could not be loaded, so its routes
+/// silently left scope while the fragment still claimed it as a root.
+/// A root with one byte that is not UTF-8 — a latin-1 accent in a
+/// comment, which is what a Spanish or German deployment looks like —
+/// was dropped from the scan entirely, taking every fragment it
+/// includes with it.
+#[test]
+fn a_config_the_scan_accepts_is_a_config_the_closure_can_load() {
+    let base = std::env::temp_dir().join(format!("frag-read-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("inc")).unwrap();
+    let frag = "route[F] {\n    route(TOP);\n    route(NOWHERE);\n}\n";
+    std::fs::write(base.join("inc/f.cfg"), frag).unwrap();
+    let frag_uri = format!("file://{}", base.join("inc/f.cfg").display());
+    let root_path = base.join("opensips.cfg");
+    let root = "include_file \"inc/f.cfg\"\nroute[TOP] {\n    exit;\n}\n";
+
+    // a comment carrying one byte that is not valid UTF-8
+    let mut bytes = root.as_bytes().to_vec();
+    bytes.extend_from_slice(b"# marca de se\xf1al\n");
+    std::fs::write(&root_path, &bytes).unwrap();
+    assert!(
+        String::from_utf8(bytes.clone()).is_err(),
+        "the fixture must be invalid UTF-8"
+    );
+
+    let (mut child, rx, mut stdin) = start(&base, "");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
+            "params":{"uri": frag_uri}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "analysisRoot with a non-UTF-8 root");
+    assert!(
+        v["result"]
+            .as_str()
+            .is_some_and(|s| s.ends_with("opensips.cfg")),
+        "one byte in a comment must not erase the whole configuration: {v}"
+    );
+    did_open(&mut stdin, &frag_uri, frag);
+    let v = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
+        "diagnostics with a non-UTF-8 root",
+    );
+    let msgs: Vec<&str> = v["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d["message"].as_str())
+        .collect();
+    assert!(
+        !msgs.iter().any(|m| m.contains("TOP")),
+        "the root's routes are in scope despite the byte: {msgs:?}"
+    );
+    assert!(
+        msgs.iter().any(|m| m.contains("NOWHERE")),
+        "and the analyzer is still running: {msgs:?}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// A config too large to load is too large to claim, and says so.
+///
+/// The two components must agree: if the closure will not load a
+/// file, the graph must not hand out a root that depends on it —
+/// "found, but its routes are not in scope" is the worst of both.
+#[test]
+fn a_root_too_large_to_load_is_not_claimed_and_is_announced() {
+    let base = std::env::temp_dir().join(format!("frag-huge-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("inc")).unwrap();
+    let frag = "route[F] {\n    route(TOP);\n}\n";
+    std::fs::write(base.join("inc/f.cfg"), frag).unwrap();
+    let frag_uri = format!("file://{}", base.join("inc/f.cfg").display());
+    let mut root = String::from("include_file \"inc/f.cfg\"\nroute[TOP] {\n    exit;\n}\n");
+    while root.len() <= 1_048_576 {
+        root.push_str("# pad pad pad pad pad pad pad pad pad pad pad pad\n");
+    }
+    std::fs::write(base.join("opensips.cfg"), &root).unwrap();
+
+    let (mut child, rx, mut stdin) = start(&base, "");
+    // the first request is what builds the graph; the log and the
+    // response race, and `wait_for` discards what it is not waiting
+    // for — so take the log first and ask again for the answer
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
+            "params":{"uri": frag_uri}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| {
+            v["method"] == "window/logMessage"
+                && v["params"]["message"]
+                    .as_str()
+                    .is_some_and(|m| m.contains("1 MiB") || m.contains("could not be read"))
+        },
+        "a log line explaining the skipped config",
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"opensips/analysisRoot",
+            "params":{"uri": frag_uri}}),
+    );
+    let answer = wait_for(&rx, |v| v["id"] == 3, "analysisRoot with an oversized root");
+    assert!(
+        answer["result"].is_null(),
+        "a root the closure cannot load must not be handed out: {answer}"
+    );
+    assert!(
+        v["params"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("opensips-lsp")),
+        "the line must say who is speaking: {v}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// A fixture that is not the text it looks like passes while proving
+/// nothing.
+///
+/// Three tests in this file once went green against a "config" whose
+/// first two lines were joined by a literal backslash-n: the script
+/// that generated them quoted `\n` one level too many, so `#!KAMAILIO`
+/// and the route definition below it were one line, the route was
+/// never defined, and every request answered null on both sides of a
+/// comparison that then agreed.  Nothing else in this file needs a
+/// literal backslash-n, so its presence is the mistake.
+#[test]
+fn no_fixture_here_carries_a_literal_backslash_n() {
+    // built rather than written, or this line matches itself
+    let bs = '\\';
+    let needle = format!("{bs}{bs}n");
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let src = std::fs::read_to_string(&path).unwrap();
+        checked += 1;
+        for (i, line) in src.lines().enumerate() {
+            // a shell stub needs a backslash-n of its own for `printf`
+            if line.contains("#!/bin/sh") || line.contains("{bs}{bs}n") {
+                continue;
+            }
+            let bytes = line.as_bytes();
+            for (at, _) in line.match_indices(&needle) {
+                // `\\` before a real newline is a CONFIG line
+                // continuation and legitimate; the mistake is a
+                // backslash-n standing on its own
+                if at > 0 && bytes[at - 1] == b'\\' {
+                    continue;
+                }
+                panic!(
+                    "{}:{}: a literal backslash-n where a newline was meant:\n  {line}",
+                    path.display(),
+                    i + 1
+                );
+            }
+        }
+    }
+    assert!(checked > 5, "only {checked} test files scanned");
+}
+
+/// Line endings, byte-order marks and multibyte names.
+///
+/// The include path, the route name and the reported column all come
+/// from byte offsets into text the editor supplies, and CRLF, a BOM
+/// and a multibyte identifier each shift those offsets differently.
+#[test]
+fn encodings_do_not_change_what_a_fragment_is_part_of() {
+    for (tag, eol, bom) in [
+        ("lf", "\n", ""),
+        ("crlf", "\r\n", ""),
+        ("bom", "\n", "\u{feff}"),
+    ] {
+        let base = std::env::temp_dir().join(format!("frag-enc-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("inc")).unwrap();
+        let root =
+            format!("{bom}include_file \"inc/f.cfg\"{eol}route[TOP] {{{eol}    exit;{eol}}}{eol}");
+        let frag =
+            format!("{bom}route[F] {{{eol}    route(TOP);{eol}    route(NOWHERE);{eol}}}{eol}");
+        std::fs::write(base.join("opensips.cfg"), &root).unwrap();
+        std::fs::write(base.join("inc/f.cfg"), &frag).unwrap();
+        let frag_uri = format!("file://{}", base.join("inc/f.cfg").display());
+        let (mut child, rx, mut stdin) = start(&base, "");
+        did_open(&mut stdin, &frag_uri, &frag);
+        let v = wait_for(
+            &rx,
+            |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
+            "diagnostics",
+        );
+        let items = v["params"]["diagnostics"].as_array().unwrap().clone();
+        let msgs: Vec<&str> = items.iter().filter_map(|d| d["message"].as_str()).collect();
+        assert!(!msgs.iter().any(|m| m.contains("TOP")), "{tag}: {msgs:?}");
+        assert!(
+            msgs.iter().any(|m| m.contains("NOWHERE")),
+            "{tag}: {msgs:?}"
+        );
+        // the reported range must frame the name it names, whatever
+        // the line ending did to the offsets
+        let d = items
+            .iter()
+            .find(|d| d["message"].as_str().is_some_and(|m| m.contains("NOWHERE")))
+            .unwrap();
+        let line = frag
+            .lines()
+            .nth(d["range"]["start"]["line"].as_u64().unwrap() as usize)
+            .unwrap();
+        let s = d["range"]["start"]["character"].as_u64().unwrap() as usize;
+        let e = d["range"]["end"]["character"].as_u64().unwrap() as usize;
+        let slice: String = line.chars().skip(s).take(e - s).collect();
+        assert_eq!(slice, "NOWHERE", "{tag}: the range does not frame the name");
+        let _ = child.kill();
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}
+
+/// What the filesystem can be that a config file is not.
+#[test]
+fn the_filesystem_being_hostile_does_not_take_the_server_down() {
+    let base = std::env::temp_dir().join(format!("frag-fs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(base.join("inc")).unwrap();
+    // the include target is a DIRECTORY that happens to be named .cfg
+    std::fs::create_dir_all(base.join("inc/dir.cfg")).unwrap();
+    // and a symlink pointing at a real fragment
+    std::fs::write(base.join("real.cfg"), "route[S] {\n    exit;\n}\n").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(base.join("real.cfg"), base.join("inc/link.cfg")).unwrap();
+    // and a directory symlink loop for the scan to walk into
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&base, base.join("inc/loop")).unwrap();
+    std::fs::write(base.join("inc/f.cfg"), "route[F] {\n    exit;\n}\n").unwrap();
+    std::fs::write(
+        base.join("opensips.cfg"),
+        "include_file \"inc/dir.cfg\"\ninclude_file \"inc/link.cfg\"\ninclude_file \"inc/f.cfg\"\nroute[TOP] {\n    exit;\n}\n",
+    )
+    .unwrap();
+    let (mut child, rx, mut stdin) = start(&base, "");
+    for name in [
+        "inc/dir.cfg",
+        "inc/link.cfg",
+        "inc/f.cfg",
+        "real.cfg",
+        "inc/loop",
+    ] {
+        let uri = format!("file://{}", base.join(name).display());
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":50,"method":"opensips/analysisRoot",
+                "params":{"uri": uri}}),
+        );
+        // a directory symlink loop must not make the scan run forever
+        let v = wait_for(&rx, |v| v["id"] == 50, "analysisRoot on a hostile path");
+        assert!(
+            v.get("result").is_some() || v.get("error").is_some(),
+            "{name}: {v}"
+        );
+    }
+    // the ordinary fragment among them still resolves
+    let f_uri = format!("file://{}", base.join("inc/f.cfg").display());
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":51,"method":"opensips/analysisRoot",
+            "params":{"uri": f_uri}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 51, "analysisRoot");
+    assert!(
+        v["result"]
+            .as_str()
+            .is_some_and(|s| s.ends_with("opensips.cfg")),
+        "a real fragment beside hostile ones still resolves: {v}"
+    );
+    // and the root vanishing mid-session is survivable
+    std::fs::remove_file(base.join("opensips.cfg")).unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{
+            "changes":[{"uri": format!("file://{}", base.join("opensips.cfg").display()), "type":3}]}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":52,"method":"opensips/analysisRoot",
+            "params":{"uri": f_uri}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| v["id"] == 52,
+        "analysisRoot after the root was deleted",
+    );
+    assert!(v["result"].is_null(), "the root is gone: {v}");
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Metamorphic: the same routes, whole and split, must be analysed
+/// identically.
+///
+/// Not "the shapes match" but "the findings match" — the same set of
+/// messages, for the same text, however it is distributed across
+/// files.  Splitting a configuration is a layout choice and must not
+/// be a semantic one.
+#[test]
+fn splitting_a_configuration_does_not_change_the_findings() {
+    // every block carries a finding of its own: a clean fragment
+    // publishes nothing, and a test that waits for that publish waits
+    // forever
+    let blocks = [
+        "route[A] {\n    route(B);\n    route(MISSING_A);\n}\n",
+        "route[B] {\n    route(C);\n    route(MISSING_B);\n}\n",
+        "route[C] {\n    route(A);\n    route(MISSING_C);\n}\n",
+    ];
+    let tail = "route {\n    route(A);\n}\n";
+
+    let base = std::env::temp_dir().join(format!("frag-meta-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let whole_dir = base.join("whole");
+    let split_dir = base.join("split");
+    std::fs::create_dir_all(&whole_dir).unwrap();
+    std::fs::create_dir_all(split_dir.join("inc")).unwrap();
+    let whole = format!("{}{tail}", blocks.concat());
+    std::fs::write(whole_dir.join("opensips.cfg"), &whole).unwrap();
+    let mut root = String::from("");
+    for i in 0..blocks.len() {
+        root.push_str(&format!("include_file \"inc/b{i}.cfg\"\n"));
+    }
+    root.push_str(tail);
+    std::fs::write(split_dir.join("opensips.cfg"), &root).unwrap();
+    for (i, b) in blocks.iter().enumerate() {
+        std::fs::write(split_dir.join(format!("inc/b{i}.cfg")), b).unwrap();
+    }
+
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "")
+            .env("OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS", "10")
+            .env(
+                "OPENSIPS_LSP_CACHE_DIR",
+                base.join("cache").display().to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "capabilities":{},
+            "initializationOptions":{"opensipsPath":""},
+            "workspaceFolders":[
+                {"uri": format!("file://{}", whole_dir.display()), "name":"w"},
+                {"uri": format!("file://{}", split_dir.display()), "name":"s"}]}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "init");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+
+    let whole_uri = format!("file://{}", whole_dir.join("opensips.cfg").display());
+    did_open(&mut stdin, &whole_uri, &whole);
+    let v = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == whole_uri,
+        "whole-file diagnostics",
+    );
+    let mut from_whole: Vec<String> = v["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|d| d["message"].as_str().map(str::to_string))
+        .collect();
+    from_whole.sort();
+
+    let mut from_split: Vec<String> = Vec::new();
+    for (i, b) in blocks.iter().enumerate() {
+        let uri = format!(
+            "file://{}",
+            split_dir.join(format!("inc/b{i}.cfg")).display()
+        );
+        did_open(&mut stdin, &uri, b);
+        let want = uri.clone();
+        let v = wait_for(
+            &rx,
+            move |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == want,
+            "fragment diagnostics",
+        );
+        from_split.extend(
+            v["params"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(|d| d["message"].as_str().map(str::to_string)),
+        );
+    }
+    from_split.sort();
+    assert!(!from_whole.is_empty(), "the fixture must produce findings");
+    assert_eq!(
+        from_whole, from_split,
+        "the same routes are analysed differently once split across includes"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Lifecycle notifications out of order, malformed params, and random
+/// content — the things an editor and a user actually do.
+#[test]
+fn the_server_survives_a_client_behaving_badly() {
+    let (base, _root_uri, frag_uri) = setup("badclient");
+    let (mut child, rx, mut stdin) = start(&base, "");
+    // close before open, open twice, change a document never opened
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
+            "textDocument":{"uri": frag_uri}}}),
+    );
+    did_open(&mut stdin, &frag_uri, FRAG_TEXT);
+    did_open(&mut stdin, &frag_uri, FRAG_TEXT);
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri": format!("file://{}", base.join("never.cfg").display()),
+                            "version": 2},
+            "contentChanges":[{"text":"route[N] { exit; }\n"}]}}),
+    );
+    // malformed params, and a method that does not exist
+    let mut id = 60;
+    for bad in [
+        serde_json::json!({}),
+        serde_json::json!({"uri": serde_json::Value::Null}),
+        serde_json::json!({"uri": 42}),
+        serde_json::json!({"uri": ["a"]}),
+        serde_json::json!({"nope": "x"}),
+    ] {
+        id += 1;
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
+                "params": bad}),
+        );
+        let want = id;
+        let v = wait_for(
+            &rx,
+            |v| v["id"] == want,
+            "analysisRoot with malformed params",
+        );
+        assert!(v.get("result").is_some() || v.get("error").is_some(), "{v}");
+    }
+    id += 1;
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/notARealMethod",
+            "params":{}}),
+    );
+    let want = id;
+    let v = wait_for(&rx, |v| v["id"] == want, "an unknown method");
+    assert!(
+        v.get("error").is_some(),
+        "an unknown method is refused: {v}"
+    );
+
+    // random content in the buffer, then back to something valid
+    let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+    for round in 0..40 {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        let n = (seed % 200) as usize;
+        let junk: String = (0..n)
+            .map(|k| {
+                let c = ((seed >> (k % 48)) % 0x2f00 + 1) as u32;
+                char::from_u32(c).unwrap_or('?')
+            })
+            .collect();
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+                "textDocument":{"uri": frag_uri, "version": round + 10},
+                "contentChanges":[{"text": junk}]}}),
+        );
+    }
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
+            "textDocument":{"uri": frag_uri, "version": 999},
+            "contentChanges":[{"text": FRAG_TEXT}]}}),
+    );
+    // it must still be answering, and answering correctly
+    id += 1;
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
+            "params":{"uri": frag_uri}}),
+    );
+    let want = id;
+    let v = wait_for(&rx, |v| v["id"] == want, "analysisRoot after the abuse");
+    assert!(
+        v["result"]
+            .as_str()
+            .is_some_and(|s| s.ends_with("opensips.cfg")),
+        "still correct after all of that: {v}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// The same question, asked repeatedly, must give the same answer.
+///
+/// The graph is cached and invalidated from four places; a cache that
+/// is rebuilt subtly differently, or invalidated by a read, shows up
+/// as an answer that drifts rather than as an error.
+#[test]
+fn repeated_questions_do_not_drift() {
+    let (base, root_uri, frag_uri) = setup("stable");
+    let (mut child, rx, mut stdin) = start(&base, "");
+    let mut answers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut id = 80;
+    for _ in 0..20 {
+        id += 1;
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
+                "params":{"uri": frag_uri}}),
+        );
+        let want = id;
+        let v = wait_for(&rx, |v| v["id"] == want, "analysisRoot");
+        answers.insert(v["result"].to_string());
+    }
+    assert_eq!(
+        answers.len(),
+        1,
+        "the answer drifted across 20 asks: {answers:?}"
+    );
+    assert!(answers.iter().next().unwrap().contains("opensips.cfg"));
+
+    // opening and closing documents must not move it either
+    for _ in 0..5 {
+        did_open(&mut stdin, &frag_uri, FRAG_TEXT);
+        did_open(&mut stdin, &root_uri, ROOT_TEXT);
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
+                "textDocument":{"uri": root_uri}}}),
+        );
+    }
+    id += 1;
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
+            "params":{"uri": frag_uri}}),
+    );
+    let want = id;
+    let v = wait_for(
+        &rx,
+        |v| v["id"] == want,
+        "analysisRoot after open/close churn",
+    );
+    assert!(
+        v["result"]
+            .as_str()
+            .is_some_and(|s| s.ends_with("opensips.cfg")),
+        "open/close churn moved the answer: {v}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}

@@ -282,6 +282,14 @@ the include loader) rather than treated as empty — reading it as
 empty is how call hierarchy came to answer "nobody calls this" for a
 route the buffer on screen calls two lines up.
 
+What counts as "a config this server can read" is decided in ONE
+place, because two places is a disagreement: a file over 1 MiB is
+skipped by both the graph and the closure, so a root can never be
+found and then refuse to load, and bytes are decoded leniently, so a
+latin-1 accent in a comment does not erase a configuration and every
+fragment it includes along with it. A config the graph could not read
+is named in the log, not dropped in silence.
+
 The scan behind the graph is bounded at 500 configs and **says so in
 the log** when it stops early. Past that bound a root is simply not
 seen and its fragments stop being recognised — no colours, no
