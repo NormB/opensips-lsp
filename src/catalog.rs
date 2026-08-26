@@ -1123,15 +1123,16 @@ pub fn parse_core_params_md(md: &str) -> Result<Vec<Item>, String> {
         .collect())
 }
 
-/// A grammar token name: upper-case, and it may contain DIGITS —
-/// `TCP_SOURCE_IPV4`. The same omission as `is_spelling` had, one
-/// level up: a token filter that rejects digits drops the token
-/// before its spelling is ever looked at.
+/// A grammar token name. It starts upper-case, and after that it may
+/// hold anything identifier-shaped: `TCP_SOURCE_IPV4` carries digits,
+/// and `SSLv23` carries a lower-case letter. Each narrowing of this
+/// filter dropped tokens before their spelling was ever looked at,
+/// and dropped them in silence — the same failure as `is_spelling`
+/// had, one level up.
 fn is_token(t: &str) -> bool {
     !t.is_empty()
         && t.starts_with(|c: char| c.is_ascii_uppercase())
-        && t.chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// A config-file spelling: lower-case, and it may contain DIGITS —
@@ -1142,7 +1143,7 @@ fn is_spelling(w: &str) -> bool {
     !w.is_empty()
         && w.starts_with(|c: char| c.is_ascii_lowercase())
         && w.chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
 }
 
 /// Every way the lexer lets you spell one token.
@@ -1329,34 +1330,20 @@ pub fn parse_socket_modifiers_c(cfg_y: &str, cfg_lex: &str) -> Vec<String> {
     // is `allow_proxy_protocol`, not `allow`. Take the first
     // lower-case alternative of each group, in order, and join them
     // the way the pattern joins them.
-    static GROUP: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let group = GROUP.get_or_init(|| regex::Regex::new(r"\(([^()]*)\)").unwrap());
-    let lower = |t: &str| -> Option<String> {
-        t.split('"')
-            .find(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
-            .map(str::to_string)
-    };
+    // ONE spelling reader, shared with the reconciliation. Written
+    // twice, the two drifted: this copy still rejected digits and
+    // hyphens after the other was widened, so the same lexer line
+    // read differently depending on which asked.
     let mut spelling: Vec<(String, String)> = Vec::new();
     for line in cfg_lex.split("\n%%").next().unwrap_or(cfg_lex).lines() {
         let mut it = line.splitn(2, [' ', '\t']);
         let (Some(tok), Some(pat)) = (it.next(), it.next()) else {
             continue;
         };
-        if tok.is_empty() || !is_token(tok) {
+        if !is_token(tok) {
             continue;
         }
-        let pat = pat.trim();
-        let parts: Vec<String> = group
-            .captures_iter(pat)
-            .filter_map(|c| lower(&c[1]))
-            .collect();
-        let word = if parts.is_empty() {
-            (!pat.is_empty() && pat.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
-                .then(|| pat.to_string())
-        } else {
-            Some(parts.join("_"))
-        };
-        if let Some(w) = word {
+        if let Some(w) = lexer_spellings(pat).into_iter().next() {
             spelling.push((tok.to_string(), w));
         }
     }
