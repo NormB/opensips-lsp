@@ -972,12 +972,130 @@ pub fn parse_core_routes_md(md: &str) -> Result<Vec<Item>, String> {
 
 /// Parse `docs/manual/Script-CoreParameters.md` (4.x): `### name`
 /// headings, first paragraph = doc.
+/// The raw body of every section at `level`, fenced blocks and all.
+///
+/// `md_sections` summarises: it takes the first paragraph and skips
+/// fenced blocks, which is right for a route type or a control
+/// statement where the summary IS the answer. For a setting the
+/// answer is what to write, and that lives in the example.
+fn md_sections_raw(md: &str, level: usize) -> Result<Vec<(String, String)>, String> {
+    if md.contains('\0') {
+        return Err("input contains NUL bytes".into());
+    }
+    if md.trim().is_empty() {
+        return Err("empty input".into());
+    }
+    let marker = format!("{} ", "#".repeat(level));
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut cur: Option<(String, Vec<&str>)> = None;
+    let mut in_fence = false;
+    for line in md.lines() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+        } else if !in_fence {
+            // a heading only ends a section outside a fenced block:
+            // `### ` inside an example is example text
+            if let Some(h) = line.strip_prefix(&marker) {
+                if let Some((name, body)) = cur.take() {
+                    out.push((name, body.join("\n")));
+                }
+                cur = Some((h.trim().to_string(), Vec::new()));
+                continue;
+            }
+            if line.starts_with('#') {
+                if let Some((name, body)) = cur.take() {
+                    out.push((name, body.join("\n")));
+                }
+                continue;
+            }
+        }
+        if let Some((_, body)) = cur.as_mut() {
+            body.push(line);
+        }
+    }
+    if let Some((name, body)) = cur.take() {
+        out.push((name, body.join("\n")));
+    }
+    Ok(out)
+}
+
+/// A setting's documentation: what it is, what it defaults to, and
+/// what writing it looks like.
+///
+/// `db_default_url` is the case that named this. Its description says
+/// it is "the default DB URL used by modules"; the URL FORMAT — the
+/// only thing a reader is hovering it to find — is in the example
+/// block below that. Keeping the description alone answered the
+/// question nobody asked.
+fn setting_doc(body: &str) -> String {
+    let mut description: Vec<&str> = Vec::new();
+    let mut default: Option<String> = None;
+    let mut example: Vec<&str> = Vec::new();
+    let mut in_fence = false;
+    let mut fence_done = false;
+    for line in body.lines() {
+        if line.trim_start().starts_with("```") {
+            // the FIRST fenced block is the worked example; a section
+            // with several is showing variations, and a hover wants one
+            if in_fence {
+                fence_done = true;
+            }
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            if !fence_done {
+                example.push(line.trim_end());
+            }
+            continue;
+        }
+        let t = line.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("Default value is") {
+            let rest = rest.trim().trim_end_matches('.').trim();
+            if !rest.is_empty() {
+                default = Some(rest.to_string());
+            }
+            continue;
+        }
+        if t.starts_with("Example of usage") {
+            continue;
+        }
+        if default.is_none() && example.is_empty() {
+            description.push(t);
+        }
+    }
+    let mut out = sanitize_doc(&description.join(" "));
+    if let Some(d) = default {
+        out.push_str(&format!("\n\nDefault: {d}."));
+    }
+    let example: Vec<&str> = example
+        .iter()
+        .skip_while(|l| l.trim().is_empty())
+        .copied()
+        .collect();
+    let example = example.join("\n");
+    if !example.trim().is_empty() {
+        out.push_str(&format!("\n\n```opensips\n{}\n```", example.trim_end()));
+    }
+    out
+}
+
+/// Parse `docs/manual/Script-CoreParameters.md` (4.x): `### name`
+/// headings, each carrying what the setting is, what it defaults to,
+/// and what writing it looks like.
 pub fn parse_core_params_md(md: &str) -> Result<Vec<Item>, String> {
-    Ok(md_sections(md, 3)?
+    Ok(md_sections_raw(md, 3)?
         .into_iter()
-        .filter_map(|(heading, doc)| {
+        .filter_map(|(heading, body)| {
             let name = heading.trim();
             if name.is_empty() || name.contains(' ') {
+                return None;
+            }
+            let doc = setting_doc(&body);
+            if doc.trim().is_empty() {
                 return None;
             }
             Some(Item {
