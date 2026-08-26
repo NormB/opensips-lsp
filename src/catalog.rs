@@ -989,10 +989,98 @@ pub fn parse_core_params_md(md: &str) -> Result<Vec<Item>, String> {
         .collect())
 }
 
+/// An `##` section of `Script-CoreVar.md` opening with a `**Naming**:`
+/// line documents a variable KIND — `$var`, `$avp` — rather than one
+/// named variable. The exception is a section that has `###` entries
+/// of its own: there the naming line is the placeholder those entries
+/// share (`## Reference Variables` names `$name`), so the section is a
+/// category and reading it as an entry would invent a `$name` that no
+/// configuration can write.
+fn parse_core_var_kinds(md: &str) -> Vec<Item> {
+    /// Heading, the text of its `**Naming**:` line, its first
+    /// paragraph after that line, and whether `###` entries follow.
+    struct Section {
+        naming: Option<String>,
+        prose: Vec<String>,
+        prose_done: bool,
+        has_entries: bool,
+    }
+    let mut out = Vec::new();
+    let mut cur: Option<Section> = None;
+    let mut in_fence = false;
+    let finish = |cur: &mut Option<Section>, out: &mut Vec<Item>| {
+        let Some(sec) = cur.take() else { return };
+        let (Some(naming), false) = (sec.naming, sec.has_entries) else {
+            return;
+        };
+        let detail = naming.replace('`', "");
+        let Some(rest) = detail.split_once('$').map(|(_, r)| r) else {
+            return;
+        };
+        let var: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect();
+        if var.is_empty() {
+            return;
+        }
+        out.push(Item {
+            name: format!("${var}"),
+            detail: detail.trim().to_string(),
+            doc: sanitize_doc(&sec.prose.join(" ")),
+        });
+    };
+    for line in md.lines() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if line.starts_with("## ") {
+            finish(&mut cur, &mut out);
+            cur = Some(Section {
+                naming: None,
+                prose: Vec::new(),
+                prose_done: false,
+                has_entries: false,
+            });
+            continue;
+        }
+        if line.starts_with("###") {
+            if let Some(sec) = cur.as_mut() {
+                sec.has_entries = true;
+            }
+            continue;
+        }
+        if line.starts_with('#') {
+            finish(&mut cur, &mut out);
+            continue;
+        }
+        let Some(sec) = cur.as_mut() else { continue };
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix("**Naming**:") {
+            // the naming line is the syntax, not the description: the
+            // paragraph after it is what a hover should say
+            sec.naming = Some(rest.trim().to_string());
+        } else if t.is_empty() {
+            if !sec.prose.is_empty() {
+                sec.prose_done = true;
+            }
+        } else if sec.naming.is_some() && !sec.prose_done {
+            sec.prose.push(t.to_string());
+        }
+    }
+    finish(&mut cur, &mut out);
+    out
+}
+
 /// Parse `docs/manual/Script-CoreVar.md` (4.x): `### Description -
-/// $name` headings, first paragraph = doc.
+/// $name` headings, first paragraph = doc, plus the `##` sections
+/// that document a whole variable kind.
 pub fn parse_core_vars_md(md: &str) -> Result<Vec<Item>, String> {
-    Ok(md_sections(md, 3)?
+    let mut out: Vec<Item> = md_sections(md, 3)?
         .into_iter()
         .filter_map(|(heading, doc)| {
             let (desc, var) = heading.rsplit_once(" - $")?;
@@ -1006,7 +1094,12 @@ pub fn parse_core_vars_md(md: &str) -> Result<Vec<Item>, String> {
                 doc,
             })
         })
-        .collect())
+        .collect();
+    // a named `###` entry is the more specific documentation, so it
+    // wins over a kind section spelling the same name
+    out.extend(parse_core_var_kinds(md));
+    dedup_by_name(&mut out);
+    Ok(out)
 }
 
 /// Core-language documentation harvested from `docs/manual/` (4.x).
