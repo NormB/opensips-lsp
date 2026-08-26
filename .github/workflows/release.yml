@@ -8,8 +8,40 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    # The tag is what publishes, and nothing checked that it agrees
+    # with the tree it points at. A tag one minor ahead of the source
+    # would build the OLD version's artefacts, publish them under the
+    # new tag, and repoint `/releases/latest` — which is what
+    # `install.sh` resolves — at a release whose contents are a
+    # version behind its own name.
+    name: Tag matches the tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: The tag, Cargo.toml, package.json and the changelog agree
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          crate=$(python3 - <<'EOF'
+          import re, pathlib
+          text = pathlib.Path("Cargo.toml").read_text()
+          pkg = text.split("[package]", 1)[1].split("\n[", 1)[0]
+          print(re.search(r'^version = "([^"]+)"', pkg, re.M).group(1))
+          EOF
+          )
+          ext=$(python3 -c "import json;print(json.load(open('client/package.json'))['version'])")
+          echo "tag=$tag crate=$crate extension=$ext"
+          [ "$tag" = "$crate" ] || { echo "::error::tag $tag != Cargo.toml $crate"; exit 1; }
+          [ "$tag" = "$ext" ]   || { echo "::error::tag $tag != package.json $ext"; exit 1; }
+          grep -q "^## \[$tag\]" client/CHANGELOG.md || {
+            echo "::error::client/CHANGELOG.md has no '## [$tag]' entry — the marketplace Changes tab would be stale"
+            exit 1
+          }
+
   server:
     name: Server (${{ matrix.arch }})
+    needs: [verify]
     strategy:
       matrix:
         include:

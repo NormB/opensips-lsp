@@ -2,6 +2,48 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.23.0] — 2026-08-26
+
+**The things a configuration is actually written with now hover and
+complete: `$var`, `$avp`, and the log level `xlog` wants.**
+
+- **`$var` and `$avp` are in the catalogue.** The two variables every
+  configuration uses were the two the server did not have. Upstream
+  documents its 119 reference variables as `### <description> -
+  $name` and documents these two as prose sections opening with a
+  `**Naming**:` line — so the harvester, reading only the first form,
+  read past both. A section with a naming line is a variable kind
+  now, unless it has entries of its own beneath it: `## Reference
+  Variables` names `$name`, which is the placeholder those hundred
+  entries share and not something you can write.
+- **Typing `xlog(` offers the log levels, quoted.** `L_ALERT`,
+  `L_CRIT`, `L_ERR`, `L_WARN`, `L_NOTICE`, `L_INFO`, `L_DBG` — read
+  from the `switch` in your own tree's `route.c`, so it is the set
+  your release accepts rather than a list frozen in this extension.
+  The quotes come with it because the grammar wants a string there
+  and `xlog(L_INFO, ...)` is a syntax error; type `xlog("` first and
+  they arrive unquoted instead. A `$` still offers pseudo-variables,
+  which that argument also accepts.
+- **Ctrl+Alt+H turns the hovers and completion off** (Cmd+Alt+H on
+  macOS), and the same keys turn them back on. For reading someone
+  else's configuration, or showing one to a room, when the popups are
+  in the way. It applies at once — no restart — the status bar reads
+  `OpenSIPS hints off` so a quiet editor is not mistaken for a broken
+  one, and diagnostics are left alone. `opensipsLsp.assistance` is
+  the setting behind it.
+
+### Fixed
+
+- **A repeated heading in a manual page no longer becomes a second,
+  unreachable entry.** Every lookup takes the first, so the other sat
+  in completion and could never be hovered.
+- **A heading with nothing under it is no longer offered.** It hovered
+  a header over an empty body, which reads as the server being broken
+  rather than as the page being thin.
+- **A capitalised heading still matches its keyword.** `## If` became
+  a name no hover could ever match, and the keyword vanished with no
+  error anywhere.
+
 ## [0.22.0] — 2026-08-25
 
 **Hover stops repeating the release, and you decide whether it says it
