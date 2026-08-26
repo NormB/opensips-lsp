@@ -231,3 +231,79 @@ fn a_route_type_with_no_rival_meaning_hovers_anywhere() {
         assert!(got.to_lowercase().contains("route type"), "{kind}: {got:?}");
     }
 }
+
+/// Names that are BOTH a core symbol and a module parameter.
+///
+/// A hover fixture that picks one of these tests whichever the site
+/// happens to resolve to, not the one the test names. `log_level` is
+/// the trap: it is a core parameter AND an `acc` modparam, and a
+/// fixture hovering `log_level=2` gets the core entry only because a
+/// bare assignment is a global site. One edit away from silently
+/// testing the module and still passing.
+///
+/// The set is pinned so it cannot grow unnoticed: a new collision
+/// means every fixture using that name needs rechecking.
+#[test]
+fn names_that_are_both_core_and_module_are_known() {
+    let core = &opensips_lsp::catalog::builtin_core().core;
+    let modules = opensips_lsp::catalog::builtin_modules();
+    let core_names: std::collections::BTreeSet<&str> = core
+        .params
+        .iter()
+        .chain(core.functions.iter())
+        .chain(core.pvars.iter())
+        .map(|i| i.name.as_str())
+        .collect();
+    assert!(
+        core_names.len() > 100,
+        "control: {} core names",
+        core_names.len()
+    );
+
+    let mut both: Vec<&str> = modules
+        .modules
+        .iter()
+        .flat_map(|m| m.params.iter())
+        .map(|p| p.name.as_str())
+        .filter(|n| core_names.contains(n))
+        .collect();
+    both.sort();
+    both.dedup();
+
+    assert_eq!(
+        both,
+        vec!["log_level", "prefix", "syslog_name"],
+        "the set of names that are both core and module has changed — every hover \
+         fixture using one of these resolves by SITE, not by the kind the test names"
+    );
+}
+
+/// A fixture that means to hover a core entry must use a name no
+/// module also exports.
+#[test]
+fn the_core_hover_fixtures_avoid_colliding_names() {
+    let core = &opensips_lsp::catalog::builtin_core().core;
+    let modules = opensips_lsp::catalog::builtin_modules();
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/version_in_hints_e2e_test.rs"
+    ))
+    .expect("the fixture file is readable");
+
+    // the symbol the core-hover fixture actually uses
+    assert!(
+        src.contains("advertised_address"),
+        "the core fixture must name the symbol it hovers"
+    );
+    assert!(
+        core.params.iter().any(|p| p.name == "advertised_address"),
+        "and it must really be a core parameter"
+    );
+    assert!(
+        !modules
+            .modules
+            .iter()
+            .any(|m| m.params.iter().any(|p| p.name == "advertised_address")),
+        "and no module may export it, or the fixture proves nothing about which won"
+    );
+}

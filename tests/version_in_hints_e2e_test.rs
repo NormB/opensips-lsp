@@ -18,7 +18,7 @@ use std::process::{Command, Stdio};
 /// initialization options.
 /// Hover over `log_level` in a one-line config.
 fn hover_text(tag: &str, opts: serde_json::Value) -> String {
-    hover_text_at(tag, opts, "log_level=2\n", 0, 3)
+    hover_text_at(tag, opts, "advertised_address=\"1.2.3.4\"\n", 0, 3)
 }
 
 fn hover_text_at(tag: &str, opts: serde_json::Value, body: &str, line: u32, ch: u32) -> String {
@@ -91,7 +91,7 @@ fn by_default_a_hover_does_not_repeat_the_release() {
     // POSITIVE CONTROL: an empty hover would satisfy any "does not
     // contain" assertion below.
     assert!(
-        text.contains("log_level"),
+        text.contains("advertised_address"),
         "the hover must actually document the entry: {text:?}"
     );
     assert!(
@@ -104,7 +104,7 @@ fn by_default_a_hover_does_not_repeat_the_release() {
 fn with_the_setting_on_a_hover_names_the_release_and_the_escape_hatch() {
     let text = hover_text("on", serde_json::json!({"versionInHints": true}));
     assert!(
-        text.contains("log_level"),
+        text.contains("advertised_address"),
         "the hover must still document the entry: {text:?}"
     );
     assert!(
@@ -185,14 +185,14 @@ fn selecting_a_release_leaves_the_core_catalogue_alone() {
     let newest = hover_text_at(
         "core-newest",
         serde_json::json!({"versionInHints": true}),
-        "log_level=2\n",
+        "advertised_address=\"1.2.3.4\"\n",
         0,
         3,
     );
     let older = hover_text_at(
         "core-older",
         serde_json::json!({"versionInHints": true, "opensipsVersion": "3.5.9"}),
-        "log_level=2\n",
+        "advertised_address=\"1.2.3.4\"\n",
         0,
         3,
     );

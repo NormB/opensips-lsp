@@ -68,7 +68,7 @@ module hover is unavailable.
 *Default value is unset. Environment fallback: `OPENSIPS_LSP_SRC`.*
 
 ```json title="Set opensipsSrc parameter"
-{ "opensipsSrc": "/home/user/src/opensips" }
+{ "opensipsSrc": "/opt/src/opensips" }
 ```
 
 #### versionInHints (boolean)
