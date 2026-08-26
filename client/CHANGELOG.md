@@ -2,6 +2,32 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.22.0] — 2026-08-25
+
+**Hover stops repeating the release, and you decide whether it says it
+at all.**
+
+- **The release is no longer under every hover.** OpenSIPS 0.x showed it on
+  the status bar the whole time a config is open, and every warning
+  that turns on the release names it — so repeating it under each
+  hover and completion item was the same fact a third time. It is off
+  by default now.
+- **`versionInHints` turns it back on.** The note is not useless:
+  reading a hover in isolation, or pasting one into a ticket, is
+  exactly when you want the provenance travelling with the text. What
+  was wrong was having it in front of everyone who does not.
+- **The note now says which catalogue it describes, and names the
+  release you are actually using.** It used to be baked into the
+  catalogue as it loaded, so it named whatever the vendored file
+  carried regardless of your choice. Module documentation follows
+  `opensipsVersion`; core documentation is a single vendored artefact at
+  4.0.1 and does not move with that setting, so it says so rather
+  than claiming a release those docs did not come from.
+- **Choosing a release is documented.** `GETTING_STARTED.md` covers
+  the dropdown, `settings.json`, the environment variable `check`
+  reads, and pointing at your own tree for a build that is not
+  shipped.
+
 ## [0.21.0] — 2026-08-25
 
 **The `modparam` check now knows what a module actually exports, and
