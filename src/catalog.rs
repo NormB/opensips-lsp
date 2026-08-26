@@ -1140,9 +1140,21 @@ pub fn parse_socket_modifiers_c(cfg_y: &str, cfg_lex: &str) -> Vec<String> {
     };
     // how the lexer spells each token: the first lower-case
     // alternative, or a bare one-word definition (`TAG   tag`)
+    // A spelling may be written in PARTS:
+    // `("allow"|"ALLOW")[-_]("proxy"|"PROXY")([-_]("protocol"|"PROTOCOL"))?`
+    // is `allow_proxy_protocol`, not `allow`. Take the first
+    // lower-case alternative of each group, in order, and join them
+    // the way the pattern joins them.
+    static GROUP: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let group = GROUP.get_or_init(|| regex::Regex::new(r"\(([^()]*)\)").unwrap());
+    let lower = |t: &str| -> Option<String> {
+        t.split('"')
+            .find(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+            .map(str::to_string)
+    };
     let mut spelling: Vec<(String, String)> = Vec::new();
     for line in cfg_lex.split("\n%%").next().unwrap_or(cfg_lex).lines() {
-        let mut it = line.splitn(2, |c: char| c == ' ' || c == '\t');
+        let mut it = line.splitn(2, [' ', '\t']);
         let (Some(tok), Some(pat)) = (it.next(), it.next()) else {
             continue;
         };
@@ -1150,18 +1162,6 @@ pub fn parse_socket_modifiers_c(cfg_y: &str, cfg_lex: &str) -> Vec<String> {
             continue;
         }
         let pat = pat.trim();
-        // A spelling may be written in PARTS:
-        // `("allow"|"ALLOW")[-_]("proxy"|"PROXY")([-_]("protocol"|"PROTOCOL"))?`
-        // is `allow_proxy_protocol`, not `allow`. Take the first
-        // lower-case alternative of each group, in order, and join
-        // them the way the pattern joins them.
-        static GROUP: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-        let group = GROUP.get_or_init(|| regex::Regex::new(r"\(([^()]*)\)").unwrap());
-        let lower = |t: &str| -> Option<String> {
-            t.split('"')
-                .find(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
-                .map(str::to_string)
-        };
         let parts: Vec<String> = group
             .captures_iter(pat)
             .filter_map(|c| lower(&c[1]))

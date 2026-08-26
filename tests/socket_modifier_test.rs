@@ -156,7 +156,7 @@ fn the_built_in_catalogue_carries_them() {
 #[test]
 fn hovering_a_modifier_on_a_socket_line_answers() {
     let core = &opensips_lsp::catalog::builtin_core().core;
-    let text = "socket=udp:10.0.0.1:5060 use_workers 4\nsocket=tcp:10.0.0.1:5060 reuse_port\n";
+    let text = "socket=udp:192.0.2.1:5060 use_workers 4\nsocket=tcp:192.0.2.1:5060 reuse_port\n";
     for (w, line, col) in [("use_workers", 0u32, 25u32), ("reuse_port", 1, 25)] {
         let got = opensips_lsp::logic::hover_markdown_at(&[], core, text, w, line, col)
             .unwrap_or_else(|| panic!("{w} must hover on a socket line"));
@@ -242,4 +242,58 @@ fn alternatives_within_one_group_are_a_choice_not_a_sequence() {
         vec!["first"],
         "not `first_second_third`"
     );
+}
+
+/// Owed, first. `listen` is the older spelling of the same statement.
+///
+/// 3.x accepts `listen =` and `socket =` with the SAME `socket_def`
+/// production behind both, so a reader on that release writes
+/// `listen` — and a check hard-coded to the newer word answers them
+/// nothing, on every line of their configuration that has a
+/// modifier.
+#[test]
+fn the_older_spelling_of_the_statement_works_too() {
+    let core = &opensips_lsp::catalog::builtin_core().core;
+    let text = "listen=udp:192.0.2.1:5060 use_workers 4\n";
+    let got = opensips_lsp::logic::hover_markdown_at(&[], core, text, "use_workers", 0, 26)
+        .expect("a modifier on a `listen` line must hover");
+    assert!(got.contains("use_workers"), "{got:?}");
+
+    let offered =
+        opensips_lsp::logic::completions_with_core(&[], core, text, "listen=udp:192.0.2.1:5060 ");
+    let labels: Vec<&str> = offered.iter().map(|c| c.label.as_str()).collect();
+    assert!(labels.contains(&"reuse_port"), "{labels:?}");
+}
+
+/// Owed, second. Both spellings are the same statement in the
+/// grammar, and the pinned trees are where that is true or not.
+#[test]
+fn both_spellings_take_the_same_production_in_the_pinned_trees() {
+    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let y = std::fs::read_to_string(tree.join("cfg.y")).expect("cfg.y");
+    // POSITIVE CONTROL: the newer spelling is definitely there
+    assert!(
+        y.contains("SOCKET EQUAL socket_def"),
+        "the grammar no longer spells it `socket` — this whole feature moved"
+    );
+    // 4.x dropped `listen`; 3.x has both. Either way, any spelling the
+    // grammar routes through `socket_def` must be one the server
+    // recognises, or that release's users get nothing.
+    for kw in ["SOCKET", "LISTEN"] {
+        if y.contains(&format!("{kw} EQUAL socket_def")) {
+            let word = kw.to_ascii_lowercase();
+            assert!(
+                opensips_lsp::logic::completions_with_core(
+                    &[],
+                    &opensips_lsp::catalog::builtin_core().core,
+                    "x\n",
+                    &format!("{word}=udp:192.0.2.1:5060 "),
+                )
+                .iter()
+                .any(|c| c.label == "anycast"),
+                "the grammar routes `{word} =` through socket_def and the server \
+                 offers nothing there"
+            );
+        }
+    }
 }

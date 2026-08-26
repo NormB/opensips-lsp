@@ -123,12 +123,7 @@ fn complete_files(
     }
     // the tail of a `socket =` line takes modifiers, and nothing else
     // in the grammar does
-    if line_prefix
-        .trim_start()
-        .strip_prefix("socket")
-        .is_some_and(|r| r.trim_start().starts_with('='))
-        && !core.socket_modifiers.is_empty()
-    {
+    if opens_a_socket_statement(line_prefix) && !core.socket_modifiers.is_empty() {
         return core
             .socket_modifiers
             .iter()
@@ -1758,17 +1753,26 @@ fn dedup_completions(items: Vec<Comp>) -> Vec<Comp> {
     out.into_iter().flatten().collect()
 }
 
-/// Whether `line` of `doc` is a `socket =` assignment — the only
-/// statement in the grammar that takes socket modifiers.
+/// The statements that take socket modifiers. `listen` is the older
+/// spelling of the same thing — 3.x accepts both, with the same
+/// `socket_def` production behind them — and a reader on that release
+/// writes `listen`.
+const SOCKET_STATEMENTS: &[&str] = &["socket", "listen"];
+
+/// Whether `text` begins a statement that takes socket modifiers.
+fn opens_a_socket_statement(text: &str) -> bool {
+    let t = text.trim_start();
+    SOCKET_STATEMENTS.iter().any(|kw| {
+        t.strip_prefix(kw)
+            .is_some_and(|r| r.trim_start().starts_with('='))
+    })
+}
+
+/// Whether `line` of `doc` is such a statement.
 fn on_a_socket_line(doc: &str, line: u32) -> bool {
     doc.lines()
         .nth(line as usize)
-        .map(|l| {
-            let t = l.trim_start();
-            t.strip_prefix("socket")
-                .is_some_and(|r| r.trim_start().starts_with('='))
-        })
-        .unwrap_or(false)
+        .is_some_and(opens_a_socket_statement)
 }
 
 /// The call the cursor sits in: the function named before the open
