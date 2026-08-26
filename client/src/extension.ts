@@ -24,7 +24,20 @@ function refreshCatalogueStatus(): void {
     }
     const active = vscode.window.activeTextEditor;
     const relevant = active?.document?.languageId === OPENSIPS_LANGUAGE;
-    if (relevant && catalogueText) {
+    if (!relevant) {
+        catalogueStatus.hide();
+        return;
+    }
+    // a silenced editor looks like a broken one, so say so
+    const on = vscode.workspace
+        .getConfiguration('opensipsLsp')
+        .get<boolean>('assistance', true);
+    if (!on) {
+        catalogueStatus.text = '$(circle-slash) OpenSIPS hints off';
+        catalogueStatus.show();
+        return;
+    }
+    if (catalogueText) {
         catalogueStatus.text = `$(book) ${catalogueText}`;
         catalogueStatus.show();
     } else {
@@ -169,6 +182,25 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(() => refreshCatalogueStatus()),
     );
+    // one key turns the popups off and the same key turns them back
+    // on; written to the workspace when there is one, so it does not
+    // silently change every other project the reader opens
+    context.subscriptions.push(
+        vscode.commands.registerCommand('opensipsLsp.toggleAssistance', async () => {
+            const cfg = vscode.workspace.getConfiguration('opensipsLsp');
+            const target = vscode.workspace.workspaceFolders?.length
+                ? vscode.ConfigurationTarget.Workspace
+                : vscode.ConfigurationTarget.Global;
+            await cfg.update('assistance', !cfg.get<boolean>('assistance', true), target);
+        }),
+    );
+    context.subscriptions.push(
+        vscode.workspace.onDidChangeConfiguration((e) => {
+            if (e.affectsConfiguration('opensipsLsp.assistance')) {
+                refreshCatalogueStatus();
+            }
+        }),
+    );
     void client.start().then(() => {
         // the server names its catalogue once it is settled, and again
         // whenever it changes
@@ -221,6 +253,7 @@ export function activate(context: vscode.ExtensionContext) {
                     analyzerDiagnostics: cfg.get<boolean>('diagnostics.analyzer', true),
                     codeLensReferences: cfg.get<boolean>('codeLens.references', true),
                     inlayHintParameterNames: cfg.get<boolean>('inlayHints.parameterNames', true),
+                    assistance: cfg.get<boolean>('assistance', true),
                 },
             });
         }),

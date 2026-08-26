@@ -141,6 +141,11 @@
           "type": "boolean",
           "default": false,
           "description": "Repeat the OpenSIPS release under every hover and completion item. Off by default: the status bar shows it continuously and every warning names it."
+        },
+        "opensipsLsp.assistance": {
+          "type": "boolean",
+          "default": true,
+          "description": "Answer hovers and completion. Turn off to read a configuration without popups; diagnostics are unaffected and have their own switch. Bound to ctrl+alt+h (cmd+alt+h on macOS) and takes effect immediately."
         }
       }
     },
@@ -148,6 +153,20 @@
       {
         "language": "opensips-cfg",
         "path": "./snippets/opensips.code-snippets"
+      }
+    ],
+    "commands": [
+      {
+        "command": "opensipsLsp.toggleAssistance",
+        "title": "OpenSIPS: Toggle Hovers and Completion"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "opensipsLsp.toggleAssistance",
+        "key": "ctrl+alt+h",
+        "mac": "cmd+alt+h",
+        "when": "editorTextFocus && editorLangId == opensips-cfg"
       }
     ]
   },

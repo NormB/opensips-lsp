@@ -61,6 +61,11 @@ pub struct Backend {
     /// the status bar says it continuously and every warning that
     /// turns on the release names it.
     version_in_hints: std::sync::RwLock<bool>,
+    /// Hovers and completion answer at all. A reader walking someone
+    /// else's configuration turns the popups off with one key and
+    /// back on with the same one; it is pushed live, because a
+    /// setting that needs a restart is a pause and not a toggle.
+    assistance: std::sync::RwLock<bool>,
     core: std::sync::RwLock<catalog::CoreDocs>,
     src: std::sync::RwLock<Option<String>>,
     opensips_bin: std::sync::RwLock<Option<String>>,
@@ -120,6 +125,7 @@ impl Backend {
             )),
             wanted_version: std::sync::RwLock::new(None),
             version_in_hints: std::sync::RwLock::new(false),
+            assistance: std::sync::RwLock::new(true),
             core: std::sync::RwLock::new(catalog::CoreDocs::default()),
             src: std::sync::RwLock::new(None),
             opensips_bin: std::sync::RwLock::new(None),
@@ -344,6 +350,13 @@ impl Backend {
         }
         if let Some(b) = opts.get("codeLensReferences").and_then(|v| v.as_bool()) {
             *self.code_lens_refs.write().unwrap() = b;
+        }
+        // absent means unchanged: a didChangeConfiguration payload that
+        // omits it must not silently turn assistance back on
+        if let Some(b) = opts.get("assistance").and_then(|v| v.as_bool()) {
+            *self.assistance.write().unwrap() = b;
+        } else if let Ok(v) = std::env::var("OPENSIPS_LSP_ASSISTANCE") {
+            *self.assistance.write().unwrap() = !(v == "0" || v.eq_ignore_ascii_case("false"));
         }
         if let Some(n) = opts.get("maxDiagnostics").and_then(|v| v.as_u64()) {
             *self.max_diagnostics.write().unwrap() = (n as usize).max(1);
@@ -1825,6 +1838,9 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, p: CompletionParams) -> Result<Option<CompletionResponse>> {
+        if !*self.assistance.read().unwrap() {
+            return Ok(None);
+        }
         let uri = p.text_document_position.text_document.uri;
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
@@ -1897,6 +1913,9 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, p: HoverParams) -> Result<Option<Hover>> {
+        if !*self.assistance.read().unwrap() {
+            return Ok(None);
+        }
         let uri = p.text_document_position_params.text_document.uri;
         let pos = p.text_document_position_params.position;
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {

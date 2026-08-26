@@ -46,6 +46,15 @@ Function completions insert **snippets** — the cursor lands between
 the parentheses (`t_relay(│)`) — disable with
 `opensipsLsp.completion.snippets`.
 
+#### Turning the popups off
+
+<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd>
+(<kbd>Cmd</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd> on macOS) stops hovers and
+completion; the same keys bring them back. The status bar reads
+`OpenSIPS hints off` meanwhile. It applies at once — no restart — and
+leaves diagnostics alone, which have their own switch. The setting
+behind it is `opensipsLsp.assistance`.
+
 #### Signature help
 
 Type `(` or `,` inside a call and the function's signature pops up
@@ -509,6 +518,7 @@ clients that can't pass options.
 | `opensipsLsp.opensipsSrc` | `opensipsSrc` | `OPENSIPS_LSP_SRC` | *(unset)* | Source tree for completion/hover docs. |
 | `opensipsLsp.opensipsVersion` | `opensipsVersion` | `OPENSIPS_LSP_VERSION` | *(newest)* | Built-in release to check `modparam` names against. Ignored when `opensipsSrc` is set. |
 | `opensipsLsp.versionInHints` | `versionInHints` | `OPENSIPS_LSP_VERSION_IN_HINTS` | `false` | Repeat the release under every hover and completion item. |
+| `opensipsLsp.assistance` | `assistance` | `OPENSIPS_LSP_ASSISTANCE` | `true` | Answer hovers and completion. Toggle with <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>H</kbd>; diagnostics are unaffected. |
 | `opensipsLsp.diagnostics.enable` | *(maps to empty `opensipsPath`)* | — | `true` | Toggle diagnostics without losing the configured path. |
 | `opensipsLsp.diagnostics.maxProblems` | `maxDiagnostics` | — | `100` | Bound on published diagnostics per file. |
 | `opensipsLsp.diagnostics.analyzer` | `analyzerDiagnostics` | — | `true` | Fast analyzer warnings between saves (undefined `route()` targets, duplicate definitions, undocumented modparams, inert `#!` directives). |
