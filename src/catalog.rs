@@ -811,7 +811,11 @@ pub fn parse_core_functions_md(md: &str) -> Result<Vec<Item>, String> {
                 doc,
             })
         })
-        .collect())
+        .collect::<Vec<_>>())
+    .map(|mut v: Vec<Item>| {
+        dedup_by_name(&mut v);
+        v
+    })
 }
 
 /// Parse `docs/manual/Script-Statements.md` (4.x): `## name`
@@ -840,22 +844,25 @@ pub fn parse_core_statements_md(md: &str) -> Result<Vec<Item>, String> {
         .into_iter()
         .filter_map(|(heading, doc)| {
             let heading = heading.trim();
-            let name = HEADING_IS_PROSE
-                .iter()
-                .find(|(h, _)| *h == heading)
-                .map(|(_, kw)| *kw)
-                .unwrap_or(heading);
-            if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            if doc.trim().is_empty() {
                 return None;
             }
+            let name = match HEADING_IS_PROSE
+                .iter()
+                .find(|(h, _)| h.eq_ignore_ascii_case(heading))
+            {
+                Some((_, kw)) => (*kw).to_string(),
+                None => heading_keyword(heading, &doc)?,
+            };
             Some(Item {
-                name: name.to_string(),
+                name,
                 detail: "control statement".to_string(),
                 doc,
             })
         })
         .collect();
 
+    dedup_by_name(&mut out);
     for (alias, parent) in EXPLAINED_UNDER {
         let Some(owner) = out.iter().find(|s| &s.name == parent) else {
             continue;
@@ -868,6 +875,45 @@ pub fn parse_core_statements_md(md: &str) -> Result<Vec<Item>, String> {
         });
     }
     Ok(out)
+}
+
+/// Fold a `## heading` into the keyword it names, or `None`.
+///
+/// Two things a straight read gets wrong, both one line away from
+/// being true of these pages.
+///
+/// A heading may be capitalised — `## If` — and a name differing by
+/// case never matches a hover, so the keyword silently disappears
+/// while the parser reports success. Keywords here are lower case, so
+/// the heading is folded.
+///
+/// A section may carry no prose at all. An entry with empty text
+/// hovers as a header with nothing under it, which reads as the
+/// server being broken rather than the page being thin. It is not
+/// documentation, so it is not offered.
+fn heading_keyword(heading: &str, doc: &str) -> Option<String> {
+    if doc.trim().is_empty() {
+        return None;
+    }
+    let name = heading.trim().to_ascii_lowercase();
+    (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+        .then_some(name)
+}
+
+/// Keep the first entry of each name.
+///
+/// A page with two `## if` sections yields two entries. Every lookup
+/// is a `find`, so the second is dead weight — except in completion,
+/// which offers both.
+fn dedup_by_name(items: &mut Vec<Item>) {
+    let mut seen: Vec<String> = Vec::new();
+    items.retain(|i| {
+        if seen.contains(&i.name) {
+            return false;
+        }
+        seen.push(i.name.clone());
+        true
+    });
 }
 
 /// Parse `docs/manual/Script-Async.md` (4.x): the two statements it
@@ -909,20 +955,19 @@ pub fn parse_core_async_md(md: &str) -> Result<Vec<Item>, String> {
 /// with no argument list, so anything parenthesised is prose rather
 /// than a route type.
 pub fn parse_core_routes_md(md: &str) -> Result<Vec<Item>, String> {
-    Ok(md_sections(md, 2)?
+    let mut out: Vec<Item> = md_sections(md, 2)?
         .into_iter()
         .filter_map(|(heading, doc)| {
-            let name = heading.trim();
-            if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-                return None;
-            }
+            let name = heading_keyword(&heading, &doc)?;
             Some(Item {
-                name: name.to_string(),
+                name,
                 detail: "route type".to_string(),
                 doc,
             })
         })
-        .collect())
+        .collect();
+    dedup_by_name(&mut out);
+    Ok(out)
 }
 
 /// Parse `docs/manual/Script-CoreParameters.md` (4.x): `### name`
