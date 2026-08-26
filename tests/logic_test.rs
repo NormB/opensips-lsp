@@ -138,6 +138,11 @@ fn core() -> opensips_lsp::catalog::CoreDocs {
             detail: "route type".into(),
             doc: "Runs once at startup.".into(),
         }],
+        socket_modifiers: vec![Item {
+            name: "use_workers".into(),
+            detail: "socket modifier — `use_workers n`".into(),
+            doc: "Workers for this socket only.".into(),
+        }],
         log_levels: vec!["L_INFO".into(), "L_DBG".into()],
     }
 }

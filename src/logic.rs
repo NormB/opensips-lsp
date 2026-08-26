@@ -121,6 +121,25 @@ fn complete_files(
             })
             .collect();
     }
+    // the tail of a `socket =` line takes modifiers, and nothing else
+    // in the grammar does
+    if line_prefix
+        .trim_start()
+        .strip_prefix("socket")
+        .is_some_and(|r| r.trim_start().starts_with('='))
+        && !core.socket_modifiers.is_empty()
+    {
+        return core
+            .socket_modifiers
+            .iter()
+            .map(|m| Comp {
+                label: m.name.clone(),
+                detail: m.detail.clone(),
+                doc: m.doc.clone(),
+                kind: CompKind::Keyword,
+            })
+            .collect();
+    }
     // an argument whose value is one of a fixed set the C parser knows.
     // After the `$` branch on purpose: that same parser takes a
     // pseudo-variable as the level (`s.s[0]==PV_MARKER`), so both are
@@ -1739,6 +1758,19 @@ fn dedup_completions(items: Vec<Comp>) -> Vec<Comp> {
     out.into_iter().flatten().collect()
 }
 
+/// Whether `line` of `doc` is a `socket =` assignment — the only
+/// statement in the grammar that takes socket modifiers.
+fn on_a_socket_line(doc: &str, line: u32) -> bool {
+    doc.lines()
+        .nth(line as usize)
+        .map(|l| {
+            let t = l.trim_start();
+            t.strip_prefix("socket")
+                .is_some_and(|r| r.trim_start().starts_with('='))
+        })
+        .unwrap_or(false)
+}
+
 /// The call the cursor sits in: the function named before the open
 /// parenthesis, which argument the cursor is in, and whether it is
 /// inside a string literal.
@@ -1974,6 +2006,16 @@ pub fn hover_markdown_at(
     line: u32,
     col: u32,
 ) -> Option<String> {
+    // A socket modifier: `socket = udp:1.2.3.4:5060 use_workers 4`.
+    // Scoped to the line, because only `socket =` takes them and the
+    // words themselves — `as`, `tag`, `frag` — are ordinary. A hover
+    // that fires on every `tag` in a configuration is worse than one
+    // that fires on none.
+    if on_a_socket_line(doc, line)
+        && let Some(m) = core.socket_modifiers.iter().find(|m| m.name == word)
+    {
+        return Some(format!("**{}** — {}\n\n{}", m.name, m.detail, m.doc));
+    }
     // A control statement. These are keywords rather than calls, so
     // nothing else in the lookup below would ever answer for them:
     // they completed with `detail: "keyword"` and no text at all, and

@@ -382,7 +382,7 @@
       {
         "name": "debug_mode",
         "detail": "core parameter",
-        "doc": "Enabling **debug_mode** is a fast way to debug **OpenSIPS**. This option automatically forces: * foreground mode (do not detach from the console) * logging level 4 (debug) * logging to standard error * core dumping * UDP worker processes to 2, if UDP is enabled * TCP worker processes to 2, or the maximum configured value if lower than 2, if TCP is enabled\n\nDefault: `false` (disabled).\n\n```opensips\n    debug_mode = true\n```"
+        "doc": "Enabling **debug_mode** is a fast way to debug **OpenSIPS**. This option automatically forces:\n* foreground mode (do not detach from the console)\n* logging level 4 (debug)\n* logging to standard error\n* core dumping\n* UDP worker processes to 2, if UDP is enabled\n* TCP worker processes to 2, or the maximum configured value if lower than 2, if TCP is enabled\n\nDefault: `false` (disabled).\n\n```opensips\n    debug_mode = true\n```"
       },
       {
         "name": "db_version_table",
@@ -527,7 +527,7 @@
       {
         "name": "log_stdout",
         "detail": "core parameter",
-        "doc": "Controls whether OpenSIPS preserves standard output. This may be useful when trying to extract logs from third-party libraries. * `false` (default): drop all standard output logs. * `true`: let all standard output logs pass through.\n\nDefault: `false`.\n\n```opensips\n    log_stdout = true\n```"
+        "doc": "Controls whether OpenSIPS preserves standard output. This may be useful when trying to extract logs from third-party libraries.\n* `false` (default): drop all standard output logs.\n* `true`: let all standard output logs pass through.\n\nDefault: `false`.\n\n```opensips\n    log_stdout = true\n```"
       },
       {
         "name": "log_prefix",
@@ -657,7 +657,7 @@
       {
         "name": "socket",
         "detail": "core parameter",
-        "doc": "Sets the network addresses/sockets the OpenSIPS server should listen on. Its syntax is `protocol:address[:port|portrange]`, where: * **protocol**: one of the transport modules loaded in the configuration file, such as `udp`, `tcp`, `tls`, `bin` or `hep`. * **address**: an IP address, hostname, network interface name or the `*` wildcard, which makes OpenSIPS listen on all possible interfaces for that protocol. * **port**: optional listening socket port; if absent, the default port exported by the transport module is used. * **portrange**: optional set of ports that should listen for the same IP address. This parameter can be set multiple times in the same configuration file, with the server listening on all specified sockets. The `socket` definition may accept several optional parameters: * `as ip[:port]`: configure an advertised IP and port only for this interface. Example: `as 11.24.14.14:5060`. * `use_workers n`: set a different number of workers for this socket only, for UDP, SCTP and HEP_UDP interfaces. This overrides the global `udp_workers` parameter. * `anycast`: mark the socket as an anycast IP. * `use_auto_scaling_profile PROFILE`: enforce an auto-scaling profile for this UDP socket. This option is only available for UDP sockets, and the per-socket profile overrides the global UDP auto-scaling profile. * `tag ID`: set a non-SIP name/tag for the socket, used when replicating socket identity across an OpenSIPS cluster. * `frag`: do not use PMTU discovery to determine whether fragmentation should be done; always allow fragmentation. * `reuse_port`: for TCP-based sockets only, allow outgoing TCP connections to reuse the listening port as the source port instead of using an ephemeral port. * `tos n`: optional TOS value to use when sending SIP traffic through this interface. This overrides the global [tos](#tos) core parameter. * `accept_subdomain`: also match subdomains of this SIP domain, when the socket is defined as an FQDN. * `allow_proxy_protocol`: allow receiving Proxy Protocol information. * `send_proxy_protocol`: provide Proxy Protocol information on outbound UDP messages/connections. * `proxy_protocol`: both allow receiving Proxy Protocol information and provide it on outbound messages. These options only affect the sockets they are configured for; if they are not defined for a given socket, the global values are used instead.\n\n```opensips\n    socket = udp:*\n    socket = udp:eth1\n    socket = tcp:eth1:5062\n    socket = tls:localhost:5061\n    socket = hep_udp:10.10.10.10:5064\n    socket = ws:127.0.0.1:5060 use_workers 5\n    socket = sctp:127.0.0.1:5060 as 99.88.44.33:5060 use_workers 3\n    socket = udp:10.10.10.10:5060 anycast\n    socket = udp:10.10.10.10:5060 use_workers 4 use_auto_scaling_profile PROFILE_SIP\n```"
+        "doc": "Sets the network addresses/sockets the OpenSIPS server should listen on. Its syntax is `protocol:address[:port|portrange]`, where:\n* **protocol**: one of the transport modules loaded in the configuration file, such as `udp`, `tcp`, `tls`, `bin` or `hep`.\n* **address**: an IP address, hostname, network interface name or the `*` wildcard, which makes OpenSIPS listen on all possible interfaces for that protocol.\n* **port**: optional listening socket port; if absent, the default port exported by the transport module is used.\n* **portrange**: optional set of ports that should listen for the same IP address. This parameter can be set multiple times in the same configuration file, with the server listening on all specified sockets. The `socket` definition may accept several optional parameters:\n* `as ip[:port]`: configure an advertised IP and port only for this interface. Example: `as 11.24.14.14:5060`.\n* `use_workers n`: set a different number of workers for this socket only, for UDP, SCTP and HEP_UDP interfaces. This overrides the global `udp_workers` parameter.\n* `anycast`: mark the socket as an anycast IP.\n* `use_auto_scaling_profile PROFILE`: enforce an auto-scaling profile for this UDP socket. This option is only available for UDP sockets, and the per-socket profile overrides the global UDP auto-scaling profile.\n* `tag ID`: set a non-SIP name/tag for the socket, used when replicating socket identity across an OpenSIPS cluster.\n* `frag`: do not use PMTU discovery to determine whether fragmentation should be done; always allow fragmentation.\n* `reuse_port`: for TCP-based sockets only, allow outgoing TCP connections to reuse the listening port as the source port instead of using an ephemeral port.\n* `tos n`: optional TOS value to use when sending SIP traffic through this interface. This overrides the global [tos](#tos) core parameter.\n* `accept_subdomain`: also match subdomains of this SIP domain, when the socket is defined as an FQDN.\n* `allow_proxy_protocol`: allow receiving Proxy Protocol information.\n* `send_proxy_protocol`: provide Proxy Protocol information on outbound UDP messages/connections.\n* `proxy_protocol`: both allow receiving Proxy Protocol information and provide it on outbound messages. These options only affect the sockets they are configured for; if they are not defined for a given socket, the global values are used instead.\n\n```opensips\n    socket = udp:*\n    socket = udp:eth1\n    socket = tcp:eth1:5062\n    socket = tls:localhost:5061\n    socket = hep_udp:10.10.10.10:5064\n    socket = ws:127.0.0.1:5060 use_workers 5\n    socket = sctp:127.0.0.1:5060 as 99.88.44.33:5060 use_workers 3\n    socket = udp:10.10.10.10:5060 anycast\n    socket = udp:10.10.10.10:5060 use_workers 4 use_auto_scaling_profile PROFILE_SIP\n```"
       },
       {
         "name": "stderror_enabled",
@@ -677,7 +677,7 @@
       {
         "name": "stderror_log_format",
         "detail": "core parameter",
-        "doc": "Format of the log messages printed to standard error. Possible values are: * `plain_text`: standard plain-text log message. * `json`: basic JSON document. * `json_cee`: JSON document following the [CEE (Common Event Expression)](https://cee.mitre.org/language/1.0-beta1/core-profile.html) schema.\n\nDefault: `plain_text`.\n\n```opensips\n    stderror_log_format = \"json\"\n```"
+        "doc": "Format of the log messages printed to standard error. Possible values are:\n* `plain_text`: standard plain-text log message.\n* `json`: basic JSON document.\n* `json_cee`: JSON document following the [CEE (Common Event Expression)](https://cee.mitre.org/language/1.0-beta1/core-profile.html) schema.\n\nDefault: `plain_text`.\n\n```opensips\n    stderror_log_format = \"json\"\n```"
       },
       {
         "name": "syslog_facility",
@@ -692,7 +692,7 @@
       {
         "name": "syslog_log_format",
         "detail": "core parameter",
-        "doc": "Format of the log messages sent to syslog. Possible values are: * `plain_text`: standard plain-text log message. * `json`: basic JSON document. * `json_cee`: JSON document following the [CEE (Common Event Expression)](https://cee.mitre.org/language/1.0-beta1/core-profile.html) schema.\n\nDefault: `plain_text`.\n\n```opensips\n    syslog_log_format = \"json\"\n```"
+        "doc": "Format of the log messages sent to syslog. Possible values are:\n* `plain_text`: standard plain-text log message.\n* `json`: basic JSON document.\n* `json_cee`: JSON document following the [CEE (Common Event Expression)](https://cee.mitre.org/language/1.0-beta1/core-profile.html) schema.\n\nDefault: `plain_text`.\n\n```opensips\n    syslog_log_format = \"json\"\n```"
       },
       {
         "name": "syslog_name",
@@ -1519,6 +1519,68 @@
         "name": "event_route",
         "detail": "route type",
         "doc": "The **event_route** is used by the OpenSIPS Event Interface to execute script code when an event is triggered. The name of the route is the event that has to be handled by that route. The route itself is executed asynchronously with regards to the trigger moment."
+      }
+    ],
+    "socket_modifiers": [
+      {
+        "name": "anycast",
+        "detail": "socket modifier — `anycast`",
+        "doc": "mark the socket as an anycast IP."
+      },
+      {
+        "name": "frag",
+        "detail": "socket modifier — `frag`",
+        "doc": "do not use PMTU discovery to determine whether fragmentation should be done; always allow fragmentation."
+      },
+      {
+        "name": "reuse_port",
+        "detail": "socket modifier — `reuse_port`",
+        "doc": "for TCP-based sockets only, allow outgoing TCP connections to reuse the listening port as the source port instead of using an ephemeral port."
+      },
+      {
+        "name": "accept_subdomain",
+        "detail": "socket modifier — `accept_subdomain`",
+        "doc": "also match subdomains of this SIP domain, when the socket is defined as an FQDN."
+      },
+      {
+        "name": "allow_proxy_protocol",
+        "detail": "socket modifier — `allow_proxy_protocol`",
+        "doc": "allow receiving Proxy Protocol information."
+      },
+      {
+        "name": "send_proxy_protocol",
+        "detail": "socket modifier — `send_proxy_protocol`",
+        "doc": "provide Proxy Protocol information on outbound UDP messages/connections."
+      },
+      {
+        "name": "proxy_protocol",
+        "detail": "socket modifier — `proxy_protocol`",
+        "doc": "both allow receiving Proxy Protocol information and provide it on outbound messages."
+      },
+      {
+        "name": "use_workers",
+        "detail": "socket modifier — `use_workers n`",
+        "doc": "set a different number of workers for this socket only, for UDP, SCTP and HEP_UDP interfaces. This overrides the global `udp_workers` parameter."
+      },
+      {
+        "name": "tos",
+        "detail": "socket modifier — `tos n`",
+        "doc": "optional TOS value to use when sending SIP traffic through this interface. This overrides the global [tos](#tos) core parameter."
+      },
+      {
+        "name": "as",
+        "detail": "socket modifier — `as ip[:port]`",
+        "doc": "configure an advertised IP and port only for this interface. Example: `as 11.24.14.14:5060`."
+      },
+      {
+        "name": "tag",
+        "detail": "socket modifier — `tag ID`",
+        "doc": "set a non-SIP name/tag for the socket, used when replicating socket identity across an OpenSIPS cluster."
+      },
+      {
+        "name": "use_auto_scaling_profile",
+        "detail": "socket modifier — `use_auto_scaling_profile PROFILE`",
+        "doc": "enforce an auto-scaling profile for this UDP socket. This option is only available for UDP sockets, and the per-socket profile overrides the global UDP auto-scaling profile."
       }
     ],
     "log_levels": [

@@ -35,6 +35,7 @@ source tree (result cached per tree):
 | letters in a route | exported functions of **loaded** modules, core functions, core parameters, route names, keywords |
 | `route(` | route names (this file and its includes) |
 | `$` | pseudo-variables with descriptions (the typed `$word` is replaced, never doubled) |
+| `socket=udp:1.2.3.4:5060 ` | the twelve modifiers a socket line takes — `use_workers n`, `reuse_port`, `anycast`, `as ip[:port]`, `tag ID` and the rest. Membership comes from the grammar's own `socket_def_param` production, so it is what your release accepts; the manual supplies the descriptions |
 | `xlog(` | the log levels, quoted — `"L_INFO"`, because the grammar wants a string there. Type `xlog("` and they come unquoted instead. The set is read from the `switch` in the tree's `route.c`, so it is the set *your* release accepts |
 
 Duplicate labels are collapsed, keeping the most informative item.
@@ -62,6 +63,12 @@ with the active parameter highlighted — module exports first, then
 core functions. Commas inside strings don't advance the parameter.
 
 #### Hover, go to definition, document symbols
+
+Hovering a core parameter shows what it is, what it defaults to, and
+a worked example — the example is where the format lives, which is
+what `db_default_url` is hovered for. On a `socket =` line the
+modifiers after the address hover too; those words are ordinary
+elsewhere, so they answer only there.
 
 Hover any function/parameter/module/`$variable` for its
 documentation; **Ctrl+Click** a `route(name)` reference to jump to

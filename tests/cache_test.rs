@@ -32,6 +32,7 @@ fn sample() -> (Vec<ModuleDoc>, CoreDocs) {
             pvars: vec![],
             statements: vec![],
             routes: vec![],
+            socket_modifiers: vec![],
             log_levels: vec![],
         },
     )

@@ -252,3 +252,48 @@ fn a_comment_at_column_zero_inside_an_example_does_not_end_the_section() {
         it.doc
     );
 }
+
+/// A markdown list must survive as a list.
+///
+/// `socket` documents its twelve optional modifiers as a bullet per
+/// modifier. Joining the description with spaces turns that into one
+/// unbroken paragraph — twelve settings run together in a popup,
+/// which is worse than not showing them.
+#[test]
+fn a_bullet_list_keeps_its_line_breaks() {
+    const LIST: &str = r#"### socket
+
+Sets the sockets to listen on.
+
+The definition may accept several optional parameters:
+* `use_workers n`: workers for this socket only.
+* `reuse_port`: reuse the listening port as the source port.
+
+Example of usage:
+```opensips
+
+    socket = udp:1.2.3.4:5060
+
+```
+"#;
+    let got = parse_core_params_md(LIST).expect("parses");
+    let it = param(&got, "socket");
+    assert!(
+        it.doc.contains("\n* `use_workers n`"),
+        "each bullet needs its own line or markdown renders one paragraph: {:?}",
+        it.doc
+    );
+    assert!(
+        it.doc.contains("\n* `reuse_port`"),
+        "every bullet, not just the first: {:?}",
+        it.doc
+    );
+    // POSITIVE CONTROL: ordinary prose still flows, so this is not
+    // just "every line got a break"
+    assert!(
+        it.doc
+            .starts_with("Sets the sockets to listen on. The definition may accept"),
+        "non-list prose must still join into a paragraph: {:?}",
+        it.doc
+    );
+}

@@ -1067,7 +1067,23 @@ fn setting_doc(body: &str) -> String {
             description.push(t);
         }
     }
-    let mut out = sanitize_doc(&description.join(" "));
+    // a markdown list must survive as a list: `socket` documents its
+    // twelve optional modifiers one bullet each, and joining those
+    // with spaces gives one unbroken paragraph of twelve settings
+    let mut joined = String::new();
+    for line in &description {
+        let is_item = line.starts_with("* ") || line.starts_with("- ");
+        if joined.is_empty() {
+            joined.push_str(line);
+        } else if is_item {
+            joined.push('\n');
+            joined.push_str(line);
+        } else {
+            joined.push(' ');
+            joined.push_str(line);
+        }
+    }
+    let mut out = sanitize_doc(&joined);
     if let Some(d) = default {
         out.push_str(&format!("\n\nDefault: {d}."));
     }
@@ -1105,6 +1121,138 @@ pub fn parse_core_params_md(md: &str) -> Result<Vec<Item>, String> {
             })
         })
         .collect())
+}
+
+/// The modifiers `socket = ...` accepts, from the grammar production
+/// that parses them, spelled as the lexer spells them.
+///
+/// Membership is the grammar's, not the manual's — the same rule that
+/// makes `param_export_t` the authority for module parameters. Only
+/// `socket =` uses this production, which is why hovering `as` or
+/// `tag` anywhere else must stay silent: they are ordinary words.
+pub fn parse_socket_modifiers_c(cfg_y: &str, cfg_lex: &str) -> Vec<String> {
+    let Some(body) = cfg_y
+        .split_once("socket_def_param:")
+        .and_then(|(_, r)| r.split_once("socket_def_params:"))
+        .map(|(b, _)| b)
+    else {
+        return Vec::new();
+    };
+    // how the lexer spells each token: the first lower-case
+    // alternative, or a bare one-word definition (`TAG   tag`)
+    let mut spelling: Vec<(String, String)> = Vec::new();
+    for line in cfg_lex.split("\n%%").next().unwrap_or(cfg_lex).lines() {
+        let mut it = line.splitn(2, |c: char| c == ' ' || c == '\t');
+        let (Some(tok), Some(pat)) = (it.next(), it.next()) else {
+            continue;
+        };
+        if tok.is_empty() || !tok.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
+            continue;
+        }
+        let pat = pat.trim();
+        // A spelling may be written in PARTS:
+        // `("allow"|"ALLOW")[-_]("proxy"|"PROXY")([-_]("protocol"|"PROTOCOL"))?`
+        // is `allow_proxy_protocol`, not `allow`. Take the first
+        // lower-case alternative of each group, in order, and join
+        // them the way the pattern joins them.
+        static GROUP: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let group = GROUP.get_or_init(|| regex::Regex::new(r"\(([^()]*)\)").unwrap());
+        let lower = |t: &str| -> Option<String> {
+            t.split('"')
+                .find(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+                .map(str::to_string)
+        };
+        let parts: Vec<String> = group
+            .captures_iter(pat)
+            .filter_map(|c| lower(&c[1]))
+            .collect();
+        let word = if parts.is_empty() {
+            (!pat.is_empty() && pat.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+                .then(|| pat.to_string())
+        } else {
+            Some(parts.join("_"))
+        };
+        if let Some(w) = word {
+            spelling.push((tok.to_string(), w));
+        }
+    }
+    let mut out: Vec<String> = Vec::new();
+    for tok in body
+        .split('|')
+        .filter_map(|alt| alt.split_whitespace().next())
+        .filter(|t| t.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
+    {
+        if let Some((_, w)) = spelling.iter().find(|(t, _)| t == tok)
+            && !out.contains(w)
+        {
+            out.push(w.clone());
+        }
+    }
+    out
+}
+
+/// The manual's descriptions of those modifiers: the bullet list in
+/// the `socket` section, one bullet per modifier.
+pub fn parse_socket_modifiers_md(md: &str) -> Vec<Item> {
+    let Some(section) = md_sections_raw(md, 3)
+        .ok()
+        .and_then(|v| v.into_iter().find(|(h, _)| h.trim() == "socket"))
+        .map(|(_, b)| b)
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in section.lines() {
+        let t = line.trim();
+        let Some(rest) = t.strip_prefix("* `").or_else(|| t.strip_prefix("- `")) else {
+            continue;
+        };
+        let Some((form, desc)) = rest.split_once('`') else {
+            continue;
+        };
+        let Some(name) = form.split_whitespace().next() else {
+            continue;
+        };
+        if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            continue;
+        }
+        let desc = desc.trim_start_matches(':').trim();
+        out.push(Item {
+            name: name.to_string(),
+            detail: format!("socket modifier — `{form}`"),
+            doc: sanitize_doc(desc),
+        });
+    }
+    out
+}
+
+/// The modifiers a tree accepts, described by its own manual.
+///
+/// The grammar decides membership; the manual supplies the text. A
+/// modifier the grammar accepts and the manual does not describe is
+/// still offered — saying so is more use than pretending it does not
+/// exist.
+pub fn harvest_socket_modifiers(tree_root: &Path) -> Vec<Item> {
+    let read = |p: &str| std::fs::read_to_string(tree_root.join(p)).unwrap_or_default();
+    let accepted = parse_socket_modifiers_c(&read("cfg.y"), &read("cfg.lex"));
+    let documented = parse_socket_modifiers_md(&read("docs/manual/Script-CoreParameters.md"));
+    accepted
+        .into_iter()
+        .map(|name| {
+            documented
+                .iter()
+                .find(|d| d.name == name)
+                .cloned()
+                .unwrap_or_else(|| Item {
+                    name: name.clone(),
+                    detail: "socket modifier".into(),
+                    doc: format!(
+                        "The grammar accepts `{name}` on a `socket` line. The manual \
+                         does not describe it."
+                    ),
+                })
+        })
+        .collect()
 }
 
 /// The log levels `xlog` accepts, read from the C `switch` that
@@ -1281,6 +1429,10 @@ pub struct CoreDocs {
     /// nothing at all.
     #[serde(default)]
     pub routes: Vec<Item>,
+    /// The modifiers a `socket = ...` line accepts after its
+    /// address. Membership from the grammar, text from the manual.
+    #[serde(default)]
+    pub socket_modifiers: Vec<Item>,
     /// The log levels `xlog`'s first argument accepts, in the order
     /// the C switch lists them. Read from the source, not from prose.
     #[serde(default)]
@@ -1667,6 +1819,7 @@ pub fn harvest_core(tree_root: &Path) -> CoreDocs {
             v.extend(parse_core_async_md(&read("Script-Async.md")).unwrap_or_default());
             v
         },
+        socket_modifiers: harvest_socket_modifiers(tree_root),
         log_levels: LEVEL_SOURCES
             .iter()
             .map(|f| std::fs::read_to_string(tree_root.join(f)).unwrap_or_default())
