@@ -193,10 +193,13 @@ fn complete_files(
         .collect();
     out.extend(route_names().map(route_comp));
     for k in CORE_KEYWORDS {
+        // the documented ones carry their text into the popup, so a
+        // reader does not have to hover to find out what a keyword is
+        let documented = core.statements.iter().find(|s| s.name == *k);
         out.push(Comp {
             label: (*k).into(),
-            detail: "keyword".into(),
-            doc: String::new(),
+            detail: documented.map_or_else(|| "keyword".into(), |s| s.detail.clone()),
+            doc: documented.map(|s| s.doc.clone()).unwrap_or_default(),
             kind: CompKind::Keyword,
         });
     }
@@ -1855,6 +1858,13 @@ pub fn hover_markdown_at(
     line: u32,
     col: u32,
 ) -> Option<String> {
+    // A control statement. These are keywords rather than calls, so
+    // nothing else in the lookup below would ever answer for them:
+    // they completed with `detail: "keyword"` and no text at all, and
+    // hovered nothing.
+    if let Some(st) = core.statements.iter().find(|s| s.name == word) {
+        return Some(format!("**{}** — {}\n\n{}", st.name, st.detail, st.doc));
+    }
     // A route type: the kind of block a configuration is built out
     // of. `route` is the one that is also a core function — at a
     // definition the block is what the reader is looking at, at a

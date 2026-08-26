@@ -128,6 +128,11 @@ fn core() -> opensips_lsp::catalog::CoreDocs {
             detail: "Request URI".into(),
             doc: "The full request URI.".into(),
         }],
+        statements: vec![Item {
+            name: "if".into(),
+            detail: "control statement".into(),
+            doc: "Chooses between two paths.".into(),
+        }],
         routes: vec![Item {
             name: "startup_route".into(),
             detail: "route type".into(),

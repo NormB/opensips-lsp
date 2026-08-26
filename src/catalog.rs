@@ -814,6 +814,94 @@ pub fn parse_core_functions_md(md: &str) -> Result<Vec<Item>, String> {
         .collect())
 }
 
+/// Parse `docs/manual/Script-Statements.md` (4.x): `## name`
+/// headings, first paragraph = doc.
+///
+/// Two things the page does that a verbatim reading gets wrong.
+///
+/// The iteration statement is headed `for each`, which is prose: the
+/// keyword a configuration writes is `for`, and documenting `for each`
+/// would answer for something nobody can type.
+///
+/// And several keywords have no section of their own — `else` is
+/// explained under `if`, `case` and `default` under `switch`.
+/// Answering nothing for them leaves the commonest keywords in the
+/// language silent; inventing text for them would be worse. They
+/// carry the explaining section's text and say which section that is.
+/// Each is named here rather than guessed from proximity.
+pub fn parse_core_statements_md(md: &str) -> Result<Vec<Item>, String> {
+    /// Headings whose text is not the keyword.
+    const HEADING_IS_PROSE: &[(&str, &str)] = &[("for each", "for")];
+    /// Keywords explained inside another statement's section.
+    const EXPLAINED_UNDER: &[(&str, &str)] =
+        &[("else", "if"), ("case", "switch"), ("default", "switch")];
+
+    let mut out: Vec<Item> = md_sections(md, 2)?
+        .into_iter()
+        .filter_map(|(heading, doc)| {
+            let heading = heading.trim();
+            let name = HEADING_IS_PROSE
+                .iter()
+                .find(|(h, _)| *h == heading)
+                .map(|(_, kw)| *kw)
+                .unwrap_or(heading);
+            if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return None;
+            }
+            Some(Item {
+                name: name.to_string(),
+                detail: "control statement".to_string(),
+                doc,
+            })
+        })
+        .collect();
+
+    for (alias, parent) in EXPLAINED_UNDER {
+        let Some(owner) = out.iter().find(|s| &s.name == parent) else {
+            continue;
+        };
+        let doc = owner.doc.clone();
+        out.push(Item {
+            name: (*alias).to_string(),
+            detail: format!("control statement — documented under `{parent}`"),
+            doc,
+        });
+    }
+    Ok(out)
+}
+
+/// Parse `docs/manual/Script-Async.md` (4.x): the two statements it
+/// documents, and nothing else on the page.
+///
+/// The headings are prose — `## async() statement` — and they sit
+/// beside `## Description` and `## Limitations`, which are
+/// identifier-shaped and are not keywords. A parser loose enough to
+/// take the first pair takes the second pair too, and then offers
+/// `Description` as something a configuration can write. So the
+/// headings that mean something are named here, and nothing else is
+/// taken.
+pub fn parse_core_async_md(md: &str) -> Result<Vec<Item>, String> {
+    /// Heading text -> the keyword it documents.
+    const STATEMENTS: &[(&str, &str)] = &[
+        ("async() statement", "async"),
+        ("launch() statement", "launch"),
+    ];
+    Ok(md_sections(md, 2)?
+        .into_iter()
+        .filter_map(|(heading, doc)| {
+            let name = STATEMENTS
+                .iter()
+                .find(|(h, _)| *h == heading.trim())
+                .map(|(_, kw)| *kw)?;
+            Some(Item {
+                name: name.to_string(),
+                detail: "control statement".to_string(),
+                doc,
+            })
+        })
+        .collect())
+}
+
 /// Parse `docs/manual/Script-Routes.md` (4.x): `## name` headings,
 /// first paragraph = doc.
 ///
@@ -885,6 +973,10 @@ pub struct CoreDocs {
     pub params: Vec<Item>,
     /// Pseudo-variables (`Script-CoreVar.md`), names include the `$`.
     pub pvars: Vec<Item>,
+    /// Control statements (`Script-Statements.md`): `if`, `switch`,
+    /// `while`, `for`, plus the keywords those sections explain.
+    #[serde(default)]
+    pub statements: Vec<Item>,
     /// Route types (`Script-Routes.md`): the blocks a configuration is
     /// built out of. Read from the page beside the others, which the
     /// harvester passed over — so hovering `startup_route` answered
@@ -1268,12 +1360,17 @@ pub fn harvest_core(tree_root: &Path) -> CoreDocs {
         params: parse_core_params_md(&read("Script-CoreParameters.md")).unwrap_or_default(),
         pvars: parse_core_vars_md(&read("Script-CoreVar.md")).unwrap_or_default(),
         routes: parse_core_routes_md(&read("Script-Routes.md")).unwrap_or_default(),
+        statements: {
+            let mut v = parse_core_statements_md(&read("Script-Statements.md")).unwrap_or_default();
+            v.extend(parse_core_async_md(&read("Script-Async.md")).unwrap_or_default());
+            v
+        },
     }
 }
 
 /// Cache format version: bump when `CacheFile` or the harvest
 /// semantics change, so caches written by older builds self-miss.
-const CACHE_SCHEMA_VERSION: u32 = 3;
+const CACHE_SCHEMA_VERSION: u32 = 5;
 
 /// A content-aware change-detector for a source tree: canonical path,
 /// schema version, and a manifest of every file the harvest reads —
@@ -1312,6 +1409,8 @@ pub fn tree_fingerprint(tree_root: &Path) -> String {
         "Script-CoreParameters.md",
         "Script-CoreVar.md",
         "Script-Routes.md",
+        "Script-Statements.md",
+        "Script-Async.md",
     ] {
         files.push(manual.join(f));
     }

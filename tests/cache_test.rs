@@ -30,6 +30,7 @@ fn sample() -> (Vec<ModuleDoc>, CoreDocs) {
             }],
             params: vec![],
             pvars: vec![],
+            statements: vec![],
             routes: vec![],
         },
     )

@@ -1417,6 +1417,53 @@
         "doc": "`$xlog_level` - allows to set /reset the xlog() logging level on per-process bases. Shortly said, you can read the verbosity level for the xlog() calls or you can temporary change the level per process bases."
       }
     ],
+    "statements": [
+      {
+        "name": "if",
+        "detail": "control statement",
+        "doc": "IF-ELSE statement"
+      },
+      {
+        "name": "switch",
+        "detail": "control statement",
+        "doc": "SWITCH statement - it can be used to test the value of a pseudo-variable."
+      },
+      {
+        "name": "while",
+        "detail": "control statement",
+        "doc": "while statement"
+      },
+      {
+        "name": "for",
+        "detail": "control statement",
+        "doc": "for each statement - easy iteration over indexed variables or pseudo-variables"
+      },
+      {
+        "name": "else",
+        "detail": "control statement — documented under `if`",
+        "doc": "IF-ELSE statement"
+      },
+      {
+        "name": "case",
+        "detail": "control statement — documented under `switch`",
+        "doc": "SWITCH statement - it can be used to test the value of a pseudo-variable."
+      },
+      {
+        "name": "default",
+        "detail": "control statement — documented under `switch`",
+        "doc": "SWITCH statement - it can be used to test the value of a pseudo-variable."
+      },
+      {
+        "name": "async",
+        "detail": "control statement",
+        "doc": "The **async()** statement of the OpenSIPS script can be used in situations where the script writer both needs to perform blocking I/O and also depends on the result of this operation. Some example scenarios:"
+      },
+      {
+        "name": "launch",
+        "detail": "control statement",
+        "doc": "The **launch()** statement of the OpenSIPS script can be used in situations where the script writer needs to perform blocking I/O, but does not depend on the result of this operation in order to continue the current SIP routing decision flow. Some example scenarios:"
+      }
+    ],
     "routes": [
       {
         "name": "route",
