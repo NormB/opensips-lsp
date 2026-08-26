@@ -71,6 +71,7 @@ fn grammar_and_scanner_agree_on_the_corpus() {
     );
     let mut cases = 0;
     let mut includes_seen = 0;
+    let mut error_cases = 0;
     for entry in std::fs::read_dir(dir).expect("corpus dir") {
         let path = entry.expect("entry").path();
         if path.extension().and_then(|e| e.to_str()) != Some("txt") {
@@ -78,6 +79,15 @@ fn grammar_and_scanner_agree_on_the_corpus() {
         }
         let text = std::fs::read_to_string(&path).expect("corpus file");
         for (title, input, expected) in parse_corpus(&text) {
+            // A case the grammar cannot parse says nothing about what
+            // the language contains: past an ERROR node tree-sitter is
+            // recovering, and it recovers `!!import_file "x"` into an
+            // `(include)` the real parser rejects outright. Comparing
+            // counts there compares against error recovery.
+            if expected.contains("(ERROR") {
+                error_cases += 1;
+                continue;
+            }
             cases += 1;
             assert_eq!(
                 analyze::route_blocks(&input).len(),
@@ -111,9 +121,15 @@ fn grammar_and_scanner_agree_on_the_corpus() {
         }
     }
     assert!(cases >= 8, "corpus went missing? saw {cases} cases");
+    // POSITIVE CONTROL for the skip above: the corpus must still
+    // carry a case the grammar rejects, or the exemption is dead
+    // wording that could hide a real divergence later.
+    assert!(
+        error_cases >= 1,
+        "no corpus case contains an ERROR node — the exemption above is unexercised"
+    );
     assert!(
         includes_seen >= 2,
-        "the corpus must exercise includes — bare and `!!`-prefixed — or \
-         that comparison is zero against zero: {includes_seen}"
+        "the corpus must exercise both include spellings, or that comparison is zero against zero: {includes_seen}"
     );
 }

@@ -80,32 +80,15 @@
             "type": "PREC",
             "value": 3,
             "content": {
-              "type": "SEQ",
+              "type": "CHOICE",
               "members": [
                 {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "STRING",
-                      "value": "!!"
-                    },
-                    {
-                      "type": "BLANK"
-                    }
-                  ]
+                  "type": "STRING",
+                  "value": "include_file"
                 },
                 {
-                  "type": "CHOICE",
-                  "members": [
-                    {
-                      "type": "STRING",
-                      "value": "include_file"
-                    },
-                    {
-                      "type": "STRING",
-                      "value": "import_file"
-                    }
-                  ]
+                  "type": "STRING",
+                  "value": "import_file"
                 }
               ]
             }

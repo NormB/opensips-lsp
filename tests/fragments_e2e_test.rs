@@ -1162,7 +1162,22 @@ fn encodings_do_not_change_what_a_fragment_is_part_of() {
         );
         let items = v["params"]["diagnostics"].as_array().unwrap().clone();
         let msgs: Vec<&str> = items.iter().filter_map(|d| d["message"].as_str()).collect();
-        assert!(!msgs.iter().any(|m| m.contains("TOP")), "{tag}: {msgs:?}");
+        // A BOM is not whitespace, so it is not skipped before the
+        // directive and `cfg_pp.c` never matches `include_file` on
+        // that line: OpenSIPS really does not fire the include, and
+        // `route(TOP)` really is undefined. Verified against the
+        // pinned binary — the same config opens the file without the
+        // BOM and does not open it with one. The server reporting it
+        // is the server agreeing with the parser, and hiding it would
+        // hide a config that is silently not including anything.
+        if bom.is_empty() {
+            assert!(!msgs.iter().any(|m| m.contains("TOP")), "{tag}: {msgs:?}");
+        } else {
+            assert!(
+                msgs.iter().any(|m| m.contains("TOP")),
+                "{tag}: a BOM suppresses the include, so TOP is genuinely undefined: {msgs:?}"
+            );
+        }
         assert!(
             msgs.iter().any(|m| m.contains("NOWHERE")),
             "{tag}: {msgs:?}"

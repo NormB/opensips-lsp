@@ -242,12 +242,12 @@ route {
           (string))))))
 
 ================================================================================
-include directives, bare and prefixed
+include directives, and the prefix that is a comment
 ================================================================================
 
 include_file "opensips-local.cfg"
+import_file "another.cfg"
 #!include_file "extra.cfg"
-!!import_file "other.cfg"
 loadmodule "tm.so"
 
 --------------------------------------------------------------------------------
@@ -255,8 +255,21 @@ loadmodule "tm.so"
 (source_file
   (include
     (string))
-  (comment)
   (include
     (string))
+  (comment)
   (loadmodule
+    (string)))
+
+================================================================================
+a !! prefix is not an include
+================================================================================
+
+!!import_file "other.cfg"
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (ERROR)
+  (include
     (string)))

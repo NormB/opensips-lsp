@@ -390,17 +390,23 @@ static_regex!(
 /// Every `include_file "x"` / `import_file "x"` in code position;
 /// `name` is the quoted path verbatim.
 pub fn includes(text: &str) -> Vec<Located> {
-    let classes = classify(text);
-    let b = text.as_bytes();
     let mut out = Vec::new();
     for c in re_include().captures_iter(text) {
         let whole = c.get(0).unwrap();
         let start = whole.start();
-        if classes.get(start) != Some(&Class::Code) {
-            continue;
-        }
-        // reject matches that are a tail of a longer identifier
-        if start > 0 && is_word(b[start - 1]) {
+        // The flattener is line-oriented and runs BEFORE anything is
+        // lexed: `cfg_pp.c:mk_included_file_path` skips leading
+        // whitespace and matches the directive there, knowing nothing
+        // about comments or strings. So it fires inside a `/* */`
+        // block, and does NOT fire when anything else opens the line
+        // — including a tail like `reinclude_file`.
+        //
+        // Reading this as code position is the LEXER's rule, and it
+        // disagrees with the parser in both directions: a block
+        // commented out with `/* */` still loads its includes, and a
+        // directive after a statement on the same line does not.
+        let line_start = text[..start].rfind('\n').map_or(0, |i| i + 1);
+        if !text[line_start..start].trim().is_empty() {
             continue;
         }
         let path = c

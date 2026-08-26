@@ -31,16 +31,22 @@ module.exports = grammar({
     // server driven by that scanner disagreed about what the file
     // even contains.
     //
-    // `!!` is accepted and `#!` is NOT, because that is what the real
-    // 4.0.1 parser does: `!!include_file` is read, `#!include_file`
-    // is a comment and never opened.  Kamailio reads both, and its
-    // sibling grammar accepts both; the difference is measured
-    // against each binary rather than shared between them.
+    // Neither `!!` nor `#!` is an include prefix here, and they fail
+    // differently.  Put to the pinned 4.0.1 binary with a file that
+    // does not exist, so "did it fire" is "did it try to open it":
+    //
+    //   include_file "x"      opens x
+    //   #!include_file "x"    nothing at all — `#` opens a comment
+    //   !!include_file "x"    SYNTAX ERROR at 1:1-2; the text reaches
+    //                         the lexer, which has no rule for `!!`
+    //
+    // This grammar previously accepted `!!`, with a comment claiming
+    // the real parser read it.  It does not: an editor driven by that
+    // grammar showed valid syntax for something OpenSIPS rejects
+    // outright.  Kamailio is a different language and its sibling
+    // grammar is measured against its own binary, not this one.
     include: $ => seq(
-      token(prec(3, seq(
-        optional('!!'),
-        choice('include_file', 'import_file'),
-      ))),
+      token(prec(3, choice('include_file', 'import_file'))),
       $.string,
     ),
 
