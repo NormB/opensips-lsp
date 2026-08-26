@@ -989,6 +989,48 @@ pub fn parse_core_params_md(md: &str) -> Result<Vec<Item>, String> {
         .collect())
 }
 
+/// The log levels `xlog` accepts, read from the C `switch` that
+/// parses them.
+///
+/// The set is not documentation anywhere a harvester can read it, it
+/// differs between releases, and it differs between the two servers —
+/// so it comes from the source, like `param_export_t` does for module
+/// parameters. The switch dispatches on the THIRD character of the
+/// string (`s.s[2]`), so a `case` letter that is not the third
+/// character of the level it assigns means the shape has changed and
+/// the pairing cannot be trusted; such a case is dropped rather than
+/// guessed at.
+///
+/// Anchored on the `unknown log level` message in the default arm: it
+/// is what distinguishes this switch from every other `case 'X':` in
+/// a source tree.
+pub fn parse_log_levels_c(src: &str) -> Vec<String> {
+    static CASE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let case = CASE.get_or_init(|| {
+        regex::Regex::new(r"case\s*'([A-Z])'\s*:[^;{}]*?(L_[A-Z][A-Z0-9_]*)").unwrap()
+    });
+    let Some(end) = src.find("unknown log level") else {
+        return Vec::new();
+    };
+    // the switch body precedes its default arm; bound the window so a
+    // switch far above the message cannot bleed into it
+    let start = src[..end].rfind("switch").unwrap_or(0);
+    let mut out: Vec<String> = Vec::new();
+    for c in case.captures_iter(&src[start..end]) {
+        let letter = c[1].chars().next().unwrap_or(' ');
+        // `L_CRIT2` is the internal constant for the level a script
+        // spells `L_CRIT`; the trailing digit is not part of the name
+        let name = c[2].trim_end_matches(|ch: char| ch.is_ascii_digit());
+        if name.chars().nth(2) != Some(letter) {
+            continue;
+        }
+        if !out.iter().any(|n| n == name) {
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
 /// An `##` section of `Script-CoreVar.md` opening with a `**Naming**:`
 /// line documents a variable KIND — `$var`, `$avp` — rather than one
 /// named variable. The exception is a section that has `###` entries
@@ -1121,6 +1163,10 @@ pub struct CoreDocs {
     /// nothing at all.
     #[serde(default)]
     pub routes: Vec<Item>,
+    /// The log levels `xlog`'s first argument accepts, in the order
+    /// the C switch lists them. Read from the source, not from prose.
+    #[serde(default)]
+    pub log_levels: Vec<String>,
 }
 
 /// The vendored core catalogue: what the core language looks like in
@@ -1503,8 +1549,19 @@ pub fn harvest_core(tree_root: &Path) -> CoreDocs {
             v.extend(parse_core_async_md(&read("Script-Async.md")).unwrap_or_default());
             v
         },
+        log_levels: LEVEL_SOURCES
+            .iter()
+            .map(|f| std::fs::read_to_string(tree_root.join(f)).unwrap_or_default())
+            .map(|src| parse_log_levels_c(&src))
+            .find(|v| !v.is_empty())
+            .unwrap_or_default(),
     }
 }
+
+/// Where the level switch lives. A test holds this against the real
+/// tree, so a file upstream moves fails rather than silently harvests
+/// nothing.
+const LEVEL_SOURCES: &[&str] = &["route.c"];
 
 /// Cache format version: bump when `CacheFile` or the harvest
 /// semantics change, so caches written by older builds self-miss.

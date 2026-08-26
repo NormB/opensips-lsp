@@ -1520,6 +1520,15 @@
         "detail": "route type",
         "doc": "The **event_route** is used by the OpenSIPS Event Interface to execute script code when an event is triggered. The name of the route is the event that has to be handled by that route. The route itself is executed asynchronously with regards to the trigger moment."
       }
+    ],
+    "log_levels": [
+      "L_ALERT",
+      "L_CRIT",
+      "L_ERR",
+      "L_WARN",
+      "L_NOTICE",
+      "L_INFO",
+      "L_DBG"
     ]
   }
 }

@@ -138,6 +138,7 @@ fn core() -> opensips_lsp::catalog::CoreDocs {
             detail: "route type".into(),
             doc: "Runs once at startup.".into(),
         }],
+        log_levels: vec!["L_INFO".into(), "L_DBG".into()],
     }
 }
 
