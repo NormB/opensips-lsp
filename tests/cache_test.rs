@@ -30,6 +30,7 @@ fn sample() -> (Vec<ModuleDoc>, CoreDocs) {
             }],
             params: vec![],
             pvars: vec![],
+            routes: vec![],
         },
     )
 }
@@ -179,4 +180,126 @@ fn editing_a_harvested_files_content_invalidates_the_cache() {
 
     let _ = std::fs::remove_dir_all(&tree);
     let _ = std::fs::remove_dir_all(&cache);
+}
+
+/// Editing the routes page must invalidate the cache.
+///
+/// The fingerprint lists every file the harvest reads, and
+/// `Script-Routes.md` was added to that harvest without being added
+/// to the list. A cache written before an edit to it would keep being
+/// served afterwards, so a corrected route description would never
+/// reach the reader — and a cache written by a build that did not
+/// harvest routes at all would serve none, silently.
+#[test]
+fn editing_the_routes_page_invalidates_the_cache() {
+    let tree = mk_tree("routes");
+    let page = tree.join("docs").join("manual").join("Script-Routes.md");
+    std::fs::write(&page, "## startup_route\n\nBefore.\n").unwrap();
+    let before = tree_fingerprint(&tree);
+
+    // Same length, different content: size alone cannot see this, so
+    // the manifest carries mtime — and mtime has a granularity, which
+    // is why the sleep is here rather than being flaky without it.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    std::fs::write(&page, "## startup_route\n\nAfterX.\n").unwrap();
+    let after = tree_fingerprint(&tree);
+
+    assert_ne!(
+        before, after,
+        "an edit to Script-Routes.md must change the fingerprint"
+    );
+    let _ = std::fs::remove_dir_all(&tree);
+}
+
+/// Every manual page the core harvest reads must be in the
+/// fingerprint's file list.
+///
+/// `Script-Routes.md` was added to the harvest and not to that list,
+/// so an edit to it left a warm cache serving the old text. Naming
+/// the pages twice — once to read, once to fingerprint — is what
+/// allowed the two to drift, so this derives one list from the other
+/// rather than restating it. The next page added is covered without
+/// anyone remembering.
+#[test]
+fn every_page_the_harvest_reads_is_fingerprinted() {
+    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/catalog.rs"))
+        .expect("the source is readable");
+
+    let harvest = src
+        .split_once("pub fn harvest_core")
+        .map(|(_, rest)| rest.split_once("\n}").map(|(b, _)| b).unwrap_or(rest))
+        .expect("harvest_core exists");
+    let read_pages: Vec<String> = harvest
+        .match_indices("read(\"")
+        .filter_map(|(i, _)| harvest[i + 6..].split_once('"').map(|(n, _)| n.to_string()))
+        .collect();
+
+    let fingerprint = src
+        .split_once("pub fn tree_fingerprint")
+        .map(|(_, rest)| rest)
+        .expect("tree_fingerprint exists");
+    let listed: Vec<String> = fingerprint
+        .match_indices(".md\"")
+        .filter_map(|(i, _)| {
+            let start = fingerprint[..i].rfind('"')? + 1;
+            Some(fingerprint[start..i + 3].to_string())
+        })
+        .collect();
+
+    // POSITIVE CONTROL: a scan that stopped matching would find no
+    // pages and agree with an empty list, proving nothing.
+    assert!(
+        read_pages.len() >= 4,
+        "only {} page(s) found in harvest_core: {read_pages:?}",
+        read_pages.len()
+    );
+    for page in &read_pages {
+        assert!(
+            listed.contains(page),
+            "{page} is harvested but absent from the fingerprint — \
+             an edit to it would leave a stale cache. Listed: {listed:?}"
+        );
+    }
+}
+
+/// The schema version must be part of what the fingerprint hashes.
+///
+/// The routes field arrived with `#[serde(default)]`, so a cache
+/// written before routes were harvested still deserializes — with an
+/// empty route list. Served, it answers no route hovers at all and
+/// nothing about it looks broken. Bumping the schema is what turns
+/// that into a miss, and it only works if the version is mixed into
+/// the hash. It cannot be checked by editing a stored fingerprint,
+/// because the stored value IS a hash; so this checks the input.
+#[test]
+fn the_fingerprint_hashes_the_schema_version() {
+    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/catalog.rs"))
+        .expect("the source is readable");
+    let body = src
+        .split_once("pub fn tree_fingerprint")
+        .map(|(_, rest)| rest.split_once("\n}").map(|(b, _)| b).unwrap_or(rest))
+        .expect("tree_fingerprint exists");
+
+    assert!(
+        body.contains("CACHE_SCHEMA_VERSION"),
+        "the schema version must be mixed into the fingerprint, or bumping it \
+         leaves every stale cache being served"
+    );
+    // POSITIVE CONTROL: a scan that grabbed the wrong span would find
+    // nothing and pass the moment the assertion above was inverted.
+    assert!(
+        body.contains("files.sort()"),
+        "the scan did not capture tree_fingerprint's body"
+    );
+    // and the constant must actually have moved past the schema that
+    // predates the routes harvest
+    let version: u32 = src
+        .split_once("const CACHE_SCHEMA_VERSION: u32 = ")
+        .and_then(|(_, r)| r.split_once(';'))
+        .and_then(|(v, _)| v.trim().parse().ok())
+        .expect("the constant is readable");
+    assert!(
+        version >= 3,
+        "routes were added to the harvest at schema 3; found {version}"
+    );
 }

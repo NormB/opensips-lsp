@@ -1855,6 +1855,18 @@ pub fn hover_markdown_at(
     line: u32,
     col: u32,
 ) -> Option<String> {
+    // A route type: the kind of block a configuration is built out
+    // of. `route` is the one that is also a core function — at a
+    // definition the block is what the reader is looking at, at a
+    // call site the function is. The others have no second meaning,
+    // so they answer wherever they appear.
+    if let Some(r) = core.routes.iter().find(|r| r.name == word) {
+        let also_a_function = core.functions.iter().any(|f| f.name == word);
+        let at_a_definition = analyze::route_defs(doc).iter().any(|d| d.line == line);
+        if !also_a_function || at_a_definition {
+            return Some(format!("**{}** — {}\n\n{}", r.name, r.detail, r.doc));
+        }
+    }
     match hover_site(doc, word, line, col) {
         HoverSite::Modparam(module) => {
             // the module the call names, and only it

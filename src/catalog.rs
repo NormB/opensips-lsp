@@ -814,6 +814,29 @@ pub fn parse_core_functions_md(md: &str) -> Result<Vec<Item>, String> {
         .collect())
 }
 
+/// Parse `docs/manual/Script-Routes.md` (4.x): `## name` headings,
+/// first paragraph = doc.
+///
+/// Unlike the core functions page, a heading here is a bare keyword
+/// with no argument list, so anything parenthesised is prose rather
+/// than a route type.
+pub fn parse_core_routes_md(md: &str) -> Result<Vec<Item>, String> {
+    Ok(md_sections(md, 2)?
+        .into_iter()
+        .filter_map(|(heading, doc)| {
+            let name = heading.trim();
+            if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return None;
+            }
+            Some(Item {
+                name: name.to_string(),
+                detail: "route type".to_string(),
+                doc,
+            })
+        })
+        .collect())
+}
+
 /// Parse `docs/manual/Script-CoreParameters.md` (4.x): `### name`
 /// headings, first paragraph = doc.
 pub fn parse_core_params_md(md: &str) -> Result<Vec<Item>, String> {
@@ -862,6 +885,12 @@ pub struct CoreDocs {
     pub params: Vec<Item>,
     /// Pseudo-variables (`Script-CoreVar.md`), names include the `$`.
     pub pvars: Vec<Item>,
+    /// Route types (`Script-Routes.md`): the blocks a configuration is
+    /// built out of. Read from the page beside the others, which the
+    /// harvester passed over — so hovering `startup_route` answered
+    /// nothing at all.
+    #[serde(default)]
+    pub routes: Vec<Item>,
 }
 
 /// The vendored core catalogue: what the core language looks like in
@@ -1238,12 +1267,13 @@ pub fn harvest_core(tree_root: &Path) -> CoreDocs {
         functions: parse_core_functions_md(&read("Script-CoreFunctions.md")).unwrap_or_default(),
         params: parse_core_params_md(&read("Script-CoreParameters.md")).unwrap_or_default(),
         pvars: parse_core_vars_md(&read("Script-CoreVar.md")).unwrap_or_default(),
+        routes: parse_core_routes_md(&read("Script-Routes.md")).unwrap_or_default(),
     }
 }
 
 /// Cache format version: bump when `CacheFile` or the harvest
 /// semantics change, so caches written by older builds self-miss.
-const CACHE_SCHEMA_VERSION: u32 = 2;
+const CACHE_SCHEMA_VERSION: u32 = 3;
 
 /// A content-aware change-detector for a source tree: canonical path,
 /// schema version, and a manifest of every file the harvest reads —
@@ -1281,6 +1311,7 @@ pub fn tree_fingerprint(tree_root: &Path) -> String {
         "Script-CoreFunctions.md",
         "Script-CoreParameters.md",
         "Script-CoreVar.md",
+        "Script-Routes.md",
     ] {
         files.push(manual.join(f));
     }
