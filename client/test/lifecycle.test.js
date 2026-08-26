@@ -27,6 +27,8 @@ let handlers = {};
 let clients = [];
 let statusItem = null;
 let activeEditor = null;
+let registeredCommands = {};
+let updates = [];
 
 const doc = (fileName, languageId) => ({
     fileName,
@@ -42,6 +44,10 @@ const vscodeStub = {
         textDocuments: [],
         getConfiguration: () => ({
             get: (key, dflt) => (key in settings ? settings[key] : dflt),
+            update: async (key, value, target) => {
+                updates.push([key, value, target]);
+                settings[key] = value;
+            },
         }),
         onDidOpenTextDocument: (cb) => {
             handlers.open = cb;
@@ -81,6 +87,16 @@ const vscodeStub = {
             return statusItem;
         },
     },
+    // The extension registers the assistance toggle as a command; a
+    // stub without `commands` makes `activate` throw before anything
+    // else this file asserts can run.
+    commands: {
+        registerCommand: (id, cb) => {
+            registeredCommands[id] = cb;
+            return { dispose() {} };
+        },
+    },
+    ConfigurationTarget: { Global: 1, Workspace: 2 },
     StatusBarAlignment: { Left: 1, Right: 2 },
 
 };
@@ -133,6 +149,8 @@ const reset = () => {
     clients = [];
     statusItem = null;
     activeEditor = null;
+    registeredCommands = {};
+    updates = [];
 };
 /** A context whose extensionPath holds no bundled server. */
 const ctx = () => ({ extensionPath: '/nonexistent-extension-dir', subscriptions: [] });
@@ -319,7 +337,50 @@ const lastInit = () => clients[clients.length - 1].clientOptions.initializationO
         'changing the release must rebuild the client, not be pushed',
     );
 
-    console.log('lifecycle: 21 assertions passed');
+    // --- the assistance toggle flips the setting, both ways
+    //
+    // Owed for the CI failure this change caused: the extension began
+    // registering a command and the stub had no `commands`, so
+    // `activate` threw before any assertion in this file ran. A stub
+    // extended just enough to stop throwing would have left the
+    // command itself untested — which is the part that broke.
+    reset();
+    ext.activate(ctx());
+    await settle();
+    const toggle = registeredCommands[`${NAMESPACE}.toggleAssistance`];
+    assert.ok(toggle, 'the toggle command must be registered');
+
+    settings['assistance'] = true;
+    await toggle();
+    assert.deepStrictEqual(
+        updates.at(-1).slice(0, 2),
+        ['assistance', false],
+        `pressing it while on must turn it off: ${JSON.stringify(updates)}`,
+    );
+    await toggle();
+    assert.deepStrictEqual(
+        updates.at(-1).slice(0, 2),
+        ['assistance', true],
+        'and pressing it again must turn it back on',
+    );
+
+    // --- and the status bar says so, since a silent editor looks broken
+    //
+    // Owed, second. The reader has no other signal that the popups
+    // were turned off on purpose.
+    reset();
+    settings['assistance'] = false;
+    ext.activate(ctx());
+    await settle();
+    activeEditor = { document: doc('/w/opensips.cfg', 'opensips-cfg') };
+    handlers.activeEditor?.();
+    assert.ok(
+        /off/i.test(statusItem.text),
+        `the status bar must say the hints are off: ${statusItem.text}`,
+    );
+    assert.strictEqual(statusItem.shown, true, 'and it must be visible');
+
+    console.log('lifecycle: 26 assertions passed');
 })().catch((e) => {
     console.error(e);
     process.exit(1);
