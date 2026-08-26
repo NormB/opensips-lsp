@@ -285,3 +285,101 @@ fn the_real_async_page_documents_async_and_launch() {
         );
     }
 }
+
+/// Every offered keyword carries its text THROUGH the completion
+/// path, not merely in the catalogue.
+///
+/// The gate above asks whether the catalogue documents each keyword.
+/// That is a different question from whether the popup shows it: the
+/// completion builder copies the text across, and a keyword can be
+/// perfectly documented and still be offered blank if that copy is
+/// dropped. `async` and `launch` were silent because the catalogue
+/// lacked them; this asks the other half, so neither half can go
+/// quiet alone.
+#[test]
+fn every_offered_keyword_reaches_the_popup_with_its_text() {
+    let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/logic.rs"))
+        .expect("the source is readable");
+    let block = src
+        .split_once("const CORE_KEYWORDS: &[&str] = &[")
+        .and_then(|(_, r)| r.split_once("];"))
+        .map(|(b, _)| b)
+        .expect("CORE_KEYWORDS exists");
+    let keywords: Vec<String> = block
+        .split(',')
+        .filter_map(|t| {
+            let t = t.trim().trim_matches('"');
+            (!t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+                .then(|| t.to_string())
+        })
+        .collect();
+    assert!(keywords.len() >= 10, "control: {keywords:?}");
+
+    let core = &opensips_lsp::catalog::builtin_core().core;
+    let items = opensips_lsp::logic::completions_with_core(&[], core, "route {\n}\n", "    ");
+
+    let mut blank: Vec<String> = Vec::new();
+    for k in &keywords {
+        // a keyword may be offered more than once (keyword list and
+        // core functions both carry `route`); ANY offering with text
+        // is enough for the reader
+        let offerings: Vec<_> = items.iter().filter(|i| &i.label == k).collect();
+        assert!(!offerings.is_empty(), "{k} is not offered at all");
+        if !offerings.iter().any(|i| !i.doc.trim().is_empty()) {
+            blank.push(k.clone());
+        }
+    }
+    assert!(
+        blank.is_empty(),
+        "keyword(s) reaching the popup with no text: {blank:?}"
+    );
+}
+
+/// `async` and `launch` come from the async page, and from nowhere
+/// else.
+///
+/// They were the two the derived gate caught, and the fix was to
+/// harvest one more page. If that page stopped being read — renamed
+/// upstream, dropped from the harvest — they would fall silent again
+/// and the catalogue gate would be the only thing to notice, on a
+/// tree that still happens to ship a vendored copy. This pins the
+/// provenance: with the page they are present, without it they are
+/// absent, and no other page supplies them.
+#[test]
+fn async_and_launch_come_from_the_async_page() {
+    let dir = std::env::temp_dir().join(format!("oslsp-async-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let manual = dir.join("docs").join("manual");
+    std::fs::create_dir_all(&manual).unwrap();
+
+    // a tree with the statements page but NOT the async page
+    std::fs::write(manual.join("Script-Statements.md"), "## if\n\nChooses.\n").unwrap();
+    let without = harvest_core(&dir);
+    assert!(
+        without.statements.iter().any(|s| s.name == "if"),
+        "control: the statements page must still be read"
+    );
+    for kw in ["async", "launch"] {
+        assert!(
+            !without.statements.iter().any(|s| s.name == kw),
+            "{kw} appeared with no async page — it is coming from somewhere unintended"
+        );
+    }
+
+    // add the async page: both appear
+    std::fs::write(
+        manual.join("Script-Async.md"),
+        "## async() statement\n\nDoes async things.\n\n## launch() statement\n\nDoes launch things.\n",
+    )
+    .unwrap();
+    let with = harvest_core(&dir);
+    for kw in ["async", "launch"] {
+        let it = with
+            .statements
+            .iter()
+            .find(|s| s.name == kw)
+            .unwrap_or_else(|| panic!("{kw} must come from the async page"));
+        assert!(!it.doc.trim().is_empty(), "{kw} must carry its text");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
