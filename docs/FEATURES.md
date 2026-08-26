@@ -507,6 +507,7 @@ clients that can't pass options.
 | `opensipsLsp.opensipsPath` | `opensipsPath` | `OPENSIPS_LSP_BIN` | `opensips` | Binary for `-C` diagnostics; empty disables them. |
 | `opensipsLsp.opensipsSrc` | `opensipsSrc` | `OPENSIPS_LSP_SRC` | *(unset)* | Source tree for completion/hover docs. |
 | `opensipsLsp.opensipsVersion` | `opensipsVersion` | `OPENSIPS_LSP_VERSION` | *(newest)* | Built-in release to check `modparam` names against. Ignored when `opensipsSrc` is set. |
+| `opensipsLsp.versionInHints` | `versionInHints` | `OPENSIPS_LSP_VERSION_IN_HINTS` | `false` | Repeat the release under every hover and completion item. |
 | `opensipsLsp.diagnostics.enable` | *(maps to empty `opensipsPath`)* | — | `true` | Toggle diagnostics without losing the configured path. |
 | `opensipsLsp.diagnostics.maxProblems` | `maxDiagnostics` | — | `100` | Bound on published diagnostics per file. |
 | `opensipsLsp.diagnostics.analyzer` | `analyzerDiagnostics` | — | `true` | Fast analyzer warnings between saves (undefined `route()` targets, duplicate definitions, undocumented modparams, inert `#!` directives). |

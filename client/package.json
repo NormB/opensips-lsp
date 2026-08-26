@@ -136,6 +136,11 @@
           "type": "boolean",
           "default": true,
           "description": "Draw parameter names from the documentation at module-function call sites."
+        },
+        "opensipsLsp.versionInHints": {
+          "type": "boolean",
+          "default": false,
+          "description": "Repeat the OpenSIPS release under every hover and completion item. Off by default: the status bar shows it continuously and every warning names it."
         }
       }
     },

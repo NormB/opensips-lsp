@@ -173,10 +173,16 @@ fn core_functions_and_pseudo_variables_complete_too() {
     let _ = child.kill();
 }
 
-/// Built-in documentation is pinned to one version, and a user whose
-/// build differs has to be able to tell.  Hover says so.
+/// Provenance is available but not repeated.
+///
+/// Built-in documentation is pinned to one release, and a user whose
+/// build differs has to be able to tell — but the status bar says so
+/// continuously and every warning that turns on the release names it,
+/// so a hover does not say it a third time. `versionInHints` turns it
+/// on for anyone who wants the provenance travelling with the text;
+/// `version_in_hints_e2e_test.rs` covers both states.
 #[test]
-fn hover_on_a_built_in_entry_names_the_version_and_the_escape_hatch() {
+fn hover_documents_the_entry_without_repeating_the_release() {
     let (mut child, rx, mut stdin, uri, _) = boot("hover", "log_level=2\n");
     write_msg(
         &mut stdin,
@@ -188,13 +194,19 @@ fn hover_on_a_built_in_entry_names_the_version_and_the_escape_hatch() {
         .as_str()
         .unwrap_or("")
         .to_string();
+    // POSITIVE CONTROL: an empty hover would satisfy the absence
+    // assertion below without documenting anything.
     assert!(
-        text.contains("Built-in documentation from OpenSIPS"),
-        "hover must disclose the provenance: {text:?}"
+        text.contains("log_level"),
+        "hover must document the entry: {text:?}"
     );
     assert!(
-        text.contains("opensipsSrc"),
-        "hover must name the setting that overrides it: {text:?}"
+        !text.contains("Built-in"),
+        "the release is on the status bar; a hover does not repeat it: {text:?}"
+    );
+    assert!(
+        !text.contains("opensipsSrc"),
+        "nor the escape hatch, unasked: {text:?}"
     );
     let _ = child.kill();
 }

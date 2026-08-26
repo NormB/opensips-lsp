@@ -71,6 +71,29 @@ module hover is unavailable.
 { "opensipsSrc": "/home/user/src/opensips" }
 ```
 
+#### versionInHints (boolean)
+
+Whether built-in documentation repeats the release it came from, under
+every hover and completion item.
+
+Off by default. The release is on the status bar the whole time a
+config is open, and every warning that turns on it names it, so a
+hover saying it again is the same fact a third time. Turn it on if you
+read hovers in isolation or paste them elsewhere and want the
+provenance travelling with the text.
+
+The note distinguishes the two catalogues, because they are pinned
+differently: module documentation follows `opensipsVersion`, while
+core documentation is a single vendored artefact and names its own
+release whatever you have selected.
+
+*Default value is `false`. Environment fallback:
+`OPENSIPS_LSP_VERSION_IN_HINTS`.*
+
+```json title="Set versionInHints parameter"
+{ "versionInHints": true }
+```
+
 #### opensipsVersion (string)
 
 Which built-in OpenSIPS release to check `modparam` names against.

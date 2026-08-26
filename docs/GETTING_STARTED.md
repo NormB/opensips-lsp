@@ -223,3 +223,67 @@ bottom-right status bar (it will say **Plain Text**) and pick
 | Completion has no documentation | Core and module entries both carry built-in documentation from 4.0.1, so an entry with none is one 4.0.1 does not document: set **Opensips Src** to an OpenSIPS source folder matching your build. |
 | A module I have is not offered | The built-in list is what 4.0.1 documents, not what you compiled. Set **Opensips Src** to your own tree. |
 | Still stuck | **View → Output**, pick **OpenSIPS LSP** in the dropdown — the server explains what it is doing (e.g. "ready (186 documented modules, 66 core functions, core and module docs built in from 4.0.1)"). |
+
+## Checking against a specific OpenSIPS release
+
+Module parameters move between releases: a name that is correct on one
+can be unknown on another. The server therefore checks `modparam`
+names against ONE release, and tells you which — it is on the status
+bar the whole time a config is open, and every warning names it:
+
+```
+parameter 'x' is not exported by module 'y' in OpenSIPS 4.0.1 (built in)
+```
+
+### Pick one of the built-in releases
+
+The extension ships catalogues for `3.5.9`, `3.6.8`, `4.0.1`. In VS Code or VSCodium,
+open Settings, search for `opensipsVersion`, and choose from the
+dropdown — it lists exactly the releases that are shipped, so it
+cannot be set to one the server would reject.
+
+Editing `settings.json` directly:
+
+```json
+{ "opensipsLsp.opensipsVersion": "4.0.1" }
+```
+
+Leave it empty for the newest. An unrecognised release is reported in
+the log and the newest is used, rather than silently checking against
+something you did not ask for.
+
+Outside the editor, `opensips-lsp check` reads the same choice from
+`OPENSIPS_LSP_VERSION`:
+
+```sh
+OPENSIPS_LSP_VERSION=4.0.1 opensips-lsp check /etc/opensips/opensips.cfg
+```
+
+### Or point at your own build
+
+A release that is not shipped — or a patched or forked build — is
+handled by pointing at its source tree instead:
+
+```json
+{ "opensipsLsp.opensipsSrc": "/opt/src/opensips" }
+```
+
+That wins over the release setting, because it is exact for the build
+you actually run: parameters come from that tree's own module code.
+The status bar then says `the configured source tree` rather than a
+version.
+
+### Seeing the release in hover text
+
+Hover and completion do not repeat the release by default — the status
+bar shows it continuously. If you read hovers in isolation, or paste
+them into tickets, turn it on:
+
+```json
+{ "opensipsLsp.versionInHints": true }
+```
+
+Module documentation then names the release you selected. Core
+documentation names its own: it is a single vendored artefact that
+does not move with that setting, and saying otherwise would misstate
+where those docs came from.

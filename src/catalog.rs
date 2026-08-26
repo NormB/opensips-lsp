@@ -885,22 +885,8 @@ pub struct BuiltinCore {
 pub fn builtin_core() -> &'static BuiltinCore {
     static B: std::sync::OnceLock<BuiltinCore> = std::sync::OnceLock::new();
     B.get_or_init(|| {
-        let mut b: BuiltinCore = serde_json::from_str(include_str!("core_builtin.json"))
+        let b: BuiltinCore = serde_json::from_str(include_str!("core_builtin.json"))
             .expect("the vendored core catalogue must parse");
-        let note = format!(
-            "\n\n*Built-in documentation from OpenSIPS {} — set `opensipsSrc` \
-             to your own source tree for version-exact docs.*",
-            b.version
-        );
-        for it in b
-            .core
-            .functions
-            .iter_mut()
-            .chain(b.core.params.iter_mut())
-            .chain(b.core.pvars.iter_mut())
-        {
-            it.doc.push_str(&note);
-        }
         b
     })
 }
@@ -1189,21 +1175,58 @@ pub fn builtin_versioned() -> &'static VersionedModules {
 /// repeatedly should hold on to the result rather than ask again.
 pub fn builtin_modules_at(version: &str) -> Option<BuiltinModules> {
     let modules = builtin_versioned().at(version)?;
-    let mut out = BuiltinModules {
+    let out = BuiltinModules {
         version: version.to_string(),
         modules,
     };
-    let note = format!(
-        "\n\n*Built-in documentation from OpenSIPS {} — set `opensipsSrc` \
-         to your own source tree for version-exact docs.*",
-        out.version
-    );
-    for m in out.modules.iter_mut() {
+    Some(out)
+}
+
+/// The provenance note for built-in documentation, when the user asks
+/// to see it.
+///
+/// `kind` distinguishes the two catalogues, because they are pinned
+/// differently: the module catalogue carries several releases and
+/// follows the user's choice, while the core catalogue is one
+/// vendored artefact at a single release. Naming the chosen release
+/// over a core entry would be a lie about where those docs came from.
+///
+/// (original note follows)
+/// The provenance note for built-in documentation, when the user asks
+/// to see it.
+///
+/// It is off by default: the release is on the status bar the whole
+/// time a config is open, and every warning that turns on the release
+/// names it, so repeating it under every hover and every completion
+/// item was the same fact a third time. Some users want it anyway —
+/// reading a hover in isolation, or pasting one into a ticket — so it
+/// is a setting rather than a decision made for them.
+pub fn version_note(kind: &str, version: &str) -> String {
+    format!(
+        "\n\n*Built-in {kind} documentation from OpenSIPS {version} — set \
+         `opensipsSrc` to your own source tree for version-exact docs.*"
+    )
+}
+
+/// Append `note` to every core entry.
+pub fn note_core(core: &mut CoreDocs, note: &str) {
+    for it in core
+        .functions
+        .iter_mut()
+        .chain(core.params.iter_mut())
+        .chain(core.pvars.iter_mut())
+    {
+        it.doc.push_str(note);
+    }
+}
+
+/// Append `note` to every entry of a module catalogue.
+pub fn note_modules(modules: &mut [ModuleDoc], note: &str) {
+    for m in modules.iter_mut() {
         for it in m.functions.iter_mut().chain(m.params.iter_mut()) {
-            it.doc.push_str(&note);
+            it.doc.push_str(note);
         }
     }
-    Some(out)
 }
 
 /// Harvest the core-language docs from an OpenSIPS 4.x source tree;

@@ -26,10 +26,18 @@ fn the_vendored_catalogue_has_the_core_language_in_it() {
 }
 
 /// Every entry says where it came from, so nobody mistakes the pinned
-/// version's documentation for their own build's.
+/// The catalogue carries no provenance note of its own.
+///
+/// It used to: the note was baked into every entry as the catalogue
+/// loaded, so it could not be turned off and it named a release the
+/// user might not be using. It is applied by the server now, only
+/// when `versionInHints` asks for it, which is also what lets it name
+/// the right release. A note baked in here would be shown regardless
+/// of the setting and would defeat both.
 #[test]
-fn every_built_in_entry_names_the_version_it_came_from() {
+fn the_catalogue_carries_no_baked_in_provenance_note() {
     let b = catalog::builtin_core();
+    let mut checked = 0usize;
     for it in b
         .core
         .params
@@ -37,13 +45,32 @@ fn every_built_in_entry_names_the_version_it_came_from() {
         .chain(b.core.functions.iter())
         .chain(b.core.pvars.iter())
     {
+        checked += 1;
         assert!(
-            it.doc.contains(&b.version) && it.doc.contains("opensipsSrc"),
-            "{} does not say it is built-in documentation: {:?}",
+            !it.doc.contains("Built-in"),
+            "{} carries a baked-in note: {:?}",
+            it.name,
+            it.doc
+        );
+        assert!(
+            !it.doc.contains("opensipsSrc"),
+            "{} carries a baked-in escape hatch: {:?}",
             it.name,
             it.doc
         );
     }
+    // POSITIVE CONTROL: an empty catalogue would satisfy every
+    // absence above.
+    assert!(checked > 100, "only {checked} entries examined");
+}
+
+/// And the note the server applies says what it should.
+#[test]
+fn the_provenance_note_names_its_catalogue_and_release() {
+    let note = catalog::version_note("core", "9.9.9");
+    assert!(note.contains("OpenSIPS 9.9.9"), "{note:?}");
+    assert!(note.contains("core documentation"), "{note:?}");
+    assert!(note.contains("opensipsSrc"), "{note:?}");
 }
 
 /// The freshness gate: the vendored file must still equal a harvest of

@@ -197,6 +197,7 @@ export function activate(context: vscode.ExtensionContext) {
         'opensipsLsp.opensipsPath',
         'opensipsLsp.opensipsSrc',
         'opensipsLsp.opensipsVersion',
+        'opensipsLsp.versionInHints',
         'opensipsLsp.cacheDir',
         'opensipsLsp.enable',
         'opensipsLsp.diagnostics.enable',
