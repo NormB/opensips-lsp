@@ -64,6 +64,14 @@ core functions. Commas inside strings don't advance the parameter.
 
 #### Hover, go to definition, document symbols
 
+The manual is not the whole language. Where the lexer accepts two
+spellings of one setting and the manual documents one — `workdir` for
+`wdir`, `tcpthreshold` for `tcp_threshold` — the other hovers as the
+same setting and says which spelling the manual uses. Where no page
+describes a name at all — `memdump`, `memlog`, and the calls `xdbg()`
+and `error()` — it is still offered, with a note saying the manual is
+silent, because offering nothing claims it does not exist.
+
 Hovering a core parameter shows what it is, what it defaults to, and
 a worked example — the example is where the format lives, which is
 what `db_default_url` is hovered for. On a `socket =` line the

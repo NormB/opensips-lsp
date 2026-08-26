@@ -1123,6 +1123,168 @@ pub fn parse_core_params_md(md: &str) -> Result<Vec<Item>, String> {
         .collect())
 }
 
+/// Every way the lexer lets you spell one token.
+///
+/// Two shapes carry different meanings and must not be confused.
+/// Alternatives INSIDE one group are ALIASES — `"workdir"|"wdir"` is
+/// one setting spelled two ways, and a reader who writes the spelling
+/// the manual skipped still deserves an answer. Separate groups are
+/// PARTS of one spelling — `("allow"|"ALLOW")[-_]("proxy"|"PROXY")`
+/// is `allow_proxy`, and reading it as aliases invents two settings
+/// nobody can write.
+pub fn lexer_spellings(pattern: &str) -> Vec<String> {
+    static GROUP: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let group = GROUP.get_or_init(|| regex::Regex::new(r"\(([^()]*)\)").unwrap());
+    let words = |t: &str| -> Vec<String> {
+        t.split('"')
+            .filter(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+            .map(str::to_string)
+            .collect()
+    };
+    let pattern = pattern.trim();
+    if pattern.contains('(') {
+        let parts: Vec<String> = group
+            .captures_iter(pattern)
+            .filter_map(|c| words(&c[1]).into_iter().next())
+            .collect();
+        return if parts.is_empty() {
+            Vec::new()
+        } else {
+            vec![parts.join("_")]
+        };
+    }
+    let mut out = words(pattern);
+    if out.is_empty()
+        && !pattern.is_empty()
+        && pattern.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+    {
+        out.push(pattern.to_string());
+    }
+    let mut seen: Vec<String> = Vec::new();
+    out.retain(|w| {
+        if seen.contains(w) {
+            return false;
+        }
+        seen.push(w.clone());
+        true
+    });
+    out
+}
+
+/// Token to every spelling of it, read from a lexer's definitions.
+fn lexer_tokens(cfg_lex: &str) -> Vec<(String, Vec<String>)> {
+    let mut out = Vec::new();
+    for line in cfg_lex.split("\n%%").next().unwrap_or(cfg_lex).lines() {
+        let mut it = line.splitn(2, [' ', '\t']);
+        let (Some(tok), Some(pat)) = (it.next(), it.next()) else {
+            continue;
+        };
+        if tok.is_empty() || !tok.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
+            continue;
+        }
+        let ws = lexer_spellings(pat);
+        if !ws.is_empty() {
+            out.push((tok.to_string(), ws));
+        }
+    }
+    out
+}
+
+/// Fill in what the grammar accepts and the manual never mentions.
+///
+/// Three shapes, one rule: the grammar decides what exists, the
+/// manual decides what it says. A spelling the manual skips gets the
+/// documented spelling's text and a pointer to it; a name documented
+/// under no spelling at all gets a note saying so, because offering
+/// nothing claims it does not exist.
+fn reconcile_core_with_grammar(core: &mut CoreDocs, cfg_y: &str, cfg_lex: &str) {
+    let tokens = lexer_tokens(cfg_lex);
+    let assignable: Vec<&str> = cfg_y
+        .match_indices(" EQUAL")
+        .filter_map(|(i, _)| cfg_y[..i].rsplit(|c: char| c.is_whitespace()).next())
+        .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
+        .collect();
+    // A token followed by `LPAREN` is written like a call, and not
+    // every one of them is one: `modparam(...)` is a directive and
+    // `not(...)` is an operator. What separates a SCRIPT FUNCTION is
+    // that its production builds an action — `mk_action` — which is
+    // exactly the thing a route can call.
+    let called: Vec<&str> = cfg_y
+        .match_indices(" LPAREN")
+        .filter(|(i, _)| {
+            let rest = &cfg_y[*i..];
+            let end = rest
+                .find("\n\t\t|")
+                .into_iter()
+                .chain(rest.find("\n\t|"))
+                .chain(rest.find("\n\t\t;"))
+                .min()
+                .unwrap_or(rest.len().min(400));
+            rest[..end].contains("mk_action")
+        })
+        .filter_map(|(i, _)| cfg_y[..i].rsplit(|c: char| c.is_whitespace()).next())
+        .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
+        .collect();
+
+    let mut new_params: Vec<Item> = Vec::new();
+    let mut new_functions: Vec<Item> = Vec::new();
+    for (tok, spellings) in &tokens {
+        let is_assignable = assignable.contains(&tok.as_str());
+        let is_called = called.contains(&tok.as_str());
+        if !is_assignable && !is_called {
+            continue;
+        }
+        // a name the reader might write that the catalogue already
+        // answers for — under any of its spellings
+        let documented = spellings.iter().find_map(|w| {
+            core.params
+                .iter()
+                .find(|p| &p.name == w)
+                .or_else(|| core.functions.iter().find(|f| &f.name == w))
+                .or_else(|| core.statements.iter().find(|s| &s.name == w))
+        });
+        match documented {
+            Some(d) => {
+                let (doc, from) = (d.doc.clone(), d.name.clone());
+                for w in spellings.iter().filter(|w| **w != from) {
+                    if core.params.iter().any(|p| &p.name == w)
+                        || core.functions.iter().any(|f| &f.name == w)
+                        || core.statements.iter().any(|s| &s.name == w)
+                    {
+                        continue;
+                    }
+                    new_params.push(Item {
+                        name: w.clone(),
+                        detail: format!("core parameter — the manual spells it `{from}`"),
+                        doc: doc.clone(),
+                    });
+                }
+            }
+            None => {
+                let Some(name) = spellings.first() else {
+                    continue;
+                };
+                let note = format!("The grammar accepts `{name}`. No manual page describes it.");
+                if is_called {
+                    new_functions.push(Item {
+                        name: name.clone(),
+                        detail: format!("core function — `{name}(...)`"),
+                        doc: note,
+                    });
+                } else {
+                    new_params.push(Item {
+                        name: name.clone(),
+                        detail: "core parameter".into(),
+                        doc: note,
+                    });
+                }
+            }
+        }
+    }
+    core.params.extend(new_params);
+    core.functions.extend(new_functions);
+}
+
 /// The modifiers `socket = ...` accepts, from the grammar production
 /// that parses them, spelled as the lexer spells them.
 ///
@@ -1809,7 +1971,7 @@ pub fn note_modules(modules: &mut [ModuleDoc], note: &str) {
 pub fn harvest_core(tree_root: &Path) -> CoreDocs {
     let manual = tree_root.join("docs").join("manual");
     let read = |f: &str| std::fs::read_to_string(manual.join(f)).unwrap_or_default();
-    CoreDocs {
+    let mut core = CoreDocs {
         functions: parse_core_functions_md(&read("Script-CoreFunctions.md")).unwrap_or_default(),
         params: parse_core_params_md(&read("Script-CoreParameters.md")).unwrap_or_default(),
         pvars: parse_core_vars_md(&read("Script-CoreVar.md")).unwrap_or_default(),
@@ -1826,7 +1988,15 @@ pub fn harvest_core(tree_root: &Path) -> CoreDocs {
             .map(|src| parse_log_levels_c(&src))
             .find(|v| !v.is_empty())
             .unwrap_or_default(),
-    }
+    };
+    // the manual is not the whole language: the grammar accepts names
+    // no page mentions, and spellings the pages skip
+    reconcile_core_with_grammar(
+        &mut core,
+        &std::fs::read_to_string(tree_root.join("cfg.y")).unwrap_or_default(),
+        &std::fs::read_to_string(tree_root.join("cfg.lex")).unwrap_or_default(),
+    );
+    core
 }
 
 /// Where the level switch lives. A test holds this against the real
