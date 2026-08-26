@@ -49,18 +49,25 @@ fn server_options() -> BTreeSet<String> {
 fn client_renames() -> Vec<(String, String)> {
     let ext = read("client/src/extension.ts");
     let mut out = Vec::new();
-    for line in ext.lines() {
-        let line = line.trim();
-        let Some((server, rest)) = line.split_once(": cfg.get") else {
+    for (i, _) in ext.match_indices(": cfg.get") {
+        // the server-side name is the identifier before the colon
+        let server = ext[..i]
+            .rsplit(|c: char| c.is_whitespace() || c == '{' || c == ',')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        // and the manifest name is the first quoted string after it,
+        // which may be on a LATER LINE: this client wraps its long
+        // calls, and a line-at-a-time reader saw 13 of 20 of them
+        let rest = &ext[i..];
+        let Some(q) = rest.find('\'') else { continue };
+        let Some((manifest, _)) = rest[q + 1..].split_once('\'') else {
             continue;
         };
-        let Some((_, after)) = rest.split_once('\'') else {
+        if server.is_empty() || manifest.is_empty() {
             continue;
-        };
-        let Some((manifest, _)) = after.split_once('\'') else {
-            continue;
-        };
-        out.push((manifest.to_string(), server.trim().to_string()));
+        }
+        out.push((manifest.to_string(), server));
     }
     out
 }
