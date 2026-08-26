@@ -2,6 +2,50 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.24.0] — 2026-08-26
+
+**Hovering a setting now tells you what to write, and the tail of a
+`socket` line stops being invisible.**
+
+- **A parameter's hover carries its default and its worked example.**
+  `db_default_url` used to say "the default DB URL used by modules
+  when no per-module URL is configured" and stop — while the URL
+  FORMAT, the one thing anyone hovers it for, sat in the example
+  block underneath. It was not one parameter: 68 of 75 stated
+  defaults and 96 of 99 examples were being discarded. All 97
+  parameters now carry their example and 70 carry a default.
+- **The twelve modifiers a `socket` line takes now hover and
+  complete.** `use_workers n`, `reuse_port`, `anycast`, `as
+  ip[:port]`, `tag ID`, `frag`, `tos n`, `accept_subdomain` and the
+  three proxy-protocol forms. `socket` hovered and every word after
+  it — most of what a real socket line is made of — answered nothing.
+  The set is read from the grammar's own `socket_def_param`
+  production, so it is what your release accepts; the manual supplies
+  the descriptions. `listen =` is the same statement in 3.x and works
+  the same way.
+- **Spellings the manual skips now hover as the setting they are.**
+  `workdir` is `wdir`, `tcpthreshold` is `tcp_threshold`, and three
+  more. Writing the spelling upstream chose not to document used to
+  answer nothing at all.
+- **Names no manual page describes are offered anyway, and say so.**
+  `memdump`, `memlog` and the calls `xdbg()` and `error()` are
+  accepted by the grammar and documented nowhere. Offering nothing
+  for them claims they do not exist.
+
+### Fixed
+
+- **An alias of a call is offered as a call.** No spelling in this
+  release is affected — the sibling server's `seturi`/`rewriteuri`
+  is — but the code path filed every alias under parameters, which
+  offers it where a parameter belongs and hides it where the call
+  does.
+- A markdown list survives as a list. `socket` documents its twelve
+  modifiers one bullet each, and they were being joined into a single
+  unbroken paragraph.
+- A `#` at column zero inside an example is a configuration comment,
+  not a heading — there are 42 across the shipped manual, and a
+  section ending at one lost the rest of its example.
+
 ## [0.23.0] — 2026-08-26
 
 **The things a configuration is actually written with now hover and

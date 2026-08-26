@@ -110,3 +110,70 @@ fn harvests_core_docs_from_a_real_4x_tree_when_present() {
     assert!(core.params.iter().any(|p| p.name == "advertised_address"));
     assert!(core.pvars.iter().any(|v| v.name == "$ru"));
 }
+
+/// Owed 1/2: the core-function heading contract, stated.
+///
+/// A test fixture written against the wrong shape tests nothing and
+/// says so only if something else notices. Mine used `### name` and
+/// harvested zero functions; the assertion that caught it was a
+/// positive control, not the fixture. The contract is `## name(args)`
+/// — level TWO, and parentheses required — and nothing pinned either
+/// half.
+#[test]
+fn the_core_function_heading_is_level_two_and_parenthesised() {
+    let names = |md: &str| -> Vec<String> {
+        parse_core_functions_md(md)
+            .expect("parses")
+            .into_iter()
+            .map(|i| i.name)
+            .collect()
+    };
+    // POSITIVE CONTROL: the shape that works
+    assert_eq!(
+        names("# F\n\n## rewriteuri(uri)\n\nRewrites it.\n"),
+        vec!["rewriteuri"]
+    );
+    assert!(
+        names("# F\n\n### rewriteuri(uri)\n\nRewrites it.\n").is_empty(),
+        "a level-three heading is not a function here — the parameters page uses \
+         `###`, and confusing the two harvests nothing at all"
+    );
+    assert!(
+        names("# F\n\n## rewriteuri\n\nRewrites it.\n").is_empty(),
+        "a heading with no argument list is not a call signature"
+    );
+}
+
+/// Owed 2/2: and the real page still satisfies it.
+///
+/// The failure mode this guards is silence: a contract change
+/// upstream harvests zero functions, every hover for a core call goes
+/// blank, and no fixture-based test notices because fixtures are
+/// written to the shape the code already expects.
+#[test]
+fn the_real_functions_page_yields_its_functions() {
+    let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
+    let page = std::fs::read_to_string(
+        std::path::Path::new(&tree).join("docs/manual/Script-CoreFunctions.md"),
+    )
+    .expect("the functions page");
+    let items = parse_core_functions_md(&page).expect("parses");
+
+    // the page was read, and it is not empty
+    assert!(page.len() > 5_000, "the page read as {} bytes", page.len());
+    assert!(
+        items.len() >= 40,
+        "only {} functions harvested from a {}-byte page",
+        items.len(),
+        page.len()
+    );
+    for want in ["xlog", "force_send_socket"] {
+        assert!(
+            items.iter().any(|i| i.name == want),
+            "{want} missing from the real page"
+        );
+    }
+    for i in &items {
+        assert!(!i.doc.trim().is_empty(), "{} would hover blank", i.name);
+    }
+}

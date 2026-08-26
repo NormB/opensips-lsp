@@ -1222,9 +1222,28 @@ fn lexer_tokens(cfg_lex: &str) -> Vec<(String, Vec<String>)> {
 /// nothing claims it does not exist.
 fn reconcile_core_with_grammar(core: &mut CoreDocs, cfg_y: &str, cfg_lex: &str) {
     let tokens = lexer_tokens(cfg_lex);
-    let assignable: Vec<&str> = cfg_y
+    // Globals come from the assignment statement alone. Every
+    // `TOKEN EQUAL` in this grammar happens to sit there today, so
+    // the unbounded scan gave the same answer — but the sibling
+    // server has a `socket = { attr = …; }` form whose attributes are
+    // assignable too, and reading the whole file there turned all
+    // seven of them into core parameters no configuration can set at
+    // the top level. Bounded before this grammar grows that shape.
+    let globals = cfg_y
+        .find("\nassign_stm:")
+        .map(|i| {
+            let rest = &cfg_y[i + 1..];
+            static NEXT: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+            let next = NEXT.get_or_init(|| regex::Regex::new(r"\n[a-z_]+:").unwrap());
+            match next.find(&rest["assign_stm:".len()..]) {
+                Some(m) => &rest[.."assign_stm:".len() + m.start()],
+                None => rest,
+            }
+        })
+        .unwrap_or(cfg_y);
+    let assignable: Vec<&str> = globals
         .match_indices(" EQUAL")
-        .filter_map(|(i, _)| cfg_y[..i].rsplit(|c: char| c.is_whitespace()).next())
+        .filter_map(|(i, _)| globals[..i].rsplit(|c: char| c.is_whitespace()).next())
         .filter(|t| !t.is_empty() && is_token(t))
         .collect();
     // A token followed by `LPAREN` is written like a call, and not
@@ -1259,28 +1278,55 @@ fn reconcile_core_with_grammar(core: &mut CoreDocs, cfg_y: &str, cfg_lex: &str) 
         }
         // a name the reader might write that the catalogue already
         // answers for — under any of its spellings
+        // which LIST the documented spelling lives in matters: an
+        // alias of a script function is a script function. Filing it
+        // under parameters offers it where a parameter belongs and
+        // hides it where the call does.
         let documented = spellings.iter().find_map(|w| {
             core.params
                 .iter()
                 .find(|p| &p.name == w)
-                .or_else(|| core.functions.iter().find(|f| &f.name == w))
-                .or_else(|| core.statements.iter().find(|s| &s.name == w))
+                .map(|d| (d, false))
+                .or_else(|| {
+                    core.functions
+                        .iter()
+                        .find(|f| &f.name == w)
+                        .map(|d| (d, true))
+                })
+                .or_else(|| {
+                    core.statements
+                        .iter()
+                        .find(|s| &s.name == w)
+                        .map(|d| (d, false))
+                })
         });
         match documented {
-            Some(d) => {
+            Some((d, is_function)) => {
                 let (doc, from) = (d.doc.clone(), d.name.clone());
                 for w in spellings.iter().filter(|w| **w != from) {
                     if core.params.iter().any(|p| &p.name == w)
                         || core.functions.iter().any(|f| &f.name == w)
                         || core.statements.iter().any(|s| &s.name == w)
+                        || new_params.iter().any(|p| &p.name == w)
+                        || new_functions.iter().any(|f| &f.name == w)
                     {
                         continue;
                     }
-                    new_params.push(Item {
+                    let kind = if is_function {
+                        "core function"
+                    } else {
+                        "core parameter"
+                    };
+                    let item = Item {
                         name: w.clone(),
-                        detail: format!("core parameter — the manual spells it `{from}`"),
+                        detail: format!("{kind} — the manual spells it `{from}`"),
                         doc: doc.clone(),
-                    });
+                    };
+                    if is_function {
+                        new_functions.push(item);
+                    } else {
+                        new_params.push(item);
+                    }
                 }
             }
             None => {

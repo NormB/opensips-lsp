@@ -630,3 +630,114 @@ fn punctuation_and_lower_case_starts_are_not_token_names() {
         );
     }
 }
+
+/// An alias of a CALL is a call, not a parameter.
+///
+/// This grammar has no such alias today; the sibling server's does —
+/// `rewriteuri` is a script action and `seturi` is the same action —
+/// and this code path filed every alias under parameters regardless.
+/// Fixed there and left wrong here until someone read the two side by
+/// side, which is how a shared shape rots: correct in the repo where
+/// it happened to bite.
+#[test]
+fn an_alias_of_a_documented_call_is_filed_as_a_call() {
+    // This tree has no function alias, so the rule cannot be observed
+    // on it: a synthetic one is the only way to make the assertion
+    // bite rather than pass on an empty set.
+    let dir = std::env::temp_dir().join(format!("oslsp-alias-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("docs/manual")).unwrap();
+    std::fs::write(
+        dir.join("cfg.lex"),
+        "REWRITEURI\t\"rewriteuri\"|\"seturi\"\n%%\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("cfg.y"),
+        "cmd:\n\t| REWRITEURI LPAREN STRING RPAREN { mk_action1($$, SET_URI_T, STR_ST, $3); }\n\t;\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("docs/manual/Script-CoreFunctions.md"),
+        "# Functions\n\n## rewriteuri(uri)\n\nRewrites the request URI.\n",
+    )
+    .unwrap();
+
+    let core = opensips_lsp::catalog::harvest_core(&dir);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // POSITIVE CONTROL: the documented call was read at all.
+    assert!(
+        core.functions.iter().any(|f| f.name == "rewriteuri"),
+        "the manual's call was not harvested: {:?}",
+        core.functions.iter().map(|f| &f.name).collect::<Vec<_>>()
+    );
+    assert!(
+        core.functions.iter().any(|f| f.name == "seturi"),
+        "`seturi` aliases a CALL and must be filed as one: {:?}",
+        core.functions.iter().map(|f| &f.name).collect::<Vec<_>>()
+    );
+    assert!(
+        !core.params.iter().any(|p| p.name == "seturi"),
+        "and must not be offered as a parameter as well"
+    );
+}
+
+#[test]
+fn an_alias_lands_in_the_same_list_as_what_it_aliases() {
+    let core = &opensips_lsp::catalog::builtin_core().core;
+    let mut wrong: Vec<String> = Vec::new();
+    let mut checked = 0usize;
+    for p in &core.params {
+        if let Some((_, from)) = p.detail.split_once("the manual spells it `") {
+            checked += 1;
+            let from = from.trim_end_matches('`');
+            if core.functions.iter().any(|f| f.name == from) {
+                wrong.push(format!(
+                    "{} aliases the CALL {from} and is a parameter",
+                    p.name
+                ));
+            }
+        }
+    }
+    // POSITIVE CONTROL: there are aliases to check.
+    assert!(checked >= 4, "only {checked} alias entries found");
+    assert!(wrong.is_empty(), "{wrong:?}");
+}
+
+/// Globals come from the assignment statement, not the whole grammar.
+///
+/// Every `TOKEN EQUAL` in this file sits in `assign_stm` today, so
+/// the unbounded scan gave the same answer. The sibling server has a
+/// `socket = { attr = …; }` form whose attributes are assignable too,
+/// and reading the whole file there made all seven of them core
+/// parameters that are a syntax error at the top level.
+#[test]
+fn globals_are_read_from_the_assignment_statement_only() {
+    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let y = std::fs::read_to_string(tree.join("cfg.y")).expect("cfg.y");
+    let start = y
+        .find("\nassign_stm:")
+        .expect("the grammar has an assignment statement")
+        + 1;
+    let rest = &y[start + "assign_stm:".len()..];
+    let end = rest
+        .match_indices('\n')
+        .find(|(i, _)| {
+            rest[i + 1..].split(':').next().is_some_and(|w| {
+                !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+            }) && rest[i + 1..].contains(':')
+        })
+        .map_or(rest.len(), |(i, _)| i);
+    let body = &rest[..end];
+    // POSITIVE CONTROL: the production was located and is substantial
+    assert!(
+        body.len() > 5_000,
+        "assign_stm body read as {} chars",
+        body.len()
+    );
+    assert!(
+        body.contains("LOGLEVEL EQUAL") || body.contains("DEBUG_MODE EQUAL"),
+        "the located body does not look like the global assignments"
+    );
+}
