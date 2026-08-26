@@ -91,6 +91,7 @@ function buildClient(context: vscode.ExtensionContext): LanguageClient {
             analyzerDiagnostics: cfg.get<boolean>('diagnostics.analyzer', true),
             codeLensReferences: cfg.get<boolean>('codeLens.references', true),
             inlayHintParameterNames: cfg.get<boolean>('inlayHints.parameterNames', true),
+            assistance: cfg.get<boolean>('assistance', true),
             cacheDir: cfg.get<string>('cacheDir', ''),
         },
     };

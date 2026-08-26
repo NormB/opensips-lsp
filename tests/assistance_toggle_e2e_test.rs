@@ -354,3 +354,49 @@ fn the_namespaced_payload_shape_toggles_too() {
     assert!(off, "the nested shape must reach the same switch");
     let _ = child.kill();
 }
+
+/// Every toggle the client pushes live must also be sent at startup.
+///
+/// `assistance` was pushed live and not sent in
+/// `initializationOptions`: turn the popups off, close the editor,
+/// reopen it, and they are back — the setting says off and the server
+/// has never been told. Every other runtime toggle was in both, so
+/// nothing distinguished the one that was in only one of them.
+#[test]
+fn every_live_toggle_is_also_sent_at_startup() {
+    let ext = extension_ts();
+    let init_start = ext.find("initializationOptions: {").expect("init options");
+    let init_end = ext[init_start..].find("\n        },").expect("init ends") + init_start;
+    let init = &ext[init_start..init_end];
+
+    let live_start = ext
+        .find("sendNotification('workspace/didChangeConfiguration'")
+        .expect("live push");
+    let live_end = ext[live_start..]
+        .find("\n            });")
+        .expect("live ends")
+        + live_start;
+    let live = &ext[live_start..live_end];
+
+    let keys = |block: &str| -> Vec<String> {
+        block
+            .lines()
+            .filter_map(|l| l.trim().split_once(": cfg.get").map(|(k, _)| k.to_string()))
+            .collect()
+    };
+    let (init_keys, live_keys) = (keys(init), keys(live));
+
+    // POSITIVE CONTROL: both blocks parsed, so a missing key below is
+    // a real absence and not an empty scan
+    assert!(init_keys.len() > 4, "init options read as {init_keys:?}");
+    assert!(live_keys.len() > 4, "live payload read as {live_keys:?}");
+    assert!(live_keys.iter().any(|k| k == "assistance"), "{live_keys:?}");
+
+    for k in &live_keys {
+        assert!(
+            init_keys.contains(k),
+            "`{k}` is pushed live but not sent at startup, so it is forgotten \
+             every time the editor restarts: init {init_keys:?}"
+        );
+    }
+}
