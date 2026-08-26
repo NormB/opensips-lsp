@@ -265,3 +265,39 @@ fn the_reconciliation_leaves_no_duplicate_names() {
         assert!(seen.len() > 40, "only {} {what}", seen.len());
     }
 }
+
+/// Owed, first. A spelling may contain DIGITS.
+///
+/// The word filter accepted lower-case letters and underscores only,
+/// so `tcp_source_ipv4` and `tcp_source_ipv6` were dropped without a
+/// sound — settings the grammar accepts, silently absent from the
+/// very reconciliation whose whole job is to find them. A filter that
+/// discards its input is the shape of gap this work exists to close.
+#[test]
+fn a_spelling_may_contain_digits() {
+    assert_eq!(
+        lexer_spellings("\"tcp_source_ipv4\""),
+        vec!["tcp_source_ipv4"],
+        "a digit in the middle of a name is part of the name"
+    );
+    assert_eq!(
+        lexer_spellings("\"disable_503_translation\""),
+        vec!["disable_503_translation"]
+    );
+}
+
+/// Owed, second. A bare number is not a spelling.
+///
+/// Widening the filter to allow digits must not widen it to allow a
+/// token that is only digits: a port or a size in a lexer pattern is
+/// a value, not a name anyone writes on the left of an `=`.
+#[test]
+fn a_bare_number_is_not_a_spelling() {
+    assert!(
+        lexer_spellings("\"5060\"").is_empty(),
+        "a number is a value, not a setting name"
+    );
+    assert!(lexer_spellings("\"4xx\"").is_empty(), "nor is `4xx`");
+    // POSITIVE CONTROL: the same shape starting with a letter is one
+    assert_eq!(lexer_spellings("\"x4\""), vec!["x4"]);
+}

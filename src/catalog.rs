@@ -1123,6 +1123,28 @@ pub fn parse_core_params_md(md: &str) -> Result<Vec<Item>, String> {
         .collect())
 }
 
+/// A grammar token name: upper-case, and it may contain DIGITS —
+/// `TCP_SOURCE_IPV4`. The same omission as `is_spelling` had, one
+/// level up: a token filter that rejects digits drops the token
+/// before its spelling is ever looked at.
+fn is_token(t: &str) -> bool {
+    !t.is_empty()
+        && t.starts_with(|c: char| c.is_ascii_uppercase())
+        && t.chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// A config-file spelling: lower-case, and it may contain DIGITS —
+/// `tcp_source_ipv4`, `disable_503_translation`. Requiring letters
+/// only dropped those silently, which is the shape of gap this whole
+/// reconciliation exists to close.
+fn is_spelling(w: &str) -> bool {
+    !w.is_empty()
+        && w.starts_with(|c: char| c.is_ascii_lowercase())
+        && w.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
 /// Every way the lexer lets you spell one token.
 ///
 /// Two shapes carry different meanings and must not be confused.
@@ -1137,7 +1159,7 @@ pub fn lexer_spellings(pattern: &str) -> Vec<String> {
     let group = GROUP.get_or_init(|| regex::Regex::new(r"\(([^()]*)\)").unwrap());
     let words = |t: &str| -> Vec<String> {
         t.split('"')
-            .filter(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c == '_'))
+            .filter(|w| is_spelling(w))
             .map(str::to_string)
             .collect()
     };
@@ -1179,7 +1201,7 @@ fn lexer_tokens(cfg_lex: &str) -> Vec<(String, Vec<String>)> {
         let (Some(tok), Some(pat)) = (it.next(), it.next()) else {
             continue;
         };
-        if tok.is_empty() || !tok.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
+        if tok.is_empty() || !is_token(tok) {
             continue;
         }
         let ws = lexer_spellings(pat);
@@ -1202,7 +1224,7 @@ fn reconcile_core_with_grammar(core: &mut CoreDocs, cfg_y: &str, cfg_lex: &str) 
     let assignable: Vec<&str> = cfg_y
         .match_indices(" EQUAL")
         .filter_map(|(i, _)| cfg_y[..i].rsplit(|c: char| c.is_whitespace()).next())
-        .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
+        .filter(|t| !t.is_empty() && is_token(t))
         .collect();
     // A token followed by `LPAREN` is written like a call, and not
     // every one of them is one: `modparam(...)` is a directive and
@@ -1223,7 +1245,7 @@ fn reconcile_core_with_grammar(core: &mut CoreDocs, cfg_y: &str, cfg_lex: &str) 
             rest[..end].contains("mk_action")
         })
         .filter_map(|(i, _)| cfg_y[..i].rsplit(|c: char| c.is_whitespace()).next())
-        .filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
+        .filter(|t| !t.is_empty() && is_token(t))
         .collect();
 
     let mut new_params: Vec<Item> = Vec::new();
@@ -1320,7 +1342,7 @@ pub fn parse_socket_modifiers_c(cfg_y: &str, cfg_lex: &str) -> Vec<String> {
         let (Some(tok), Some(pat)) = (it.next(), it.next()) else {
             continue;
         };
-        if tok.is_empty() || !tok.chars().all(|c| c.is_ascii_uppercase() || c == '_') {
+        if tok.is_empty() || !is_token(tok) {
             continue;
         }
         let pat = pat.trim();
@@ -1342,7 +1364,7 @@ pub fn parse_socket_modifiers_c(cfg_y: &str, cfg_lex: &str) -> Vec<String> {
     for tok in body
         .split('|')
         .filter_map(|alt| alt.split_whitespace().next())
-        .filter(|t| t.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
+        .filter(|t| is_token(t))
     {
         if let Some((_, w)) = spelling.iter().find(|(t, _)| t == tok)
             && !out.contains(w)
