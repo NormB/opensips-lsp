@@ -98,3 +98,76 @@ fn the_vendored_catalogue_matches_a_fresh_harvest_of_the_pinned_tree() {
         "vendored core pvars differ from the pinned tree — regenerate"
     );
 }
+
+/// The vendored catalogue must match in its TEXT, not just its names.
+///
+/// The drift gate above compares names. The regression that dropped
+/// every default and every worked example from every hover changed no
+/// name at all, so that gate would have passed it without a murmur.
+/// Names are the cheap half of a catalogue; the text is what a reader
+/// is actually shown.
+#[test]
+fn the_vendored_catalogue_matches_a_fresh_harvest_in_its_text_too() {
+    let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
+    let fresh = catalog::harvest_core(std::path::Path::new(&tree));
+    let b = catalog::builtin_core();
+
+    let mut differ: Vec<String> = Vec::new();
+    let mut compared = 0usize;
+    for (what, shipped, harvested) in [
+        ("params", &b.core.params, &fresh.params),
+        ("functions", &b.core.functions, &fresh.functions),
+        ("pvars", &b.core.pvars, &fresh.pvars),
+    ] {
+        for (s, h) in shipped.iter().zip(harvested.iter()) {
+            compared += 1;
+            if s.doc != h.doc || s.detail != h.detail {
+                differ.push(format!("{what}/{}", s.name));
+            }
+        }
+    }
+    // POSITIVE CONTROL: both sides were read.
+    assert!(compared > 200, "only {compared} entries compared");
+    assert!(
+        differ.is_empty(),
+        "vendored text differs from the pinned tree — regenerate. This is the \
+         half the name comparison cannot see: {differ:?}"
+    );
+}
+
+/// And the gate must cover every field it ships.
+///
+/// It compared three. Routes, statements, the socket modifiers and
+/// the log levels were vendored and held against nothing, so any of
+/// them could go stale — or empty — with no test noticing.
+#[test]
+fn the_drift_gate_covers_every_field_of_the_catalogue() {
+    let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
+    let fresh = catalog::harvest_core(std::path::Path::new(&tree));
+    let b = catalog::builtin_core();
+    let names = |v: &[catalog::Item]| -> Vec<String> { v.iter().map(|i| i.name.clone()).collect() };
+
+    for (what, shipped, harvested) in [
+        ("routes", &b.core.routes, &fresh.routes),
+        ("statements", &b.core.statements, &fresh.statements),
+        (
+            "socket_modifiers",
+            &b.core.socket_modifiers,
+            &fresh.socket_modifiers,
+        ),
+    ] {
+        // POSITIVE CONTROL: a field that harvests empty would make
+        // the comparison trivially true.
+        assert!(!harvested.is_empty(), "{what} harvested empty");
+        assert_eq!(
+            names(shipped),
+            names(harvested),
+            "vendored {what} differ from the pinned tree — regenerate"
+        );
+    }
+    assert!(!fresh.log_levels.is_empty(), "log_levels harvested empty");
+    assert_eq!(
+        b.core.log_levels, fresh.log_levels,
+        "vendored log levels differ from the pinned tree — regenerate"
+    );
+}
