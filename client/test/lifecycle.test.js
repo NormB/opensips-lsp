@@ -25,6 +25,8 @@ let settings = {};
 let trusted = true;
 let handlers = {};
 let clients = [];
+let statusItem = null;
+let activeEditor = null;
 
 const doc = (fileName, languageId) => ({
     fileName,
@@ -54,7 +56,33 @@ const vscodeStub = {
             return { dispose() {} };
         },
     },
-    languages: { setTextDocumentLanguage: async () => {} },
+    languages: { setTextDocumentLanguage: async () => {} },    window: {
+        get activeTextEditor() {
+            return activeEditor;
+        },
+        onDidChangeActiveTextEditor: (cb) => {
+            handlers.activeEditor = cb;
+            return { dispose() {} };
+        },
+        createStatusBarItem: () => {
+            statusItem = {
+                text: '',
+                tooltip: '',
+                command: '',
+                shown: false,
+                show() {
+                    this.shown = true;
+                },
+                hide() {
+                    this.shown = false;
+                },
+                dispose() {},
+            };
+            return statusItem;
+        },
+    },
+    StatusBarAlignment: { Left: 1, Right: 2 },
+
 };
 
 class LanguageClient {
@@ -64,6 +92,11 @@ class LanguageClient {
         this.notifications = [];
         clients.push(this);
         log.push('build');
+    }
+    onNotification(method, cb) {
+        this.handlers = this.handlers ?? {};
+        this.handlers[method] = cb;
+        return { dispose() {} };
     }
     async start() {
         log.push('start');
@@ -98,6 +131,8 @@ const reset = () => {
     trusted = true;
     handlers = {};
     clients = [];
+    statusItem = null;
+    activeEditor = null;
 };
 /** A context whose extensionPath holds no bundled server. */
 const ctx = () => ({ extensionPath: '/nonexistent-extension-dir', subscriptions: [] });
@@ -224,7 +259,67 @@ const lastInit = () => clients[clients.length - 1].clientOptions.initializationO
     await ext.deactivate();
     assert.ok(log.includes('stop'), 'deactivate must stop the client');
 
-    console.log('lifecycle: 15 assertions passed');
+    // --- the release the server uses is shown, and only where it applies
+    //
+    // A warning names the catalogue, but only once something is
+    // wrong. Until then nothing told the reader which OpenSIPS
+    // release their file was being parsed against.
+    reset();
+    ext.activate(ctx());
+    await settle();
+    const announce = clients[clients.length - 1].handlers['opensipsLsp/catalogue'];
+    assert.ok(announce, 'the client must subscribe to the catalogue announcement');
+
+    activeEditor = { document: { languageId: 'opensips-cfg' } };
+    handlers.activeEditor?.();
+    assert.strictEqual(
+        statusItem.shown,
+        false,
+        'nothing is shown until the server names its catalogue',
+    );
+
+    announce({ describe: 'OpenSIPS 4.0.1 (built in)', version: '4.0.1' });
+    assert.strictEqual(statusItem.shown, true, 'it appears once announced');
+    assert.ok(
+        statusItem.text.includes('OpenSIPS 4.0.1'),
+        `the release must be visible: ${statusItem.text}`,
+    );
+
+    activeEditor = { document: { languageId: 'plaintext' } };
+    handlers.activeEditor?.();
+    assert.strictEqual(
+        statusItem.shown,
+        false,
+        'a permanent item would be noise in every other editor',
+    );
+
+    activeEditor = { document: { languageId: 'opensips-cfg' } };
+    handlers.activeEditor?.();
+    announce({ describe: 'the configured source tree' });
+    assert.ok(
+        statusItem.text.includes('configured source tree'),
+        `a configured tree must say so: ${statusItem.text}`,
+    );
+
+    // --- changing the release restarts, because the server reads it once
+    //
+    // It is taken from `initializationOptions`, so pushing it to a
+    // running server would change nothing and the user would see the
+    // old release keep answering.
+    reset();
+    ext.activate(ctx());
+    await settle();
+    const beforeVersion = clients.length;
+    await handlers.config({
+        affectsConfiguration: (s) => s === NAMESPACE || s.endsWith('.opensipsVersion'),
+    });
+    await settle();
+    assert.ok(
+        clients.length > beforeVersion,
+        'changing the release must rebuild the client, not be pushed',
+    );
+
+    console.log('lifecycle: 21 assertions passed');
 })().catch((e) => {
     console.error(e);
     process.exit(1);

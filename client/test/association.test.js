@@ -31,6 +31,9 @@ const doc = (fileName, languageId) => ({
     uri: { scheme: 'file', toString: () => 'file://' + fileName },
 });
 
+let statusItem = null;
+let activeEditor = null;
+
 const vscodeStub = {
     workspace: {
         isTrusted: true,
@@ -51,11 +54,30 @@ const vscodeStub = {
         setTextDocumentLanguage: async (d, id) => {
             calls.setLanguage.push([d.fileName, id]);
         },
+    },    // The status item is not what this file is about; it exists here
+    // so `activate` can run at all. `lifecycle.test.js` is where its
+    // behaviour is asserted.
+    window: {
+        activeTextEditor: undefined,
+        onDidChangeActiveTextEditor: () => ({ dispose() {} }),
+        createStatusBarItem: () => ({
+            text: '',
+            tooltip: '',
+            command: '',
+            show() {},
+            hide() {},
+            dispose() {},
+        }),
     },
+    StatusBarAlignment: { Left: 1, Right: 2 },
+
 };
 
 /** A server that includes everything under `inc/` and nothing else. */
 class LanguageClient {
+    onNotification() {
+        return { dispose() {} };
+    }
     async start() {}
     async stop() {}
     async sendRequest(method, params) {

@@ -2,7 +2,7 @@
   "name": "opensips-lsp",
   "displayName": "OpenSIPS Routing Script",
   "description": "Language support for opensips.cfg routing scripts (diagnostics via opensips -C, completion, hover, go-to-definition).",
-  "version": "0.20.1",
+  "version": "0.21.0",
   "publisher": "NormB",
   "license": "(MIT OR Apache-2.0)",
   "engines": {
@@ -63,7 +63,19 @@
         "opensipsLsp.opensipsVersion": {
           "type": "string",
           "default": "",
-          "description": "Built-in OpenSIPS release to check modparam names against (e.g. 3.6.8). Empty means the newest the catalogue covers. Ignored when opensipsSrc is set."
+          "description": "Built-in OpenSIPS release to check modparam names against (e.g. 3.6.8). Empty means the newest the catalogue covers. Ignored when opensipsSrc is set.",
+          "enum": [
+            "",
+            "3.5.9",
+            "3.6.8",
+            "4.0.1"
+          ],
+          "enumDescriptions": [
+            "Newest release the built-in catalogue covers (4.0.1).",
+            "Check modparam names against OpenSIPS 3.5.9.",
+            "Check modparam names against OpenSIPS 3.6.8.",
+            "Check modparam names against OpenSIPS 4.0.1."
+          ]
         },
         "opensipsLsp.checkTimeoutMs": {
           "type": "number",

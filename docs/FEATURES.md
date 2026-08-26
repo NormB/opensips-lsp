@@ -450,7 +450,8 @@ its own.
 
 The built-in catalogue covers several releases — one in full plus what
 each later release changed — so `opensipsVersion` picks which one to
-judge against. A `modparam` warning names the release it was judged
+judge against. In the settings UI it is a dropdown of
+exactly the releases the shipped catalogue carries. A `modparam` warning names the release it was judged
 against, and when the parameter exists in another supported release it
 says which, because a name absent from one release and present in its
 neighbour is a version mismatch rather than a typo.

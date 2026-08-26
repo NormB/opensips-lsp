@@ -14,6 +14,33 @@ pub struct AnalysisRootParams {
     pub uri: Uri,
 }
 
+/// What the server is judging `modparam` names against, pushed to the
+/// client so the editor can show it.
+///
+/// A warning names the catalogue, but only once something is wrong.
+/// Until then nothing tells the reader which release their file is
+/// being parsed against, and the answer changes with a setting they
+/// may not have set themselves.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CatalogueStatus {
+    /// The catalogue named as it reads in a sentence, e.g.
+    /// `OpenSIPS 4.0.1 (built in)` or `the configured source tree`.
+    pub describe: String,
+    /// The release, when it is a built-in one. Absent for a
+    /// configured tree, which is exact for the user's own build and
+    /// carries no version this server can name.
+    pub version: Option<String>,
+}
+
+/// `opensipsLsp/catalogue`: sent once the catalogue is settled, and
+/// again whenever it changes.
+pub enum CatalogueNotification {}
+
+impl tower_lsp_server::ls_types::notification::Notification for CatalogueNotification {
+    type Params = CatalogueStatus;
+    const METHOD: &'static str = "opensipsLsp/catalogue";
+}
+
 /// LSP backend: document store, doc catalog, and the `-C` runner.
 pub struct Backend {
     client: Client,
@@ -1408,6 +1435,18 @@ impl LanguageServer for Backend {
             };
             tag.push_str(&format!(", {what} built in from {version}"));
         }
+        // Tell the client what it is judging against, so the editor can
+        // show it without waiting for something to go wrong.
+        let origin = self.catalog_origin.read().unwrap().clone();
+        self.client
+            .send_notification::<CatalogueNotification>(CatalogueStatus {
+                describe: origin.describe(),
+                version: match &origin {
+                    catalog::CatalogOrigin::BuiltIn(v) => Some(v.clone()),
+                    catalog::CatalogOrigin::ConfiguredTree => None,
+                },
+            })
+            .await;
         self.client
             .log_message(
                 MessageType::INFO,

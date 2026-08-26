@@ -2,6 +2,64 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.21.0] — 2026-08-25
+
+**The `modparam` check now knows what a module actually exports, and
+the server follows the includes OpenSIPS actually opens.** Both had
+been read out of the documentation, and the documentation is not the
+authority for either.
+
+- **Parameters come from the module's own code.** A module declares
+  what `modparam` accepts in a C table, and that table is what
+  OpenSIPS checks against when it starts. The catalogue is now built
+  from it: 189 parameters the documentation never mentions are
+  available in completion and hover for the first time — among them
+  `rtpengine`'s `extra_failover_error`, `tcp_mgm`'s
+  `connect_timeout_col` and all fifty of `b2b_sca`'s `appN_*` column
+  names — and 25 entries the documentation invented are gone,
+  including five `b2b_sca` heading templates and `tls_mgm`'s
+  `cipher_list_col`, none of which OpenSIPS has ever accepted.
+- **The release in use is on the status bar.** While a OpenSIPS config
+  is in front of you, the status bar names the catalogue your
+  `modparam` lines are being checked against — `OpenSIPS 4.0.1`, or
+  the configured source tree when you have pointed at one. Previously
+  the only way to find out was to write something wrong and read the
+  warning. The server tells the editor directly, so it is right even
+  when the release was chosen for you by a workspace setting.
+- **The release is a dropdown, not a text box.** `opensipsVersion`
+  lists exactly the releases the shipped catalogue can answer for, so
+  it cannot be mistyped into a value the server has to reject.
+
+- **Choose the release you run.** The built-in catalogue now covers
+  OpenSIPS 3.5.9, 3.6.8 and 4.0.1, and `opensipsLsp.opensipsVersion`
+  picks which one your configuration is judged against. A warning
+  names that release, and when the parameter exists in another one it
+  says which: *"'bin_async_local_connect_timeout' is not exported by
+  module 'proto_bin' in OpenSIPS 4.0.1 — it exists in 3.5.9, 3.6.8"*.
+  That is the difference between a warning you have to investigate and
+  one that explains itself.
+- **An include inside a block comment is followed, because OpenSIPS
+  follows it.** Includes are flattened line by line before the config
+  is parsed, so commenting a section out with `/* */` does not stop
+  its `include_file` lines from loading. The server used to miss those
+  files entirely: the routes they define were invisible and every call
+  into them was reported undefined. It also stopped following a
+  directive written after a statement on the same line, which OpenSIPS
+  ignores.
+- **`!!include_file` is no longer shown as valid.** OpenSIPS rejects
+  it outright — it is a syntax error, not a prefixed include — and the
+  grammar had been colouring it as though it worked. `#!include_file`
+  is different again: a comment that does nothing, still reported as
+  having no effect.
+- **`opensips-lsp check` runs the same `modparam` check the editor
+  does.** A CI job or git hook previously ran only the analyzer, so a
+  configuration naming a parameter no module exports passed there
+  while the editor warned about it. Expect `check` to report warnings
+  it did not report before; they were always true.
+- **Two warnings arrived with a gap in the middle of the sentence**,
+  from a line continuation that kept its indentation. Both read as
+  sentences now.
+
 ## [0.20.1] — 2026-08-25
 
 **A split configuration whose fragments are named `.inc` now works,

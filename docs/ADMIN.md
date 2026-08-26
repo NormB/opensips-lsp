@@ -77,7 +77,10 @@ Which built-in OpenSIPS release to check `modparam` names against.
 What a module exports moves between releases, so a configuration that
 is correct on one can look wrong when judged against another.
 
-Accepts any release the built-in catalogue covers — currently
+In VS Code and VSCodium this is a dropdown listing exactly the
+releases the shipped catalogue can answer for, so the value cannot
+be mistyped. Editing settings as JSON, it accepts any release the
+built-in catalogue covers — currently
 `3.5.9`, `3.6.8` and `4.0.1`. An unrecognised value is reported and
 the newest is used, rather than silently checking against a release
 you did not ask for.

@@ -16,6 +16,12 @@
 
 mod common;
 use common::*;
+use std::cell::RefCell;
+
+thread_local! {
+    /// The last `opensipsLsp/catalogue` payload seen by `diagnostics_for`.
+    static ANNOUNCED: RefCell<serde_json::Value> = const { RefCell::new(serde_json::Value::Null) };
+}
 use std::process::{Command, Stdio};
 
 const CFG: &str = "route {\n    xlog(\"x\");\n}\nmodparam(\"proto_bin\", \"bin_async_local_connect_timeout\", 5)\n";
@@ -63,6 +69,17 @@ fn diagnostics_for(tag: &str, version: Option<&str>) -> Vec<String> {
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
+    // The server announces what it is judging against before it is
+    // ready; the editor shows this so the reader never has to guess.
+    // `wait_for` discards what it passes over, so this must be taken
+    // before the ready message it precedes.
+    let announced = wait_for(
+        &rx,
+        |v| v["method"] == "opensipsLsp/catalogue",
+        "catalogue announcement",
+    );
+    ANNOUNCED.with(|a| *a.borrow_mut() = announced["params"].clone());
+
     // Wait for the catalogue to be in place first. Without this the
     // "no diagnostics" case below would be satisfied by a server that
     // simply had not got there yet — an empty result meaning nothing.
@@ -146,5 +163,43 @@ fn an_unsupported_release_still_produces_a_working_server() {
     assert!(
         hit.contains("4.0.1"),
         "it falls back to the newest, and says so in the message: {hit:?}"
+    );
+}
+
+/// The server tells the client what it is judging against, so the
+/// editor can show it without waiting for something to go wrong.
+#[test]
+fn the_server_announces_the_catalogue_it_uses() {
+    let _ = diagnostics_for("announce-default", None);
+    let d = ANNOUNCED.with(|a| a.borrow().clone());
+    assert_eq!(
+        d["version"].as_str(),
+        Some("4.0.1"),
+        "the newest release must be announced: {d}"
+    );
+    assert!(
+        d["describe"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("OpenSIPS 4.0.1"),
+        "and named as it reads in a sentence: {d}"
+    );
+
+    let _ = diagnostics_for("announce-older", Some("3.6.8"));
+    let d = ANNOUNCED.with(|a| a.borrow().clone());
+    assert_eq!(
+        d["version"].as_str(),
+        Some("3.6.8"),
+        "the announcement must follow the chosen release: {d}"
+    );
+
+    // an unsupported one falls back, and announces what it FELL BACK
+    // TO rather than what was asked for
+    let _ = diagnostics_for("announce-bogus", Some("9.9.9"));
+    let d = ANNOUNCED.with(|a| a.borrow().clone());
+    assert_eq!(
+        d["version"].as_str(),
+        Some("4.0.1"),
+        "the announcement must name what is in use, not what was asked: {d}"
     );
 }
