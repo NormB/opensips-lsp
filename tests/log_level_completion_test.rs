@@ -213,3 +213,34 @@ fn a_comma_inside_a_string_does_not_advance_the_argument() {
     let site = opensips_lsp::logic::call_site("    xlog(\"lvl\", \"fmt").expect("in a call");
     assert_eq!(site.arg, 1, "a real separator advances the index");
 }
+
+/// The log level is the only enumerated argument the core has.
+///
+/// "The same pattern across all the appropriate calls" is only
+/// finished if the set of appropriate calls is known. In this tree it
+/// is one: `route.c` dispatches on a string character in exactly one
+/// place, and every other `unknown ...` in it names an internal op
+/// code rather than anything a configuration can write.
+///
+/// If upstream adds a second, this fails and the offer gets extended
+/// — rather than the new one quietly offering nothing, which is the
+/// state `xlog` itself was in.
+#[test]
+fn the_core_has_exactly_one_enumerated_string_argument() {
+    let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
+    let src = std::fs::read_to_string(std::path::Path::new(&tree).join("route.c"))
+        .expect("route.c in the pinned tree");
+    let switches = src.matches("switch(s.s[").count();
+    assert_eq!(
+        switches, 1,
+        "route.c dispatches on a string character {switches} times; each one is \
+         an argument with a fixed set of values, and each needs an entry in \
+         LEVEL_ARGUMENTS or its own offer"
+    );
+    // POSITIVE CONTROL: the file was read, so the count above is a
+    // measurement and not an empty scan
+    assert!(
+        src.contains("unknown log level"),
+        "route.c read but does not contain the level parser — the anchor moved"
+    );
+}
