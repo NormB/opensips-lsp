@@ -2,6 +2,24 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.24.1] — 2026-09-02
+
+**A dependency release: the language client the extension talks to,
+and the type stubs it compiles against.**
+
+- **`vscode-languageclient` 10.1.0 to 10.1.1**, which carries LSP
+  3.18.3. Two fixes matter to how this extension behaves: diagnostic
+  pull state now survives a document being closed and reopened
+  quickly — the shape of a fragment being clicked through and come
+  back to — and the client's stream handlers are configurable.
+  Nothing in this extension's own code changed to meet it.
+- **`@types/node` 26.2.0 to 26.4.0**, a compile-time stub with no
+  runtime half.
+- **The lockfile agrees with the manifest again.** Its own `version`
+  field had drifted to 0.19.2 while the manifest read 0.24.0.
+  Regenerating the tree resynced it; `npm ci` compares the two, so
+  the pairing had been quietly untrue for several releases.
+
 ## [0.24.0] — 2026-08-26
 
 **Hovering a setting now tells you what to write, and the tail of a

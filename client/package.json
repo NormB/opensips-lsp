@@ -2,7 +2,7 @@
   "name": "opensips-lsp",
   "displayName": "OpenSIPS Routing Script",
   "description": "Language support for opensips.cfg routing scripts (diagnostics via opensips -C, completion, hover, go-to-definition).",
-  "version": "0.24.0",
+  "version": "0.24.1",
   "publisher": "NormB",
   "license": "(MIT OR Apache-2.0)",
   "engines": {

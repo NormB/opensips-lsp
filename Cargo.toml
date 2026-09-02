@@ -1,6 +1,6 @@
 [package]
 name = "opensips-lsp"
-version = "0.24.0"
+version = "0.24.1"
 edition = "2024"
 # Verified by the `msrv` CI job, which builds with exactly this
 # toolchain — a declared MSRV nothing checks is a wish, not a fact.
