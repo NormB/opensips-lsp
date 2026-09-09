@@ -2,6 +2,26 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.24.3] — 2026-09-09
+
+**Two settings that did nothing now work.**
+
+- **`opensipsLsp.versionInHints` and `opensipsLsp.opensipsVersion` had
+  no effect at all.** The server reads both when it starts, out of the
+  options the extension hands it, and the extension never put them
+  there. Setting either one in your editor changed nothing, and because
+  both are on the restart list, changing one restarted the server, which
+  then looked for the same missing value again. Until now the only way
+  to reach either feature was the `OPENSIPS_LSP_VERSION_IN_HINTS` and
+  `OPENSIPS_LSP_VERSION` environment variables. Set them in Settings
+  instead.
+- **Two gates so this cannot come back.** One drives the built extension
+  and checks every configuration name it reaches for against the
+  manifest that publishes them, in both directions, which is what found
+  the bug. The other compares the option names the server reads against
+  the keys the extension sends, since those were the same fact written
+  twice in two languages with nothing holding them together.
+
 ## [0.24.2] — 2026-09-09
 
 **A release with no behaviour change: one compile-time dependency, and
