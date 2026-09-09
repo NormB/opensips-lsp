@@ -91,7 +91,10 @@ fn the_setting_exists_and_defaults_to_on() {
 #[test]
 fn the_toggle_is_not_in_the_restart_list() {
     let ext = extension_ts();
-    let start = ext.find("restartSettings").expect("restart list");
+    // anchored on the DECLARATION, not the first mention: the name
+    // also appears in prose above, and a bare substring search put
+    // `start` in a comment and read the wrong braces from there
+    let start = ext.find("const restartSettings").expect("restart list");
     let end = ext[start..].find("];").expect("restart list ends") + start;
     assert!(
         !ext[start..end].contains("assistance"),

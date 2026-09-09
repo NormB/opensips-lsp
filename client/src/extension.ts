@@ -93,6 +93,11 @@ function buildClient(context: vscode.ExtensionContext): LanguageClient {
             inlayHintParameterNames: cfg.get<boolean>('inlayHints.parameterNames', true),
             assistance: cfg.get<boolean>('assistance', true),
             cacheDir: cfg.get<string>('cacheDir', ''),
+            // read only at `initialize` on the server side, which is
+            // why both are on `restartSettings` below: changing either
+            // rebuilds the client, and the new value arrives here
+            versionInHints: cfg.get<boolean>('versionInHints', false),
+            opensipsVersion: cfg.get<string>('opensipsVersion', ''),
         },
     };
     return new LanguageClient(
