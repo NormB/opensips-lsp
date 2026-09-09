@@ -26,6 +26,13 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # `@types/vscode` is not a dependency to keep current. Its range IS
+      # the API floor we promise, and `vsce package` refuses to build when
+      # the range exceeds `engines.vscode` — so a routine bump here breaks
+      # the release job while CI stays green. Move it only when the floor
+      # in `client/package.json` `engines.vscode` moves, deliberately.
+      - dependency-name: "@types/vscode"
     commit-message:
       prefix: "deps(client)"
 

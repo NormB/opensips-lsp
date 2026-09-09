@@ -58,6 +58,12 @@ jobs:
       # restarts the server when it should not — and the Rust gate can
       # only see that the strings are there
       - run: npm test
+      # the same command `release.yml` packages with. `tsc` and the
+      # behaviour suites both pass on a manifest `vsce` will refuse —
+      # `@types/vscode` above `engines.vscode` is the one that bit us —
+      # and without this step the refusal first appears on a pushed tag,
+      # after the release job has already built the server artefacts.
+      - run: npx --yes @vscode/vsce package --out /tmp/ci-package-check.vsix
 
   grammar:
     name: tree-sitter grammar
