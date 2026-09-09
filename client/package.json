@@ -180,7 +180,7 @@
   },
   "devDependencies": {
     "@types/vscode": "^1.91.0",
-    "@types/node": "^26.4.0",
+    "@types/node": "^26.4.1",
     "typescript": "^7.0.2"
   },
   "repository": {
