@@ -2,6 +2,32 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.24.4] — 2026-09-15
+
+**A release with no behaviour change: the weekly dependency updates, and
+nothing else.**
+
+- **`@types/node` 26.4.1 to 26.6.1**, a compile-time stub with no
+  runtime half. The weekly dependency group proposed 26.5.1; 26.6.1 was
+  the newest 26.x by the time it was taken, so the range went there
+  directly rather than landing a version that would be superseded on the
+  next run. Note that npm's `latest` tag for this package points at
+  22.20.3 — DefinitelyTyped publishes a line per Node major, and 26.x is
+  the one every current TypeScript dist-tag resolves to.
+- **Five transitive Rust crates**, none of them a direct dependency of
+  this crate: `bitflags` 2.13.1 to 2.13.2, `crossbeam-utils` 0.8.22 to
+  0.8.23, `mio` 1.2.2 to 1.2.3, `smallvec` 1.15.2 to 1.16.1 and `syn`
+  3.0.3 to 3.0.5. Each arrives through something the manifest already
+  asks for rather than through a changed line in it: `bitflags` through
+  `tower-lsp-server`'s `ls-types`, `crossbeam-utils` through `dashmap`,
+  `mio` through `tokio`, `smallvec` through `parking_lot_core` under
+  both, and `syn` through `serde_derive`, which is a proc-macro and so
+  runs only at build time. `Cargo.toml` is untouched.
+- **`@types/vscode` stays at `^1.91.0`**, equal to `engines.vscode`, for
+  the reason 0.24.2 recorded: `vsce package` refuses a manifest whose
+  range exceeds the engine floor, so this one is pinned by a dependabot
+  `ignore` rather than left to the weekly group.
+
 ## [0.24.3] — 2026-09-09
 
 **Two settings that did nothing now work.**
