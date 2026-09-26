@@ -2,6 +2,16 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.24.5] — 2026-09-26
+
+**A release with no behavior change: one weekly dependency update, and
+nothing else.**
+
+- **`@types/node` 26.6.1 to 26.6.2**, a compile-time stub with no
+  runtime half, proposed by the weekly dependency group in #89. No
+  source file, Rust crate or lock entry other than this package's own
+  version changed.
+
 ## [0.24.4] — 2026-09-15
 
 **A release with no behaviour change: the weekly dependency updates, and
