@@ -176,10 +176,10 @@
     "test": "node test/association.test.js && node test/lifecycle.test.js && node test/settings.test.js"
   },
   "dependencies": {
-    "vscode-languageclient": "^10.1.1"
+    "vscode-languageclient": "^10.1.2"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.3",
     "@types/vscode": "^1.91.0",
     "typescript": "^7.0.2"
   },
