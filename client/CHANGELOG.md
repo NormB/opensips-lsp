@@ -4,9 +4,13 @@ All notable changes to the OpenSIPS Routing Script extension.
 
 ## [0.24.6] — 2026-10-01
 
-**A release with no behavior change: one weekly dependency update, and
-nothing else.**
+**A release with no behavior change: a security fix in a bundled dependency,
+and one weekly dependency update.**
 
+- **`brace-expansion` 5.0.9 to 5.0.12**, from #91. The extension bundles it
+  through `minimatch`, and 5.0.9 is affected by three advisories published
+  2026-09-29: GHSA-6j4f-fj2g-mc7p (high, fixed in 5.0.10), GHSA-qhr7-859c-m2p7
+  (high, fixed in 5.0.11) and GHSA-q2hr-2g5m-vwhr (moderate, fixed in 5.0.12).
 - **`vscode-languageclient` 10.1.1 to 10.1.2**, the language-client library
   the extension bundles, and **`@types/node` 26.6.2 to 26.6.3**, a
   compile-time stub, both from the weekly dependency group in #90. No source
