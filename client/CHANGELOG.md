@@ -2,6 +2,16 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.24.7] — 2026-10-07
+
+**A release with no behavior change: two weekly dependency updates, and
+nothing else.**
+
+- **`tokio` 1.53.1 to 1.53.2**, the async runtime the server is built on, from
+  the weekly Cargo dependency group in #92.
+- **`@types/node` 26.6.3 to 26.6.4**, a compile-time stub, from the weekly npm
+  dependency group in #93. No source file changed.
+
 ## [0.24.6] — 2026-10-01
 
 **A release with no behavior change: a security fix in a bundled dependency,
