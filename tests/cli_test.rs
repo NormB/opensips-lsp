@@ -269,6 +269,7 @@ fn the_checked_release_is_selectable() {
         !older_out.contains("bin_async_local_connect_timeout"),
         "3.6.8 exports it, so there is nothing to warn about; stdout: {older_out}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// An unsupported release must not quietly become the newest — the
