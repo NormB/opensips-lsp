@@ -1,0 +1,259 @@
+================================================================================
+bitwise and arithmetic precedence (cfg.y assignexp)
+================================================================================
+
+route {
+    $var(a) = 1 | 2 & 3 << 1 + 4;
+    $var(b) = ~ 5;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (route_definition
+    (route_kind)
+    (block
+      (assignment_statement
+        (pseudo_variable)
+        (binary_expression
+          (binary_expression
+            (binary_expression
+              (number)
+              (number))
+            (number))
+          (binary_expression
+            (number)
+            (number))))
+      (assignment_statement
+        (pseudo_variable)
+        (unary_expression
+          (number))))))
+
+================================================================================
+every assignment operator (cfg.y assignop)
+================================================================================
+
+route {
+    $var(f) := 1;
+    $var(f) += 1;
+    $var(f) -= 1;
+    $var(f) *= 2;
+    $var(f) /= 2;
+    $var(f) %= 2;
+    $var(f) &= 2;
+    $var(f) |= 2;
+    $var(f) ^= 2;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (route_definition
+    (route_kind)
+    (block
+      (assignment_statement
+        (pseudo_variable)
+        (number))
+      (assignment_statement
+        (pseudo_variable)
+        (number))
+      (assignment_statement
+        (pseudo_variable)
+        (number))
+      (assignment_statement
+        (pseudo_variable)
+        (number))
+      (assignment_statement
+        (pseudo_variable)
+        (number))
+      (assignment_statement
+        (pseudo_variable)
+        (number))
+      (assignment_statement
+        (pseudo_variable)
+        (number))
+      (assignment_statement
+        (pseudo_variable)
+        (number))
+      (assignment_statement
+        (pseudo_variable)
+        (number)))))
+
+================================================================================
+not negates a whole comparison; an IP network is a value
+================================================================================
+
+route {
+    if (not $var(a) == 1 && $si == 198.51.100.0/24) {
+        exit;
+    }
+    if (!$si == 192.0.2.1) {
+        exit;
+    }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (route_definition
+    (route_kind)
+    (block
+      (if_statement
+        (binary_expression
+          (unary_expression
+            (binary_expression
+              (pseudo_variable)
+              (number)))
+          (binary_expression
+            (pseudo_variable)
+            (ip_address)))
+        (block
+          (keyword_statement)))
+      (if_statement
+        (unary_expression
+          (binary_expression
+            (pseudo_variable)
+            (ip_address)))
+        (block
+          (keyword_statement))))))
+
+================================================================================
+adjacent strings fold, and strings span lines
+================================================================================
+
+route {
+    xlog("one" "two");
+    xlog("L_INFO", "multi
+line");
+    xlog('no \escape');
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (route_definition
+    (route_kind)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (string_concatenation
+            (string)
+            (string))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (string)
+          (string)))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (string))))))
+
+================================================================================
+return takes a bare value
+================================================================================
+
+route[sub] {
+    return -1;
+}
+route[sub2] {
+    return $var(a);
+}
+route[sub3] {
+    return($var(a), 1);
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (route_definition
+    (route_kind)
+    (identifier)
+    (block
+      (keyword_statement
+        (unary_expression
+          (number)))))
+  (route_definition
+    (route_kind)
+    (identifier)
+    (block
+      (keyword_statement
+        (pseudo_variable))))
+  (route_definition
+    (route_kind)
+    (identifier)
+    (block
+      (keyword_statement
+        (pseudo_variable)
+        (number)))))
+
+================================================================================
+include_file inside a route block
+================================================================================
+
+route {
+    include_file "local.cfg"
+    exit;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (route_definition
+    (route_kind)
+    (block
+      (include
+        (string))
+      (keyword_statement))))
+
+================================================================================
+block comments nest
+================================================================================
+
+/* outer /* inner */ route(ghost); */
+route {
+    exit;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (block_comment)
+  (route_definition
+    (route_kind)
+    (block
+      (keyword_statement))))
+
+================================================================================
+socket parameters (cfg.y socket_def_param)
+================================================================================
+
+socket = udp:192.0.2.10:5060 use_workers 4 as 192.0.2.1:5060
+socket = udp:192.0.2.20:5060 anycast frag reuse_port tag internal
+socket = tcp:192.0.2.30:5060 allow_proxy_protocol tos 16
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (global_assignment
+    (identifier)
+    (socket_value)
+    (socket_parameter
+      (number))
+    (socket_parameter
+      (socket_address)))
+  (global_assignment
+    (identifier)
+    (socket_value)
+    (socket_parameter)
+    (socket_parameter)
+    (socket_parameter)
+    (socket_parameter
+      (identifier)))
+  (global_assignment
+    (identifier)
+    (socket_value)
+    (socket_parameter)
+    (socket_parameter
+      (number))))

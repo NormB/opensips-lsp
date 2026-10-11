@@ -150,8 +150,12 @@ comment-token = "#"
 language-servers = ["opensips-lsp"]
 ```
 
-Helix can also use the tree-sitter grammar in `tree-sitter-opensips/`
-for highlighting and folding; see the repository README.
+The tree-sitter grammar in `tree-sitter-opensips/` ships highlight and
+fold queries (`queries/highlights.scm`, `queries/folds.scm`) for editors
+that build grammars themselves, Helix among them. Using them from Helix
+has not been tested; see
+[`tree-sitter-opensips/README.md`](../tree-sitter-opensips/README.md)
+for what the grammar contains.
 
 ## Emacs (eglot, built-in since 29)
 
@@ -268,6 +272,11 @@ grammar = "opensips"
 path_suffixes = ["opensips.cfg"]
 line_comments = ["# "]
 ```
+
+Colours come from a `highlights.scm` beside that file: copy
+`tree-sitter-opensips/queries/highlights.scm` to
+`languages/opensips-cfg/highlights.scm`. Without it Zed parses the file
+but colours nothing.
 
 `Cargo.toml`:
 

@@ -8,11 +8,12 @@
       "file-types": [
         "cfg"
       ],
-      "injection-regex": "opensips"
+      "injection-regex": "opensips",
+      "highlights": "queries/highlights.scm"
     }
   ],
   "metadata": {
-    "version": "0.5.4",
+    "version": "0.6.0",
     "license": "MIT OR Apache-2.0",
     "description": "OpenSIPS routing script grammar",
     "authors": [

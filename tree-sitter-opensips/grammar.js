@@ -7,6 +7,11 @@
 module.exports = grammar({
   name: 'opensips',
 
+  // Block comments NEST: cfg.lex counts `comment_nest` up on every
+  // `/*` inside a comment and leaves it only back at zero, which no
+  // regular token can express — src/scanner.c matches them.
+  externals: $ => [$.block_comment],
+
   extras: $ => [/\s/, $.comment, $.block_comment],
 
   word: $ => $.identifier,
@@ -23,7 +28,6 @@ module.exports = grammar({
     ),
 
     comment: _ => token(seq('#', /[^\n]*/)),
-    block_comment: _ => token(seq('/*', /[^*]*\*+([^/*][^*]*\*+)*/, '/')),
 
     // The grammar did not model includes at all, while the server's
     // scanner follows them and the whole split-configuration feature
@@ -58,8 +62,29 @@ module.exports = grammar({
 
     global_assignment: $ => seq(
       field('name', $.identifier), '=',
-      field('value', choice($.socket_value, $.host_value, $._expression)),
+      field('value', choice(
+        seq($.socket_value, repeat($.socket_parameter)),
+        $.host_value,
+        $._expression,
+      )),
     ),
+
+    // what may follow a socket definition (cfg.y socket_def_param):
+    // `socket = udp:192.0.2.10:5060 use_workers 4 as 192.0.2.1:5060`
+    socket_parameter: $ => choice(
+      choice('anycast', 'ANYCAST', 'frag', 'FRAG', 'reuse_port', 'REUSE_PORT',
+        'accept_subdomain', 'ACCEPT_SUBDOMAIN'),
+      // ALLOW_PROXY_PROTOCOL, SEND_PROXY_PROTOCOL, PROXY_PROTOCOL
+      token(prec(1, /((allow|ALLOW|send|SEND)[-_])?(proxy|PROXY)([-_](protocol|PROTOCOL))?/)),
+      seq(choice('use_workers', 'USE_WORKERS'), $.number),
+      seq(choice('tos', 'TOS'), $.number),
+      seq(choice('as', 'AS'), $.socket_address),
+      seq('tag', $.identifier),
+      seq(choice('use_auto_scaling_profile', 'USE_AUTO_SCALING_PROFILE'), $.identifier),
+    ),
+
+    // the advertised address after `as`: host or IP, optional port
+    socket_address: _ => token(/[A-Za-z0-9_.\[\]*-]+(:[0-9]+(-[0-9]+)?)?/),
 
     // raw socket/listen values: udp:127.0.0.1:5060, tls:eth0:5061,
     // udp:*:5060 — scheme-prefixed, unquoted
@@ -89,6 +114,9 @@ module.exports = grammar({
     block: $ => seq('{', repeat($._statement), '}'),
 
     _statement: $ => choice(
+      // the flattener splices an include wherever it stands, so one
+      // inside a route block is legal (accepted by opensips -C 4.0.1)
+      $.include,
       $.empty_statement,
       $.if_statement,
       $.while_statement,
@@ -121,15 +149,23 @@ module.exports = grammar({
     case_clause: $ => seq('case', $._expression, ':', repeat($._statement)),
     default_clause: $ => seq('default', ':', repeat($._statement)),
 
+    // `return -1;` and `return $var(x);` need no parentheses (cfg.y
+    // RETURN snumber / RETURN script_var); `return($var(x), ...)`
+    // carries more than one value
     keyword_statement: $ => seq(
       choice('exit', 'drop', 'return', 'break'),
-      optional(seq('(', optional($._expression), ')')),
+      optional(choice(
+        seq('(', ')'),
+        $._expression,
+        seq('(', $._expression, repeat1(seq(',', $._expression)), ')'),
+      )),
       ';',
     ),
 
+    // cfg.y assignop
     assignment_statement: $ => seq(
       field('target', $.pseudo_variable),
-      choice('=', '+=', '-='),
+      choice('=', ':=', '+=', '-=', '*=', '/=', '%=', '&=', '|=', '^='),
       field('value', $._expression),
       ';',
     ),
@@ -143,9 +179,18 @@ module.exports = grammar({
       $.parenthesized_expression,
       $.pseudo_variable,
       $.string,
+      $.string_concatenation,
+      $.ip_address,
       $.number,
       $.identifier,
     ),
+
+    // cfg.y folded_string: adjacent strings are one string
+    string_concatenation: $ => prec.left(seq($.string, repeat1($.string))),
+
+    // cfg.y ipnet: an IPv4 address with an optional netmask length,
+    // compared as a network (`$si == 198.51.100.0/24`)
+    ip_address: _ => token(prec(2, /[0-9]{1,3}(\.[0-9]{1,3}){3}(\/[0-9]{1,2})?/)),
 
     parenthesized_expression: $ => seq('(', $._expression, ')'),
 
@@ -157,18 +202,28 @@ module.exports = grammar({
     _argument: $ => $._expression,
 
     binary_expression: $ => {
+      // cfg.y: OR AND below BOR BAND BXOR BLSHIFT BRSHIFT below the
+      // arithmetic operators; a comparison is one exp_cond, which a
+      // NOT (level 3, see unary_expression) wraps whole
       const table = [
         ['||', 1], ['&&', 2],
-        ['==', 3], ['!=', 3], ['=~', 3], ['!~', 3],
-        ['<', 4], ['>', 4], ['<=', 4], ['>=', 4],
-        ['+', 5], ['-', 5],
-        ['*', 6], ['/', 6], ['%', 6],
+        ['==', 4], ['!=', 4], ['=~', 4], ['!~', 4],
+        ['<', 5], ['>', 5], ['<=', 5], ['>=', 5],
+        ['|', 6], ['&', 6], ['^', 6], ['<<', 6], ['>>', 6],
+        ['+', 7], ['-', 7],
+        ['*', 8], ['/', 8], ['%', 8],
       ];
       return choice(...table.map(([op, p]) =>
         prec.left(p, seq($._expression, op, $._expression))));
     },
 
-    unary_expression: $ => prec(7, seq(choice('!', '-'), $._expression)),
+    // NOT is `!` or `not` (cfg.lex), and in cfg.y `NOT exp` negates a
+    // whole comparison: `!$var(a) == 1` is `!($var(a) == 1)`, while
+    // `!a && b` is `(!a) && b`.  BNOT `~` and a sign bind tightest.
+    unary_expression: $ => choice(
+      prec(3, seq(choice('!', 'not'), $._expression)),
+      prec(9, seq(choice('-', '~'), $._expression)),
+    ),
 
     pseudo_variable: _ => token(seq(
       '$', optional('$'),
@@ -181,9 +236,11 @@ module.exports = grammar({
       ),
     )),
 
+    // Both quote styles may span lines (cfg.lex STRING1/STRING2 take
+    // {CR}); only the double-quoted one has escapes.
     string: _ => token(choice(
-      seq('"', repeat(choice(/[^"\\\n]/, /\\./)), '"'),
-      seq("'", repeat(choice(/[^'\\\n]/, /\\./)), "'"),
+      seq('"', repeat(choice(/[^"\\]/, /\\(.|\n)/)), '"'),
+      seq("'", repeat(/[^']/), "'"),
     )),
 
     number: _ => /0[xX][0-9a-fA-F]+|[0-9]+/,

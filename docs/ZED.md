@@ -73,6 +73,10 @@ path_suffixes = ["opensips.cfg"]
 line_comments = ["# "]
 TOML
 
+# the colours: the grammar's highlight query, from the same revision
+curl -fsSL -o "$EXT/languages/opensips-cfg/highlights.scm" \
+  "https://raw.githubusercontent.com/NormB/opensips-lsp/$REV/tree-sitter-opensips/queries/highlights.scm"
+
 cat > "$EXT/Cargo.toml" <<'TOML'
 [package]
 name = "zed-opensips"
