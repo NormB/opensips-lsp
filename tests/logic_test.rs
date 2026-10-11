@@ -66,6 +66,25 @@ fn loadmodule_position_offers_so_names() {
 }
 
 #[test]
+fn argument_completions_follow_a_single_quote_too() {
+    // cfg.lex makes a STRING of either quote, so every quoted argument
+    // context must be recognised after `'` as it is after `"`
+    let labels = |prefix: &str| -> Vec<String> {
+        completions(&catalog(), DOC, prefix)
+            .into_iter()
+            .map(|i| i.label)
+            .collect()
+    };
+    assert_eq!(labels("modparam('cachedb_nats', '"), vec!["kv_bucket"]);
+    assert_eq!(labels("modparam('cachedb_nats', "), vec!["kv_bucket"]);
+    assert!(labels("modparam('").contains(&"cachedb_nats".to_string()));
+    assert!(labels("loadmodule 'ca").contains(&"cachedb_nats.so".to_string()));
+    assert_eq!(labels("    route('"), vec!["check"]);
+    // a closed single-quoted argument leaves that context
+    assert!(!labels("loadmodule 'tm.so' ").contains(&"tm.so".to_string()));
+}
+
+#[test]
 fn code_position_offers_loaded_module_functions_and_routes() {
     let items = completions(&catalog(), DOC, "    t_re");
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
@@ -291,6 +310,24 @@ fn signature_at_finds_active_parameter() {
     for p in ["", "(", ")))((", "\"", "t_relay(\"\\", "#t_relay(", "\0("] {
         let _ = signature_at(&sig_catalog(), &core, doc, p);
     }
+}
+
+#[test]
+fn signature_at_reads_single_quoted_strings_as_the_lexer_does() {
+    // cfg.lex: `'` opens STRING2, which ends at the next `'` and has
+    // no escapes, so a backslash inside it is just a character
+    let core = opensips_lsp::catalog::CoreDocs::default();
+    let doc = "loadmodule \"tm.so\"\nroute {\n}\n";
+    let s = signature_at(&sig_catalog(), &core, doc, "    t_relay('a,b', ").expect("sig");
+    assert_eq!(s.2, 1, "the comma inside '' is not a separator");
+    let s = signature_at(&sig_catalog(), &core, doc, r"    t_relay('\', ").expect("sig");
+    assert_eq!(s.2, 1, "'\\' is a closed string holding a backslash");
+    // a double quote inside single quotes does not open a string
+    let s = signature_at(&sig_catalog(), &core, doc, "    t_relay('\"', ").expect("sig");
+    assert_eq!(s.2, 1);
+    // signature help and the enumerated offers walk the line the same way
+    let site = opensips_lsp::logic::call_site("    xlog('a,b', 'x").expect("in a call");
+    assert_eq!((site.arg, site.in_string), (1, true));
 }
 
 #[test]

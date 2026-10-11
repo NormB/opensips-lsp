@@ -248,3 +248,19 @@ fn the_graph_spans_the_include_closure() {
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn prepare_takes_a_utf16_position() {
+    // each `€` is three bytes but one UTF-16 unit, so RELAY starts at
+    // UTF-16 column 24 and byte column 32; reading the LSP column as a
+    // byte offset lands on the space before `route(`
+    let text = "route {\n    xlog(\"€€€€\"); route(RELAY);\n}\nroute[RELAY] {\n    exit;\n}\n";
+    let (mut child, rx, mut stdin, uri) = boot("utf16", text);
+    let r = prepare(&mut stdin, &rx, &uri, 2, 1, 25);
+    let items = r
+        .as_array()
+        .unwrap_or_else(|| panic!("no item at RELAY: {r}"));
+    assert_eq!(items.len(), 1, "{r}");
+    assert_eq!(items[0]["name"], "route[RELAY]");
+    let _ = child.kill();
+}

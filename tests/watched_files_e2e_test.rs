@@ -96,8 +96,11 @@ fn the_server_registers_for_the_files_it_reads() {
         .iter()
         .map(|w| w["globPattern"].to_string())
         .collect();
+    // every extension the workspace sweep reads as a config
+    // (`.inc` and `.m4` fragments too), or a fragment edited on disk
+    // never reaches the server
     assert!(
-        patterns.iter().any(|p| p.contains("*.cfg")),
+        patterns.contains(&"\"**/*.{cfg,inc,m4}\"".to_string()),
         "configs must be watched: {patterns:?}"
     );
     assert!(

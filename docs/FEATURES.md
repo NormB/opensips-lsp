@@ -38,6 +38,10 @@ source tree (result cached per tree):
 | `socket=udp:1.2.3.4:5060 ` | the twelve modifiers a socket line takes — `use_workers n`, `reuse_port`, `anycast`, `as ip[:port]`, `tag ID` and the rest. Membership comes from the grammar's own `socket_def_param` production, so it is what your release accepts; the manual supplies the descriptions |
 | `xlog(` | the log levels, quoted — `"L_INFO"`, because the grammar wants a string there. Type `xlog("` and they come unquoted instead. The set is read from the `switch` in the tree's `route.c`, so it is the set *your* release accepts |
 
+Single quotes work wherever double quotes do (`loadmodule 'tm`,
+`modparam('tm', '`, `route('`): the lexer makes a string of either.
+Inside a comment nothing is offered — nothing typed there is code.
+
 Duplicate labels are collapsed, keeping the most informative item.
 Modules loaded and routes defined in `include_file`/`import_file`
 files count — the closure is followed (open editor buffers preferred
@@ -81,8 +85,13 @@ elsewhere, so they answer only there.
 Hover any function/parameter/module/`$variable` for its
 documentation; **Ctrl+Click** a `route(name)` reference to jump to
 its definition — including definitions that live in an included
-file; **Ctrl+Shift+O** lists every route block with its full extent
-(the outline nests, and breadcrumbs know which block you're in).
+file; **Ctrl+Shift+O** lists every route block with its full extent,
+every `loadmodule`, every `modparam` (its module shown beside it) and
+every top-level parameter assignment. The blocks inside a route —
+`if`, `else`, `switch`, `while` — nest under it, named by their
+condition, so the outline and the breadcrumbs know which block you
+are in. Selecting an entry highlights the route's name, not just the
+keyword.
 
 #### References, rename, highlights
 
@@ -339,7 +348,9 @@ three directories above, read but not walked, because the root that
 includes `inc/routes.cfg` is usually the config one level up). Pass it
 a fragment alone and it still analyses it as part of its root —
 before, it reported the parent's routes as undefined, and `--strict`
-turned that into a failed build for a correct configuration.
+turned that into a failed build for a correct configuration. It reads
+files the same way too: a latin-1 byte in a comment does not make a
+file unreadable to `check` when the editor reads it fine.
 
 **Folders added to the workspace after startup count.** The server
 advertises `workspaceFolders` support with change notifications and
@@ -425,7 +436,11 @@ sweeps the workspace without opening anything. A report carries a
 result id, so asking again for something that has not moved comes back
 `unchanged` instead of resending the same list.
 
-**Only root configs are reported by the workspace sweep.** A config
+**Only root configs are reported by the workspace sweep, and the
+include graph decides which those are** — the same graph and the same
+reader the per-document analysis uses, so `inc/../frag.inc` names the
+fragment it resolves to, and a config with a latin-1 byte is reported
+like any other. A config
 that another config includes is a fragment, not a program: checked on
 its own it would flag every route its parent defines as undefined and
 every construct it continues as a syntax error. Roots are the files
@@ -452,7 +467,8 @@ tool editing an include all leave the server answering from a stale
 read until the buffer happens to be touched.
 
 The server registers for `workspace/didChangeWatchedFiles` on the
-configs and on the tree, and reacts to each:
+configs (`**/*.{cfg,inc,m4}`, the extensions the workspace sweep reads,
+built from the same list) and on the tree, and reacts to each:
 
 - **An include changed** — every open document whose include closure
   contains that file is re-checked and republished.
@@ -526,8 +542,18 @@ pipelines and git hooks. Exit codes: 0 clean, 1 findings, 2 usage.
 #### Folding
 
 Every route-family block folds (`route`, `failure_route[x]`,
-`event_route[...]`, ...), with string- and comment-safe brace
-matching.
+`event_route[...]`, ...), and so does every block inside one — an
+`if`, its `else`, a `switch`. A block whose closing brace shares its
+line with more code (`} else {`) stops folding above that line, so the
+`else` stays visible. Block comments that span lines fold, and so does
+every run of two or more `#` comment lines. Brace matching is string-
+and comment-safe: a `}` inside `xlog("}")` closes nothing.
+
+#### Selection range
+
+**Shift+Alt+→** (expand selection) grows from the word under the
+cursor to the block statement around it, then each block outside that,
+the route block, and the whole document.
 
 #### Static snippets
 

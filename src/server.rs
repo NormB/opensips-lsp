@@ -41,8 +41,44 @@ impl tower_lsp_server::ls_types::notification::Notification for CatalogueNotific
     const METHOD: &'static str = "opensipsLsp/catalogue";
 }
 
-/// LSP backend: document store, doc catalog, and the `-C` runner.
-pub struct Backend {
+/// LSP backend: a handle on the server's [`State`].
+///
+/// The handle is what the transport owns; the state is shared, so a
+/// check started by a notification can run on its own task and the
+/// notification can return at once.  The transport runs at most four
+/// messages at a time, and a notification that waited for a
+/// subprocess held one of those slots for the whole run: a few files
+/// opened together left every request queued behind their checks.
+pub struct Backend(std::sync::Arc<State>);
+
+impl std::ops::Deref for Backend {
+    type Target = State;
+    fn deref(&self) -> &State {
+        &self.0
+    }
+}
+
+impl Backend {
+    /// Build a backend for one client connection.
+    pub fn new(client: Client) -> Self {
+        Self(std::sync::Arc::new(State::new(client)))
+    }
+
+    /// `opensips/analysisRoot`; see [`State::analysis_root`].
+    pub async fn analysis_root(&self, p: AnalysisRootParams) -> Result<Option<String>> {
+        self.0.analysis_root(p).await
+    }
+
+    /// Re-check `uri` on a task of its own; see
+    /// [`State::check_publishing`].
+    fn spawn_check(&self, uri: Uri, quiet_when_clean: bool) {
+        let state = self.0.clone();
+        tokio::spawn(async move { state.check_publishing(&uri, quiet_when_clean).await });
+    }
+}
+
+/// Document store, doc catalog, and the `-C` runner.
+pub struct State {
     client: Client,
     /// Open documents: (version, full text).
     docs: DashMap<Uri, (i32, String)>,
@@ -113,9 +149,9 @@ pub struct Backend {
     unreadable_logged: std::sync::atomic::AtomicBool,
 }
 
-impl Backend {
-    /// Build a backend for one client connection.
-    pub fn new(client: Client) -> Self {
+impl State {
+    /// Build the state for one client connection.
+    fn new(client: Client) -> Self {
         Self {
             client,
             docs: DashMap::new(),
@@ -264,44 +300,27 @@ impl Backend {
     }
 
     /// Merge stored `-C` results with fresh analyzer diagnostics and
-    /// publish, capped.  Static so the debounce task can call it.
-    #[allow(clippy::too_many_arguments)]
+    /// publish `version` of `uri`, capped.  `skip_if_empty` keeps a
+    /// clean document from getting an empty publish.
     async fn merge_and_publish(
-        pushing: bool,
-        client: &Client,
-        check_map: &DashMap<Uri, Vec<Diagnostic>>,
-        analyzer_enabled: bool,
-        cap: usize,
+        &self,
         uri: &Uri,
         version: i32,
         text: &str,
-        open: std::collections::HashMap<std::path::PathBuf, String>,
-        cat: &std::sync::Arc<std::sync::RwLock<Vec<catalog::ModuleDoc>>>,
-        origin: &std::sync::Arc<std::sync::RwLock<catalog::CatalogOrigin>>,
         skip_if_empty: bool,
         root: Option<&std::path::Path>,
     ) {
         // a client that pulls gets everything through
         // `textDocument/diagnostic`; pushing as well shows each
         // problem twice
-        if !pushing {
+        if *self.diagnostics_pulled.read().unwrap() {
             return;
         }
-        let merged = Self::merged_diags(
-            check_map,
-            analyzer_enabled,
-            cap,
-            uri,
-            text,
-            open,
-            cat,
-            origin,
-            root,
-        );
+        let merged = self.merged_diags(uri, text, self.open_docs_snapshot(), root);
         if merged.is_empty() && skip_if_empty {
             return;
         }
-        client
+        self.client
             .publish_diagnostics(uri.clone(), merged, Some(version))
             .await;
     }
@@ -309,24 +328,26 @@ impl Backend {
     /// The diagnostics for one document: the last checker result plus
     /// a fresh analyzer pass, capped.  Shared by the push path and the
     /// pull one so both can never disagree about what is wrong.
-    #[allow(clippy::too_many_arguments)]
     fn merged_diags(
-        check_map: &DashMap<Uri, Vec<Diagnostic>>,
-        analyzer_enabled: bool,
-        cap: usize,
+        &self,
         uri: &Uri,
         text: &str,
         open: std::collections::HashMap<std::path::PathBuf, String>,
-        cat: &std::sync::Arc<std::sync::RwLock<Vec<catalog::ModuleDoc>>>,
-        origin: &std::sync::Arc<std::sync::RwLock<catalog::CatalogOrigin>>,
         root: Option<&std::path::Path>,
     ) -> Vec<Diagnostic> {
-        let mut merged = check_map.get(uri).map(|v| v.clone()).unwrap_or_default();
-        if analyzer_enabled && let Some(path) = uri.to_file_path() {
+        let cap = *self.max_diagnostics.read().unwrap();
+        let mut merged = self
+            .check_diags
+            .get(uri)
+            .map(|v| v.clone())
+            .unwrap_or_default();
+        if *self.analyzer_enabled.read().unwrap()
+            && let Some(path) = uri.to_file_path()
+        {
             let loader = Self::make_loader(open);
-            let cat = cat.read().unwrap().clone();
+            let cat = self.catalog.read().unwrap().clone();
             let files = Self::closure_rooted_at(root, &path, text, &loader);
-            let origin = origin.read().unwrap().clone();
+            let origin = self.catalog_origin.read().unwrap().clone();
             merged.extend(Self::analyzer_lsp_diags(&files, &path, text, &cat, &origin));
         }
         merged.truncate(cap.max(1));
@@ -385,6 +406,44 @@ impl Backend {
     /// Line `n` of a [`Self::lines_of`] table; empty past the end.
     fn line_in<'a>(lines: &[&'a str], n: u32) -> &'a str {
         lines.get(n as usize).copied().unwrap_or("")
+    }
+
+    /// The UTF-16 range of a byte-column [`crate::outline::Span`].
+    fn span_range(lines: &[&str], s: crate::outline::Span) -> Range {
+        let at = |line: u32, col: u32| {
+            Position::new(
+                line,
+                analyze::byte_to_utf16(Self::line_in(lines, line), col as usize),
+            )
+        };
+        Range::new(at(s.start_line, s.start_col), at(s.end_line, s.end_col))
+    }
+
+    /// An outline entry as an LSP document symbol, children included.
+    fn document_symbol(lines: &[&str], s: crate::outline::Sym) -> DocumentSymbol {
+        use crate::outline::SymKind;
+        #[allow(deprecated)]
+        DocumentSymbol {
+            name: s.name,
+            detail: s.detail,
+            kind: match s.kind {
+                SymKind::Module => SymbolKind::MODULE,
+                SymKind::Property => SymbolKind::PROPERTY,
+                SymKind::Variable => SymbolKind::VARIABLE,
+                SymKind::Route => SymbolKind::FUNCTION,
+                SymKind::Block => SymbolKind::OBJECT,
+            },
+            tags: None,
+            deprecated: None,
+            range: Self::span_range(lines, s.span),
+            selection_range: Self::span_range(lines, s.sel),
+            children: (!s.children.is_empty()).then(|| {
+                s.children
+                    .into_iter()
+                    .map(|c| Self::document_symbol(lines, c))
+                    .collect()
+            }),
+        }
     }
 
     /// Whole-line rewrites as LSP edits.  Each edit replaces exactly
@@ -557,7 +616,7 @@ impl Backend {
             return;
         }
         let mut watchers = vec![FileSystemWatcher {
-            glob_pattern: GlobPattern::String("**/*.cfg".into()),
+            glob_pattern: GlobPattern::String(logic::config_watch_glob()),
             kind: None,
         }];
         if let Some(src) = self.src.read().unwrap().clone()
@@ -859,6 +918,21 @@ impl Backend {
         }
     }
 
+    /// The byte offset of an LSP (UTF-16) position; a line past the
+    /// end clamps to the end of the text.
+    fn offset_at(text: &str, pos: Position) -> usize {
+        let mut start = 0;
+        for (n, line) in text.split_inclusive('\n').enumerate() {
+            if n == pos.line as usize {
+                // a column past the end stays on this line
+                let body = line.strip_suffix('\n').unwrap_or(line);
+                return start + analyze::utf16_to_byte(body, pos.character);
+            }
+            start += line.len();
+        }
+        text.len()
+    }
+
     fn line_prefix(text: &str, pos: Position) -> String {
         text.lines()
             .nth(pos.line as usize)
@@ -867,11 +941,6 @@ impl Backend {
                 l[..e].to_string()
             })
             .unwrap_or_default()
-    }
-
-    /// The ordinary check: quiet for a clean document.
-    async fn check(&self, uri: &Uri) {
-        self.check_publishing(uri, true).await;
     }
 
     /// Run the checker for `uri` and publish the result.
@@ -931,24 +1000,14 @@ impl Backend {
             .get(uri)
             .map(|d| d.clone())
             .unwrap_or((0, String::new()));
-        let analyzer_enabled = *self.analyzer_enabled.read().unwrap();
         let cap = *self.max_diagnostics.read().unwrap();
         let Some(bin) = self.opensips_bin.read().unwrap().clone() else {
             // -C disabled: analyzer-only pass
             self.check_diags.insert(uri.clone(), Vec::new());
-            let pushing = !*self.diagnostics_pulled.read().unwrap();
-            Self::merge_and_publish(
-                pushing,
-                &self.client,
-                &self.check_diags,
-                analyzer_enabled,
-                cap,
+            self.merge_and_publish(
                 uri,
                 snap_version,
                 &snap_text,
-                self.open_docs_snapshot(),
-                &self.catalog,
-                &self.catalog_origin,
                 quiet_when_clean,
                 root.as_deref(),
             )
@@ -1058,23 +1117,8 @@ impl Backend {
                     .await;
                 // an incomplete check must not leave stale results pinned
                 self.check_diags.insert(uri.clone(), Vec::new());
-                let pushing = !*self.diagnostics_pulled.read().unwrap();
-                Self::merge_and_publish(
-                    pushing,
-                    &self.client,
-                    &self.check_diags,
-                    analyzer_enabled,
-                    cap,
-                    uri,
-                    snap_version,
-                    &snap_text,
-                    self.open_docs_snapshot(),
-                    &self.catalog,
-                    &self.catalog_origin,
-                    false,
-                    root.as_deref(),
-                )
-                .await;
+                self.merge_and_publish(uri, snap_version, &snap_text, false, root.as_deref())
+                    .await;
                 return;
             }
         };
@@ -1086,23 +1130,8 @@ impl Backend {
                 )
                 .await;
             self.check_diags.insert(uri.clone(), Vec::new());
-            let pushing = !*self.diagnostics_pulled.read().unwrap();
-            Self::merge_and_publish(
-                pushing,
-                &self.client,
-                &self.check_diags,
-                analyzer_enabled,
-                cap,
-                uri,
-                snap_version,
-                &snap_text,
-                self.open_docs_snapshot(),
-                &self.catalog,
-                &self.catalog_origin,
-                false,
-                root.as_deref(),
-            )
-            .await;
+            self.merge_and_publish(uri, snap_version, &snap_text, false, root.as_deref())
+                .await;
             return;
         };
         let Some(status) = status else {
@@ -1116,23 +1145,8 @@ impl Backend {
                 )
                 .await;
             self.check_diags.insert(uri.clone(), Vec::new());
-            let pushing = !*self.diagnostics_pulled.read().unwrap();
-            Self::merge_and_publish(
-                pushing,
-                &self.client,
-                &self.check_diags,
-                analyzer_enabled,
-                cap,
-                uri,
-                snap_version,
-                &snap_text,
-                self.open_docs_snapshot(),
-                &self.catalog,
-                &self.catalog_origin,
-                false,
-                root.as_deref(),
-            )
-            .await;
+            self.merge_and_publish(uri, snap_version, &snap_text, false, root.as_deref())
+                .await;
             return;
         };
         let text = format!(
@@ -1225,23 +1239,8 @@ impl Backend {
             diags.truncate(cap);
         }
         self.check_diags.insert(uri.clone(), diags);
-        let pushing = !*self.diagnostics_pulled.read().unwrap();
-        Self::merge_and_publish(
-            pushing,
-            &self.client,
-            &self.check_diags,
-            analyzer_enabled,
-            cap,
-            uri,
-            snap_version,
-            &snap_text,
-            self.open_docs_snapshot(),
-            &self.catalog,
-            &self.catalog_origin,
-            false,
-            root.as_deref(),
-        )
-        .await;
+        self.merge_and_publish(uri, snap_version, &snap_text, false, root.as_deref())
+            .await;
     }
 }
 
@@ -1369,6 +1368,7 @@ impl LanguageServer for Backend {
                 document_range_formatting_provider: Some(OneOf::Left(true)),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
+                selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
                 references_provider: Some(OneOf::Left(true)),
                 document_highlight_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Right(RenameOptions {
@@ -1521,27 +1521,16 @@ impl LanguageServer for Backend {
         let opts = s.get("opensipsLsp").unwrap_or(s);
         self.apply_runtime_opts(opts);
         // re-publish every open document under the new configuration
-        let analyzer_enabled = *self.analyzer_enabled.read().unwrap();
-        let cap = *self.max_diagnostics.read().unwrap();
         let open: Vec<(Uri, i32, String)> = self
             .docs
             .iter()
             .map(|e| (e.key().clone(), e.value().0, e.value().1.clone()))
             .collect();
         for (uri, version, text) in open {
-            let pushing = !*self.diagnostics_pulled.read().unwrap();
-            Self::merge_and_publish(
-                pushing,
-                &self.client,
-                &self.check_diags,
-                analyzer_enabled,
-                cap,
+            self.merge_and_publish(
                 &uri,
                 version,
                 &text,
-                self.open_docs_snapshot(),
-                &self.catalog,
-                &self.catalog_origin,
                 false,
                 self.analysis_root_of(&uri).as_deref(),
             )
@@ -1555,7 +1544,7 @@ impl LanguageServer for Backend {
             .insert(uri.clone(), (p.text_document.version, p.text_document.text));
         // an opened buffer outranks the disk copy the scan read
         self.invalidate_include_graph();
-        self.check(&uri).await;
+        self.spawn_check(uri, true);
     }
 
     async fn did_change(&self, p: DidChangeTextDocumentParams) {
@@ -1598,7 +1587,7 @@ impl LanguageServer for Backend {
                 .map(|e| e.key().clone())
                 .collect();
             for u in stale {
-                self.check_publishing(&u, false).await;
+                self.spawn_check(u, false);
             }
         }
         // debounced analyzer pass: fast feedback between saves
@@ -1610,14 +1599,7 @@ impl LanguageServer for Backend {
             *e += 1;
             *e
         };
-        let gen_map = self.change_gen.clone();
-        let pulled = self.diagnostics_pulled.clone();
-        let check_map = self.check_diags.clone();
-        let cat_arc = self.catalog.clone();
-        let origin_arc = self.catalog_origin.clone();
-        let client = self.client.clone();
-        let open = self.open_docs_snapshot();
-        let cap = *self.max_diagnostics.read().unwrap();
+        let state = self.0.clone();
         let debounce = std::env::var("OPENSIPS_LSP_ANALYZER_DEBOUNCE_MS")
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
@@ -1627,26 +1609,12 @@ impl LanguageServer for Backend {
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(debounce)).await;
             // superseded by a newer edit: let the newest task publish
-            if gen_map.get(&uri).map(|g| *g) != Some(generation) {
+            if state.change_gen.get(&uri).map(|g| *g) != Some(generation) {
                 return;
             }
-            let pushing = !*pulled.read().unwrap();
-            Backend::merge_and_publish(
-                pushing,
-                &client,
-                &check_map,
-                true,
-                cap,
-                &uri,
-                version,
-                &text,
-                open,
-                &cat_arc,
-                &origin_arc,
-                false,
-                root.as_deref(),
-            )
-            .await;
+            state
+                .merge_and_publish(&uri, version, &text, false, root.as_deref())
+                .await;
         });
     }
 
@@ -1656,18 +1624,13 @@ impl LanguageServer for Backend {
     ) -> Result<DocumentDiagnosticReportResult> {
         let uri = p.text_document.uri;
         let text = self.text_for(&uri);
-        let diags = Self::merged_diags(
-            &self.check_diags,
-            *self.analyzer_enabled.read().unwrap(),
-            *self.max_diagnostics.read().unwrap(),
+        let diags = self.merged_diags(
             &uri,
             &text,
             self.open_docs_snapshot(),
-            &self.catalog,
-            &self.catalog_origin,
             self.analysis_root_of(&uri).as_deref(),
         );
-        let id = Self::result_id(&diags);
+        let id = State::result_id(&diags);
         if p.previous_result_id.as_deref() == Some(id.as_str()) {
             return Ok(DocumentDiagnosticReportResult::Report(
                 DocumentDiagnosticReport::Unchanged(RelatedUnchangedDocumentDiagnosticReport {
@@ -1699,21 +1662,12 @@ impl LanguageServer for Backend {
         // every construct it continues as a syntax error.  Roots are
         // the files nothing else includes, and their closures already
         // cover the fragments.
+        //
+        // Which file is a root is the include graph's answer, read the
+        // same way the graph and the closures read: two readers would
+        // be two answers about which file is a program.
         let (configs, truncated) = self.workspace_configs(500);
-        let mut included: std::collections::HashSet<std::path::PathBuf> =
-            std::collections::HashSet::new();
-        let mut texts: std::collections::HashMap<std::path::PathBuf, String> =
-            std::collections::HashMap::new();
-        for path in &configs {
-            let Ok(text) = std::fs::read_to_string(path) else {
-                continue;
-            };
-            let base = path.parent().unwrap_or(std::path::Path::new("."));
-            for inc in analyze::includes(&text) {
-                included.insert(base.join(&inc.name));
-            }
-            texts.insert(path.clone(), text);
-        }
+        let graph = self.include_graph();
         if truncated {
             self.client
                 .log_message(
@@ -1724,29 +1678,23 @@ impl LanguageServer for Backend {
                 .await;
         }
 
-        let analyzer_enabled = *self.analyzer_enabled.read().unwrap();
-        let cap = *self.max_diagnostics.read().unwrap();
         let open = self.open_docs_snapshot();
         let mut items = Vec::new();
-        for (path, text) in &texts {
-            if included.contains(path) {
+        for path in &configs {
+            if graph.is_included(path) {
                 continue;
             }
             let Some(uri) = Uri::from_file_path(path) else {
                 continue;
             };
             // the open buffer wins over what is on disk
-            let text = open.get(path).cloned().unwrap_or_else(|| text.clone());
-            let diags = Self::merged_diags(
-                &self.check_diags,
-                analyzer_enabled,
-                cap,
+            let Some(text) = open.get(path).cloned().or_else(|| logic::read_config(path)) else {
+                continue;
+            };
+            let diags = self.merged_diags(
                 &uri,
                 &text,
-                open.clone(),
-                &self.catalog,
-                &self.catalog_origin,
-                // the sweep reports ROOTS only, so each is its own
+                open.clone(), // the sweep reports ROOTS only, so each is its own
                 // analysis context by construction
                 None,
             );
@@ -1755,7 +1703,7 @@ impl LanguageServer for Backend {
                     uri,
                     version: None,
                     full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                        result_id: Some(Self::result_id(&diags)),
+                        result_id: Some(State::result_id(&diags)),
                         items: diags,
                     },
                 },
@@ -1834,13 +1782,13 @@ impl LanguageServer for Backend {
             {
                 // not something the user typed: if the warning on
                 // screen is no longer true, say so explicitly
-                self.check_publishing(&uri, false).await;
+                self.spawn_check(uri, false);
             }
         }
     }
 
     async fn did_save(&self, p: DidSaveTextDocumentParams) {
-        self.check(&p.text_document.uri).await;
+        self.spawn_check(p.text_document.uri, true);
     }
 
     async fn did_close(&self, p: DidCloseTextDocumentParams) {
@@ -1861,7 +1809,11 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let pos = p.text_document_position.position;
-        let prefix = Self::line_prefix(&text, pos);
+        // nothing typed in a comment is code, so nothing is offered
+        if analyze::in_comment(&text, State::offset_at(&text, pos)) {
+            return Ok(Some(CompletionResponse::Array(Vec::new())));
+        }
+        let prefix = State::line_prefix(&text, pos);
         // typed `$` + tail: completions REPLACE the typed token (labels
         // carry the `$`, so plain insertion would double it)
         let pvar_edit_range = logic::pvar_tail(&prefix).map(|n| {
@@ -1967,10 +1919,10 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let line_text = Self::doc_line(&text, pos.line);
+        let line_text = State::doc_line(&text, pos.line);
         let byte_col = analyze::utf16_to_byte(&line_text, pos.character) as u32;
         if let Some(d) = logic::definition_of(&text, pos.line, byte_col) {
-            let def_line = Self::doc_line(&text, d.line);
+            let def_line = State::doc_line(&text, d.line);
             let c = analyze::byte_to_utf16(&def_line, d.col as usize);
             return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                 uri,
@@ -1997,7 +1949,7 @@ impl LanguageServer for Backend {
                 .find(|d| d.name == name)
                 && let Some(target) = Uri::from_file_path(path)
             {
-                let def_line = Self::doc_line(ftext, d.line);
+                let def_line = State::doc_line(ftext, d.line);
                 let c = analyze::byte_to_utf16(&def_line, d.col as usize);
                 return Ok(Some(GotoDefinitionResponse::Scalar(Location {
                     uri: target,
@@ -2015,41 +1967,13 @@ impl LanguageServer for Backend {
         &self,
         p: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
-        let Some((version, text)) = self.docs.get(&p.text_document.uri).map(|d| d.clone()) else {
+        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let analysis = self
-            .memo
-            .get_or_compute(p.text_document.uri.as_str(), version, &text);
-        let lines = Self::lines_of(&text);
-        #[allow(deprecated)]
-        let syms: Vec<DocumentSymbol> = analysis
-            .blocks
-            .iter()
-            .map(|b| {
-                let lt = Self::line_in(&lines, b.line);
-                let start = Position::new(b.line, analyze::byte_to_utf16(lt, b.col as usize));
-                let et = Self::line_in(&lines, b.end_line);
-                let end = Position::new(b.end_line, analyze::byte_to_utf16(et, b.end_col as usize));
-                DocumentSymbol {
-                    name: if b.name.is_empty() {
-                        if b.kind == "route" {
-                            "route (main)".into()
-                        } else {
-                            b.kind.clone()
-                        }
-                    } else {
-                        format!("{}[{}]", b.kind, b.name)
-                    },
-                    detail: None,
-                    kind: SymbolKind::FUNCTION,
-                    tags: None,
-                    deprecated: None,
-                    range: Range { start, end },
-                    selection_range: Range { start, end: start },
-                    children: None,
-                }
-            })
+        let lines = State::lines_of(&text);
+        let syms = crate::outline::outline(&text)
+            .into_iter()
+            .map(|sym| State::document_symbol(&lines, sym))
             .collect();
         Ok(Some(DocumentSymbolResponse::Nested(syms)))
     }
@@ -2060,7 +1984,7 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let prefix = Self::line_prefix(&text, pos);
+        let prefix = State::line_prefix(&text, pos);
         let cat = self.catalog.read().unwrap();
         let core = self.core.read().unwrap();
         Ok(
@@ -2099,7 +2023,7 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let Some((name, ns)) = Self::route_name_at(&text, pos) else {
+        let Some((name, ns)) = State::route_name_at(&text, pos) else {
             return Ok(None);
         };
         let include_decl = p.context.include_declaration;
@@ -2111,12 +2035,12 @@ impl LanguageServer for Backend {
             let Some(furi) = Uri::from_file_path(path) else {
                 continue;
             };
-            let lines = Self::lines_of(ftext);
+            let lines = State::lines_of(ftext);
             for (l, is_def) in logic::ns_occurrences(ftext, &name, &ns) {
                 if include_decl || !is_def {
                     locs.push(Location {
                         uri: furi.clone(),
-                        range: Self::occurrence_range(&lines, &l),
+                        range: State::occurrence_range(&lines, &l),
                     });
                 }
             }
@@ -2133,14 +2057,14 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let Some((name, ns)) = Self::route_name_at(&text, pos) else {
+        let Some((name, ns)) = State::route_name_at(&text, pos) else {
             return Ok(None);
         };
-        let lines = Self::lines_of(&text);
+        let lines = State::lines_of(&text);
         let hls = logic::ns_occurrences(&text, &name, &ns)
             .into_iter()
             .map(|(l, is_def)| DocumentHighlight {
-                range: Self::occurrence_range(&lines, &l),
+                range: State::occurrence_range(&lines, &l),
                 kind: Some(if is_def {
                     DocumentHighlightKind::WRITE
                 } else {
@@ -2163,7 +2087,7 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let Some((name, ns)) = Self::route_name_at(&text, pos) else {
+        let Some((name, ns)) = State::route_name_at(&text, pos) else {
             return Ok(None);
         };
         // rewrite every occurrence of the symbol's namespace in the
@@ -2185,11 +2109,11 @@ impl LanguageServer for Backend {
             let Some(furi) = Uri::from_file_path(path) else {
                 continue;
             };
-            let lines = Self::lines_of(ftext);
+            let lines = State::lines_of(ftext);
             let edits: Vec<TextEdit> = logic::ns_occurrences(ftext, &name, &ns)
                 .into_iter()
                 .map(|(l, _)| TextEdit {
-                    range: Self::occurrence_range(&lines, &l),
+                    range: State::occurrence_range(&lines, &l),
                     new_text: new_name.clone(),
                 })
                 .collect();
@@ -2222,12 +2146,12 @@ impl LanguageServer for Backend {
                 let Some(furi) = Uri::from_file_path(&path) else {
                     continue;
                 };
-                let lines = Self::lines_of(&ftext);
+                let lines = State::lines_of(&ftext);
                 for b in analyze::route_blocks(&ftext) {
                     if b.name.is_empty() || !b.name.to_lowercase().contains(&query) {
                         continue;
                     }
-                    let lt = Self::line_in(&lines, b.line);
+                    let lt = State::line_in(&lines, b.line);
                     let c = analyze::byte_to_utf16(lt, b.col as usize);
                     // LSP 3.17 deprecates `SymbolInformation` here in
                     // favour of `WorkspaceSymbol`, and for this server
@@ -2273,15 +2197,15 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let pos = p.position;
-        let Some((name, ns)) = Self::route_name_at(&text, pos) else {
+        let Some((name, ns)) = State::route_name_at(&text, pos) else {
             return Ok(None);
         };
         // the exact occurrence span under the cursor becomes the edit
         // range the editor pre-selects
-        let lines = Self::lines_of(&text);
+        let lines = State::lines_of(&text);
         let hit = logic::ns_occurrences(&text, &name, &ns)
             .into_iter()
-            .map(|(l, _)| Self::occurrence_range(&lines, &l))
+            .map(|(l, _)| State::occurrence_range(&lines, &l))
             .find(|r| {
                 r.start.line == pos.line
                     && r.start.character <= pos.character
@@ -2309,7 +2233,7 @@ impl LanguageServer for Backend {
             .to_path_buf();
         let mut out = Vec::new();
         for inc in analyze::includes(&text) {
-            let lt = Self::doc_line(&text, inc.line);
+            let lt = State::doc_line(&text, inc.line);
             // locate the quoted path text after the directive keyword
             let Some(rel) = lt
                 .get(inc.col as usize..)
@@ -2406,7 +2330,7 @@ impl LanguageServer for Backend {
         } else {
             p.range.end.line
         };
-        let start_line_text = Self::doc_line(&text, p.range.start.line);
+        let start_line_text = State::doc_line(&text, p.range.start.line);
         let covers_whole_lines = p.range.start.character == 0
             && (sel_end > p.range.start.line
                 || p.range.end.character
@@ -2414,7 +2338,7 @@ impl LanguageServer for Backend {
         if covers_whole_lines
             && let Some(plan) = logic::extract_route(&text, p.range.start.line, sel_end)
         {
-            let last = Self::doc_line(&text, plan.end_line);
+            let last = State::doc_line(&text, plan.end_line);
             let mut edits = vec![
                 // the selection becomes the call
                 TextEdit {
@@ -2523,7 +2447,7 @@ impl LanguageServer for Backend {
         let analysis = self.memo.get_or_compute(uri.as_str(), version, &text);
         // every file is scanned once, not once per route
         let counts = logic::route_ref_counts(&files);
-        let lines = Self::lines_of(&text);
+        let lines = State::lines_of(&text);
         let lenses = analysis
             .blocks
             .iter()
@@ -2532,7 +2456,7 @@ impl LanguageServer for Backend {
             .filter(|b| b.kind == "route" && !b.name.is_empty())
             .map(|b| {
                 let n = counts.get(&b.name).copied().unwrap_or(0);
-                let lt = Self::line_in(&lines, b.name_line);
+                let lt = State::line_in(&lines, b.name_line);
                 let c = analyze::byte_to_utf16(lt, b.name_col as usize);
                 CodeLens {
                     range: Range {
@@ -2566,12 +2490,12 @@ impl LanguageServer for Backend {
         let core = self.core.read().unwrap();
         // the client asks for a viewport, so only pay for what is on
         // screen
-        let lines = Self::lines_of(&text);
+        let lines = State::lines_of(&text);
         let hints = logic::parameter_hints(&cat, &core, &text)
             .into_iter()
             .filter(|h| h.line >= p.range.start.line && h.line <= p.range.end.line)
             .map(|h| {
-                let lt = Self::line_in(&lines, h.line);
+                let lt = State::line_in(&lines, h.line);
                 InlayHint {
                     position: Position::new(h.line, analyze::byte_to_utf16(lt, h.col as usize)),
                     label: InlayHintLabel::String(h.label),
@@ -2599,21 +2523,19 @@ impl LanguageServer for Backend {
         // only the main table takes part: `route(NAME)` is the only
         // call form the server can see, so a failure_route or
         // event_route has no callers it could honestly report
-        let Some((name, logic::RouteNs::Main)) =
-            logic::route_symbol_ns_at(&text, pos.line, pos.character)
-        else {
+        let Some((name, logic::RouteNs::Main)) = State::route_name_at(&text, pos) else {
             return Ok(None);
         };
         let files = self.closure_for(&uri, &text);
-        let Some((def_uri, def_text, block)) = Self::main_definition(&files, &name) else {
+        let Some((def_uri, def_text, block)) = State::main_definition(&files, &name) else {
             // a call to a route that is defined nowhere: the analyzer
             // already flags it, and there is no item to anchor to
             return Ok(None);
         };
-        Ok(Some(vec![Self::hierarchy_item(
+        Ok(Some(vec![State::hierarchy_item(
             &def_uri,
             &block,
-            &Self::lines_of(&def_text),
+            &State::lines_of(&def_text),
         )]))
     }
 
@@ -2621,7 +2543,7 @@ impl LanguageServer for Backend {
         &self,
         p: CallHierarchyIncomingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
-        let Some(name) = Self::item_route(&p.item) else {
+        let Some(name) = State::item_route(&p.item) else {
             return Ok(None);
         };
         let files = self.closure_for(&p.item.uri, &self.text_for(&p.item.uri));
@@ -2630,7 +2552,7 @@ impl LanguageServer for Backend {
             let Some(uri) = Uri::from_file_path(path) else {
                 continue;
             };
-            let lines = Self::lines_of(text);
+            let lines = State::lines_of(text);
             for (caller, call) in logic::call_edges(text) {
                 if call.name != name {
                     continue;
@@ -2638,8 +2560,8 @@ impl LanguageServer for Backend {
                 // a call outside every block cannot be attributed to a
                 // caller; the real parser rejects that config anyway
                 let Some(caller) = caller else { continue };
-                let range = Self::call_range(&lines, &call);
-                let item = Self::hierarchy_item(&uri, &caller, &lines);
+                let range = State::call_range(&lines, &call);
+                let item = State::hierarchy_item(&uri, &caller, &lines);
                 match out.iter_mut().find(|c| {
                     c.from.uri == item.uri && c.from.selection_range == item.selection_range
                 }) {
@@ -2658,22 +2580,22 @@ impl LanguageServer for Backend {
         &self,
         p: CallHierarchyOutgoingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
-        let Some(name) = Self::item_route(&p.item) else {
+        let Some(name) = State::item_route(&p.item) else {
             return Ok(None);
         };
         let files = self.closure_for(&p.item.uri, &self.text_for(&p.item.uri));
-        let Some((_, def_text, block)) = Self::main_definition(&files, &name) else {
+        let Some((_, def_text, block)) = State::main_definition(&files, &name) else {
             return Ok(None);
         };
         let mut out: Vec<CallHierarchyOutgoingCall> = Vec::new();
-        let def_lines = Self::lines_of(&def_text);
+        let def_lines = State::lines_of(&def_text);
         for call in analyze::route_refs(&def_text)
             .into_iter()
             .filter(|c| c.line >= block.line && c.line <= block.end_line)
         {
-            let range = Self::call_range(&def_lines, &call);
-            let to = match Self::main_definition(&files, &call.name) {
-                Some((uri, text, b)) => Self::hierarchy_item(&uri, &b, &Self::lines_of(&text)),
+            let range = State::call_range(&def_lines, &call);
+            let to = match State::main_definition(&files, &call.name) {
+                Some((uri, text, b)) => State::hierarchy_item(&uri, &b, &State::lines_of(&text)),
                 // a target defined nowhere is still an edge the reader
                 // should see; say so rather than dropping it silently
                 None => CallHierarchyItem {
@@ -2709,7 +2631,7 @@ impl LanguageServer for Backend {
             insert_spaces: p.options.insert_spaces,
             tab_size: p.options.tab_size,
         };
-        Ok(Some(Self::line_edits(
+        Ok(Some(State::line_edits(
             &text,
             crate::format::format_lines(&text, &opts),
         )))
@@ -2728,32 +2650,61 @@ impl LanguageServer for Backend {
         };
         // the depth still comes from the whole document, so a range
         // lands where a full pass would have put it
-        Ok(Some(Self::line_edits(
+        Ok(Some(State::line_edits(
             &text,
             crate::format::format_range(&text, &opts, p.range.start.line, p.range.end.line),
         )))
     }
 
     async fn folding_range(&self, p: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
-        let Some((version, text)) = self.docs.get(&p.text_document.uri).map(|d| d.clone()) else {
+        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let analysis = self
-            .memo
-            .get_or_compute(p.text_document.uri.as_str(), version, &text);
-        let ranges: Vec<FoldingRange> = analysis
-            .blocks
-            .iter()
-            .filter(|b| b.end_line > b.line)
-            .map(|b| FoldingRange {
-                start_line: b.line,
+        let ranges: Vec<FoldingRange> = crate::outline::folds(&text)
+            .into_iter()
+            .map(|f| FoldingRange {
+                start_line: f.start_line,
                 start_character: None,
-                end_line: b.end_line,
+                end_line: f.end_line,
                 end_character: None,
-                kind: Some(FoldingRangeKind::Region),
+                kind: Some(match f.kind {
+                    crate::outline::FoldKind::Region => FoldingRangeKind::Region,
+                    crate::outline::FoldKind::Comment => FoldingRangeKind::Comment,
+                }),
                 collapsed_text: None,
             })
             .collect();
         Ok(Some(ranges))
+    }
+
+    async fn selection_range(
+        &self,
+        p: SelectionRangeParams,
+    ) -> Result<Option<Vec<SelectionRange>>> {
+        let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
+            return Ok(None);
+        };
+        let lines = State::lines_of(&text);
+        let out = p
+            .positions
+            .into_iter()
+            .map(|pos| {
+                let chain = crate::outline::selection_chain(&text, State::offset_at(&text, pos));
+                // the protocol links them outermost-in: each range
+                // points at the one that contains it
+                let mut parent: Option<Box<SelectionRange>> = None;
+                for span in chain.into_iter().rev() {
+                    parent = Some(Box::new(SelectionRange {
+                        range: State::span_range(&lines, span),
+                        parent,
+                    }));
+                }
+                parent.map(|b| *b).unwrap_or(SelectionRange {
+                    range: Range::new(pos, pos),
+                    parent: None,
+                })
+            })
+            .collect();
+        Ok(Some(out))
     }
 }

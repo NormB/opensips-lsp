@@ -336,3 +336,25 @@ fn check_accepts_relative_paths() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn check_reads_a_config_that_is_not_utf8() {
+    // one latin-1 byte in a comment is not a reason to refuse the file:
+    // the editor and the include graph read it, so `check` must too
+    let dir = setup("latin1");
+    let cfg = dir.join("l.cfg");
+    std::fs::write(&cfg, b"# caf\xe9\nroute {\n    route(missing);\n}\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .args(["check", cfg.to_str().unwrap()])
+        .env("OPENSIPS_LSP_BIN", "")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("l.cfg:3:11: warning: route 'missing' is not defined"),
+        "stdout: {stdout} stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(0));
+    let _ = std::fs::remove_dir_all(&dir);
+}

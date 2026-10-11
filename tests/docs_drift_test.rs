@@ -55,6 +55,7 @@ const DOC_TOKENS: &[(&str, &str)] = &[
     ("inlay_hint_provider", "inlay hint"),
     ("references_provider", "reference"),
     ("rename_provider", "rename"),
+    ("selection_range_provider", "selection range"),
     ("semantic_tokens_provider", "semantic"),
     ("signature_help_provider", "signature help"),
     ("workspace_symbol_provider", "workspace symbol"),

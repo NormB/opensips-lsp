@@ -268,3 +268,55 @@ fn only_root_configs_are_reported_never_the_fragments_they_include() {
     let _ = child.kill();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// The sweep must read the workspace the way the include graph does,
+/// or a document's analysis and the workspace report disagree about
+/// which file is a program.  Two ways they used to: a `..` in the
+/// include path, and a config with one byte that is not UTF-8.
+#[test]
+fn the_sweep_agrees_with_the_include_graph() {
+    let (mut child, rx, mut stdin, base) = boot("sweep-graph", true);
+    std::fs::create_dir_all(base.join("sub")).unwrap();
+    std::fs::write(
+        base.join("frag.inc"),
+        "route[CALLER] {\n    route(HELPER);\n}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        base.join("main.cfg"),
+        "include_file \"sub/../frag.inc\"\nroute[HELPER] {\n    exit;\n}\n",
+    )
+    .unwrap();
+    // latin-1 `é` in a comment: a root all the same
+    std::fs::write(
+        base.join("latin1.cfg"),
+        b"# caf\xe9\nroute {\n    route(GHOST);\n}\n",
+    )
+    .unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":5,"method":"workspace/diagnostic","params":{
+            "previousResultIds":[]}}),
+    );
+    let r = wait_for(&rx, |v| v["id"] == 5, "workspace/diagnostic");
+    let items = r["result"]["items"].as_array().expect("items");
+    let mut reported: Vec<String> = items
+        .iter()
+        .map(|i| {
+            let u = i["uri"].as_str().unwrap_or("");
+            u.rsplit('/').next().unwrap_or("").to_string()
+        })
+        .collect();
+    reported.sort();
+    assert_eq!(reported, vec!["latin1.cfg", "main.cfg"]);
+    let latin = items
+        .iter()
+        .find(|i| i["uri"].as_str().unwrap_or("").ends_with("latin1.cfg"))
+        .unwrap();
+    assert!(
+        latin["items"].to_string().contains("GHOST"),
+        "the latin-1 root is analysed: {latin}"
+    );
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}

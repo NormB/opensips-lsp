@@ -75,11 +75,15 @@ macro_rules! static_regex {
     };
 }
 
-static_regex!(re_modparam_first_arg, r#"modparam\s*\(\s*"[^"]*$"#);
-static_regex!(re_loadmodule_arg, r#"loadmodule\s*"[^"]*$"#);
+// an open argument string of either quote: cfg.lex makes a STRING of both
+static_regex!(
+    re_modparam_first_arg,
+    r#"modparam\s*\(\s*(?:"[^"]*|'[^']*)$"#
+);
+static_regex!(re_loadmodule_arg, r#"loadmodule\s*(?:"[^"]*|'[^']*)$"#);
 static_regex!(
     re_route_call_arg,
-    r#"(?:^|[^A-Za-z0-9_])route\s*\(\s*"?[A-Za-z0-9_.:-]*$"#
+    r#"(?:^|[^A-Za-z0-9_])route\s*\(\s*["']?[A-Za-z0-9_.:-]*$"#
 );
 
 /// Is the cursor inside the name argument of a `route(...)` call?
@@ -838,6 +842,12 @@ fn resolve_include(from: &std::path::Path, inc: &str) -> std::path::PathBuf {
 /// scan of the user's disk.
 const CONFIG_EXTENSIONS: [&str; 3] = ["cfg", "inc", "m4"];
 
+/// The file-watcher glob for every file the sweep reads as a
+/// configuration, built from the same list so the two cannot drift.
+pub fn config_watch_glob() -> String {
+    format!("**/*.{{{}}}", CONFIG_EXTENSIONS.join(","))
+}
+
 /// Whether the sweep should treat `path` as a possible configuration.
 fn is_config_candidate(path: &std::path::Path) -> bool {
     path.extension()
@@ -980,6 +990,12 @@ impl IncludeGraph {
             v.sort();
         }
         Self { parents }
+    }
+
+    /// Whether any scanned config includes `path`: then it is a
+    /// fragment, not a program in its own right.
+    pub fn is_included(&self, path: &std::path::Path) -> bool {
+        self.parents.contains_key(&lexically_normal(path))
     }
 
     /// The config `path` should be analysed as part of: the top of the
@@ -1855,27 +1871,31 @@ pub struct CallSite {
 }
 
 /// The innermost call the cursor sits in, or `None` outside one.
+///
+/// Strings follow `cfg.lex`: `"` opens STRING1, where a backslash
+/// escapes the next character, and `'` opens STRING2, which ends at
+/// the next `'` and has no escapes.
 pub fn call_site(line_prefix: &str) -> Option<CallSite> {
     let b = line_prefix.as_bytes();
     let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
     let mut stack: Vec<(String, u32)> = Vec::new();
-    let mut in_str = false;
+    let mut quote: Option<u8> = None;
     let mut i = 0;
     while i < b.len() {
         let c = b[i];
-        if in_str {
-            if c == b'\\' {
+        if let Some(q) = quote {
+            if q == b'"' && c == b'\\' {
                 i += 2;
                 continue;
             }
-            if c == b'"' {
-                in_str = false;
+            if c == q {
+                quote = None;
             }
             i += 1;
             continue;
         }
         match c {
-            b'"' => in_str = true,
+            b'"' | b'\'' => quote = Some(c),
             b'#' => break,
             b'(' => {
                 let mut e = i;
@@ -1905,7 +1925,7 @@ pub fn call_site(line_prefix: &str) -> Option<CallSite> {
     Some(CallSite {
         name,
         arg,
-        in_string: in_str,
+        in_string: quote.is_some(),
     })
 }
 
@@ -1958,52 +1978,9 @@ pub fn signature_at(
     doc: &str,
     line_prefix: &str,
 ) -> Option<(String, String, u32)> {
-    let b = line_prefix.as_bytes();
-    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
-    let mut stack: Vec<(String, u32)> = Vec::new();
-    let mut in_str = false;
-    let mut i = 0;
-    while i < b.len() {
-        let c = b[i];
-        if in_str {
-            if c == b'\\' {
-                i += 2;
-                continue;
-            }
-            if c == b'"' {
-                in_str = false;
-            }
-            i += 1;
-            continue;
-        }
-        match c {
-            b'"' => in_str = true,
-            b'#' => break,
-            b'(' => {
-                let mut s = i;
-                while s > 0 && (b[s - 1] as char).is_whitespace() {
-                    s -= 1;
-                }
-                let e = s;
-                while s > 0 && word(b[s - 1]) {
-                    s -= 1;
-                }
-                let ident = std::str::from_utf8(&b[s..e]).unwrap_or("").to_string();
-                stack.push((ident, 0));
-            }
-            b')' => {
-                stack.pop();
-            }
-            b',' => {
-                if let Some(top) = stack.last_mut() {
-                    top.1 += 1;
-                }
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    let (name, commas) = stack.pop()?;
+    let CallSite {
+        name, arg: commas, ..
+    } = call_site(line_prefix)?;
     if name.is_empty() {
         return None;
     }

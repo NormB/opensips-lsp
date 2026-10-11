@@ -313,3 +313,42 @@ fn block_comments_nest() {
     let defs: Vec<String> = route_defs(t).into_iter().map(|d| d.name).collect();
     assert_eq!(defs, vec!["real"]);
 }
+
+#[test]
+fn the_cursor_is_in_a_comment_only_before_the_comment_ends() {
+    use opensips_lsp::analyze::in_comment;
+    let at = |t: &str, needle: &str| t.find(needle).unwrap() + needle.len();
+    let t = "route {\n    # xlo\n    xlo\n    /* a /* b */ xl */ xlo\n}\n";
+    assert!(in_comment(t, at(t, "# xlo")), "inside a # comment");
+    assert!(!in_comment(t, at(t, "    xlo\n") - 1), "plain code");
+    assert!(in_comment(t, at(t, "b */ xl")), "still inside the outer /*");
+    assert!(!in_comment(t, at(t, "xl */")), "after the outer */ closes");
+    assert!(!in_comment(t, at(t, "*/ xlo")), "code after the comment");
+    // a `#` or `/*` inside a string opens no comment
+    let s = "route {\n    xlog(\"# /* x\"); xl\n}\n";
+    assert!(!in_comment(s, at(s, "# /* x")));
+    assert!(!in_comment(s, at(s, "; xl")));
+    // the end of a `#` line is still in it; the next line is not
+    let e = "# c\nxl";
+    assert!(in_comment(e, 3));
+    assert!(!in_comment(e, e.len()));
+}
+
+#[test]
+fn a_backslash_in_single_quotes_escapes_nothing() {
+    // cfg.lex STRING2 ends at the next `'` and has no escapes, so
+    // `'\'` is a complete string and the route call after it is code
+    let t = "route {\n    xlog('\\'); route(after);\n}\n";
+    let refs: Vec<String> = route_refs(t).into_iter().map(|r| r.name).collect();
+    assert_eq!(refs, vec!["after"]);
+}
+
+#[test]
+fn loadmodule_takes_a_single_quoted_string_too() {
+    // cfg.y `module_stm: LOADMODULE STRING`, and cfg.lex makes a STRING
+    // of either quote; `opensips -C` resolves t_relay after
+    // `loadmodule 'tm.so'` and fails to parse without it
+    let t = "loadmodule 'tm.so'\nloadmodule \"sl.so\"\n# loadmodule 'gone.so'\n";
+    let names: Vec<String> = loaded_modules(t).into_iter().map(|m| m.name).collect();
+    assert_eq!(names, vec!["tm", "sl"]);
+}

@@ -25,7 +25,11 @@ extension and it just works.
   pseudo-variables, harvested from OpenSIPS's own docs.
 - **Navigation** — go to definition: Ctrl+Click `route(name)` to jump
   to its definition (even into an `include_file`); Ctrl+Shift+O lists every
-  route block (document symbols) with its full extent; route blocks fold.
+  route block (document symbols) with its full extent, with the blocks
+  inside it nested under it, plus every `loadmodule`, `modparam` and
+  top-level parameter; blocks and comments fold, and selection range
+  (expand selection) grows from a word to its block, its route and
+  the file.
 - **Signature help** — type `(` or `,` in a call and the signature
   pops up with the active parameter highlighted.
 - **References & rename** — Shift+F12 lists every call site of a

@@ -231,7 +231,8 @@ fn symbol_columns_are_utf16_on_multibyte_lines() {
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("u.cfg");
     // the comment holds é (2 bytes / 1 unit) and 😀 (4 bytes / 2 units):
-    // byte col of `route` = 12, utf16 col = 9
+    // `route` starts at byte 13 / UTF-16 10, its name `x` at byte 19 /
+    // UTF-16 16
     let text = "/* \u{e9}\u{1F600} */ route[x] { exit; }\n";
     std::fs::write(&cfg, text).unwrap();
     let uri = format!("file://{}", cfg.display());
@@ -268,13 +269,16 @@ fn symbol_columns_are_utf16_on_multibyte_lines() {
         "textDocument":{"uri":uri}}}),
     );
     let v = wait_for(&rx, |v| v["id"] == 2, "symbols");
-    let col = v["result"][0]["selectionRange"]["start"]["character"]
-        .as_u64()
-        .unwrap();
+    let sym = &v["result"][0];
     assert_eq!(
-        col, 10,
+        sym["range"]["start"]["character"], 10,
         "must be the UTF-16 column, not the byte column (13)"
     );
+    assert_eq!(
+        sym["selectionRange"]["start"]["character"], 16,
+        "the name, in UTF-16, not the byte column (19)"
+    );
+    assert_eq!(sym["selectionRange"]["end"]["character"], 17);
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -327,11 +331,18 @@ fn folding_and_nested_symbols_over_stdio() {
     );
     let v = wait_for(&rx, |v| v["id"] == 2, "folding");
     let folds = v["result"].as_array().expect("folding array");
-    assert_eq!(folds.len(), 2, "one fold per route block: {folds:?}");
-    assert_eq!(folds[0]["startLine"], 1);
-    assert_eq!(folds[0]["endLine"], 5);
-    assert_eq!(folds[1]["startLine"], 6);
-    assert_eq!(folds[1]["endLine"], 8);
+    let got: Vec<(u64, u64)> = folds
+        .iter()
+        .map(|f| {
+            (
+                f["startLine"].as_u64().unwrap(),
+                f["endLine"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    // both route blocks and the `if` inside the first; the `}` in the
+    // string closes nothing
+    assert_eq!(got, vec![(1, 5), (2, 4), (6, 8)], "{folds:?}");
 
     write_msg(
         &mut stdin,
@@ -340,15 +351,22 @@ fn folding_and_nested_symbols_over_stdio() {
     );
     let v = wait_for(&rx, |v| v["id"] == 3, "symbols");
     let syms = v["result"].as_array().expect("symbol array");
-    assert_eq!(syms.len(), 2);
+    let names: Vec<&str> = syms.iter().map(|s| s["name"].as_str().unwrap()).collect();
+    assert_eq!(names, vec!["tm", "route (main)", "failure_route[fr]"]);
     // nested DocumentSymbol shape: full block range + selectionRange
-    assert_eq!(syms[0]["name"], "route (main)");
-    assert_eq!(syms[0]["range"]["start"]["line"], 1);
-    assert_eq!(syms[0]["range"]["end"]["line"], 5);
-    assert_eq!(syms[0]["range"]["end"]["character"], 1);
-    assert_eq!(syms[0]["selectionRange"]["start"]["line"], 1);
-    assert_eq!(syms[1]["name"], "failure_route[fr]");
-    assert_eq!(syms[1]["range"]["end"]["line"], 8);
+    let main = &syms[1];
+    assert_eq!(main["range"]["start"]["line"], 1);
+    assert_eq!(main["range"]["end"]["line"], 5);
+    assert_eq!(main["range"]["end"]["character"], 1);
+    assert_eq!(main["selectionRange"]["start"]["line"], 1);
+    // the block inside the route nests under it
+    let inner = main["children"].as_array().expect("children");
+    assert_eq!(inner.len(), 1);
+    assert_eq!(inner[0]["name"], "if (1)");
+    assert_eq!(inner[0]["range"]["start"]["line"], 2);
+    assert_eq!(inner[0]["range"]["end"]["line"], 4);
+    assert_eq!(syms[2]["range"]["end"]["line"], 8);
+    assert_eq!(syms[2]["selectionRange"]["start"]["character"], 14);
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -682,6 +700,77 @@ fn a_newer_save_supersedes_a_slow_running_check() {
     let msgs = v["params"]["diagnostics"].to_string();
     assert!(msgs.contains("fresh"), "newest run's diagnostic: {msgs}");
     assert!(!msgs.contains("slow"), "killed run must not leak: {msgs}");
+    child.kill().ok();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn selection_range_grows_outward_over_stdio() {
+    let dir = std::env::temp_dir().join(format!("oslsp-selrange-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let cfg = dir.join("s.cfg");
+    // `é` is two bytes and one UTF-16 unit, so every column on line 1
+    // after it differs between the two
+    let text = "route {\n    if ($rU == \"é\") { xlog(\"x\"); }\n}\n";
+    std::fs::write(&cfg, text).unwrap();
+    let uri = format!("file://{}", cfg.display());
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &dir,
+    );
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
+    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    assert_eq!(
+        init["result"]["capabilities"]["selectionRangeProvider"],
+        serde_json::json!(true)
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
+    );
+    // `xlog` is UTF-16 columns 22..26 and bytes 23..27; the cursor
+    // sits inside it
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/selectionRange","params":{
+        "textDocument":{"uri":uri},"positions":[{"line":1,"character":24}]}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "selectionRange");
+    let mut chain = Vec::new();
+    let mut cur = &v["result"][0];
+    while !cur.is_null() {
+        let r = &cur["range"];
+        chain.push(format!(
+            "{}:{}-{}:{}",
+            r["start"]["line"], r["start"]["character"], r["end"]["line"], r["end"]["character"]
+        ));
+        cur = &cur["parent"];
+    }
+    assert_eq!(
+        chain,
+        vec![
+            "1:22-1:26", // xlog
+            "1:4-1:34",  // the if statement
+            "0:0-2:1",   // the route block
+            "0:0-3:0",   // the document
+        ]
+    );
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&dir);
 }

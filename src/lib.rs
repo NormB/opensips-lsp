@@ -18,5 +18,6 @@ pub mod format;
 /// Completion/hover/definition assembly.
 pub mod logic;
 pub mod memo;
+pub mod outline;
 /// The tower-lsp-server wiring.
 pub mod server;

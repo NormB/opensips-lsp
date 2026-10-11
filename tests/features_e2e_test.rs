@@ -443,3 +443,83 @@ fn undocumented_modparam_warns_between_saves() {
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn completion_offers_nothing_inside_a_comment() {
+    let base = std::env::temp_dir().join(format!("oslsp-feat-cmt-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let tree = base.join("tree");
+    mk_tree(&tree);
+    let doc = "loadmodule \"mymod.so\"\nroute {\n    # my_\n    /* my_\n    */ my_\n}\n";
+    let cfg = base.join("c.cfg");
+    std::fs::write(&cfg, doc).unwrap();
+    let uri = format!("file://{}", cfg.display());
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "")
+            .env("OPENSIPS_LSP_SRC", tree.display().to_string())
+            .env(
+                "OPENSIPS_LSP_CACHE_DIR",
+                base.join("cache").display().to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
+    );
+    wait_for(&rx, |v| v["id"] == 1, "initialize");
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    wait_for(
+        &rx,
+        |v| {
+            v["method"] == "window/logMessage"
+                && v["params"]["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("ready (")
+        },
+        "readiness",
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+            "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":doc}}}),
+    );
+    // (line, character, expect my_func offered)
+    for (id, (line, ch, offered)) in [
+        (2, 9, false),
+        // a column past the end of the line stays on that line
+        (2, 99, false),
+        (3, 10, false),
+        (4, 10, true),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let id = 10 + id as i64;
+        write_msg(
+            &mut stdin,
+            &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"textDocument/completion","params":{
+                "textDocument":{"uri":uri},"position":{"line":line,"character":ch}}}),
+        );
+        let l = labels(&wait_for(&rx, |v| v["id"] == id, "completion"));
+        assert_eq!(
+            l.contains(&"my_func".to_string()),
+            offered,
+            "line {line} col {ch}: {l:?}"
+        );
+    }
+    let _ = child.kill();
+    let _ = std::fs::remove_dir_all(&base);
+}

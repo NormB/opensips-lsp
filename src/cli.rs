@@ -145,8 +145,13 @@ pub fn run_check(args: &[String]) -> i32 {
     let mut warnings = 0usize;
     for f in &files {
         let path = std::path::Path::new(f);
-        let Ok(text) = std::fs::read_to_string(path) else {
-            eprintln!("{f}: cannot read");
+        // the editor's and the include graph's reader, so the three
+        // agree about what a file says
+        let Some(text) = disk_loader(path) else {
+            eprintln!(
+                "{f}: cannot read (missing, not a regular file, or over {} bytes)",
+                logic::MAX_CONFIG_BYTES
+            );
             return 2;
         };
         let mut findings: Vec<(u32, u32, bool, String)> = Vec::new();

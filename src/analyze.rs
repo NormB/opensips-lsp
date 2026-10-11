@@ -24,8 +24,25 @@ pub(crate) enum Class {
 
 /// Per-byte classification: code, string interior, or comment.
 pub(crate) fn classify(text: &str) -> Vec<Class> {
+    scan(text).0
+}
+
+/// Whether byte offset `at` (a cursor sitting before that byte) is
+/// inside a comment: the text before it opens one it has not closed.
+/// A `#` comment runs to its newline, so the end of that line is still
+/// in it; a nested block comment ends only at the `*/` that brings its
+/// depth back to zero.
+pub fn in_comment(text: &str, at: usize) -> bool {
+    let at = at.min(text.len());
+    text.is_char_boundary(at) && scan(&text[..at]).1 == Class::Comment
+}
+
+/// [`classify`] plus what the scanner is still inside when the text
+/// runs out: `Code` when everything it opened was closed.
+fn scan(text: &str) -> (Vec<Class>, Class) {
     let b = text.as_bytes();
     let mut out = vec![Class::Code; b.len()];
+    let mut open = Class::Code;
     let mut i = 0;
     while i < b.len() {
         match b[i] {
@@ -33,6 +50,9 @@ pub(crate) fn classify(text: &str) -> Vec<Class> {
                 while i < b.len() && b[i] != b'\n' {
                     out[i] = Class::Comment;
                     i += 1;
+                }
+                if i == b.len() {
+                    open = Class::Comment;
                 }
             }
             // block comments NEST: cfg.lex counts `comment_nest` up on
@@ -56,14 +76,19 @@ pub(crate) fn classify(text: &str) -> Vec<Class> {
                         break;
                     }
                 }
+                if depth > 0 {
+                    open = Class::Comment;
+                }
             }
-            // OpenSIPS strings come double- OR single-quoted
+            // OpenSIPS strings come double- OR single-quoted; cfg.lex
+            // gives only the double-quoted STRING1 backslash escapes,
+            // the single-quoted STRING2 ends at the next `'`
             q @ (b'"' | b'\'') => {
                 // opening quote counts as code; interior as string
                 i += 1;
                 while i < b.len() && b[i] != q {
                     out[i] = Class::Str;
-                    if b[i] == b'\\' && i + 1 < b.len() {
+                    if q == b'"' && b[i] == b'\\' && i + 1 < b.len() {
                         out[i + 1] = Class::Str;
                         i += 1;
                     }
@@ -71,12 +96,14 @@ pub(crate) fn classify(text: &str) -> Vec<Class> {
                 }
                 if i < b.len() {
                     i += 1; // closing quote
+                } else {
+                    open = Class::Str;
                 }
             }
             _ => i += 1,
         }
     }
-    out
+    (out, open)
 }
 
 /// Line starts of a text, built once so each byte offset → (line,
@@ -100,6 +127,14 @@ impl Lines {
             starts,
             len: text.len(),
         }
+    }
+
+    /// (0-based line, 0-based byte col) → byte offset; past the end
+    /// clamps to the end.
+    pub(crate) fn offset(&self, line: u32, col: u32) -> usize {
+        self.starts
+            .get(line as usize)
+            .map_or(self.len, |s| (s + col as usize).min(self.len))
     }
 
     /// Byte offset → (0-based line, 0-based byte col); offsets past
@@ -130,7 +165,8 @@ macro_rules! static_regex {
     };
 }
 
-static_regex!(re_loadmodule, r#"loadmodule\s*"([^"\n]+)""#);
+// either quote: cfg.lex makes a STRING of both
+static_regex!(re_loadmodule, r#"loadmodule\s*(?:"([^"\n]+)"|'([^'\n]+)')"#);
 static_regex!(
     re_route_def,
     r#"(?s)(failure_route|onreply_route|branch_route|timer_route|event_route|error_route|local_route|startup_route|route)\s*(?:\[\s*["']?([A-Za-z0-9_.:-]+)["']?\s*(?:,\s*\d+\s*)?\])?\s*\{"#
@@ -141,7 +177,7 @@ static_regex!(
 );
 static_regex!(
     re_modparam_ctx,
-    r#"modparam\s*\(\s*"([^"\n]+)"\s*,\s*("[^"\n]*)?$"#
+    r#"modparam\s*\(\s*(?:"([^"\n]+)"|'([^'\n]+)')\s*,\s*(?:"[^"\n]*|'[^'\n]*)?$"#
 );
 
 /// A function call found in code position, with where each of its
@@ -268,6 +304,26 @@ fn push_arg(text: &str, from: usize, to: usize, out: &mut Vec<usize>) {
 
 /// Every `loadmodule "x.so"` in code position, as bare module names.
 pub fn loaded_modules(text: &str) -> Vec<Located> {
+    loadmodule_statements(text)
+        .into_iter()
+        .map(|s| s.module)
+        .collect()
+}
+
+/// One `loadmodule` statement and its byte extent.
+pub(crate) struct LoadStatement {
+    /// The module's bare name, at the `loadmodule` keyword.
+    pub module: Located,
+    /// Byte offset of the `loadmodule` keyword.
+    pub start: usize,
+    /// Byte extent of the path inside the quotes.
+    pub path: std::ops::Range<usize>,
+    /// Byte offset just past the closing quote.
+    pub end: usize,
+}
+
+/// Every `loadmodule "x.so"` statement in code position.
+pub(crate) fn loadmodule_statements(text: &str) -> Vec<LoadStatement> {
     let classes = classify(text);
     let lines = Lines::new(text);
     let mut out = Vec::new();
@@ -276,7 +332,7 @@ pub fn loaded_modules(text: &str) -> Vec<Located> {
         if classes.get(whole.start()) != Some(&Class::Code) {
             continue; // inside a comment or a string
         }
-        let path = c.get(1).unwrap();
+        let path = c.get(1).or_else(|| c.get(2)).unwrap();
         let base = path
             .as_str()
             .rsplit('/')
@@ -287,10 +343,15 @@ pub fn loaded_modules(text: &str) -> Vec<Located> {
             continue;
         }
         let (line, col) = lines.line_col(whole.start());
-        out.push(Located {
-            name: base.to_string(),
-            line,
-            col,
+        out.push(LoadStatement {
+            module: Located {
+                name: base.to_string(),
+                line,
+                col,
+            },
+            start: whole.start(),
+            path: path.range(),
+            end: whole.end(),
         });
     }
     out
@@ -595,6 +656,27 @@ static_regex!(
 /// Every `modparam("m", "p", ...)` in code position, with the
 /// position of the parameter name.
 pub fn modparam_calls(text: &str) -> Vec<ModparamCall> {
+    modparam_statements(text)
+        .into_iter()
+        .map(|s| s.call)
+        .collect()
+}
+
+/// One `modparam(...)` statement and its byte extent.
+pub(crate) struct ModparamStatement {
+    /// The module and parameter it names.
+    pub call: ModparamCall,
+    /// Byte offset of the `modparam` keyword.
+    pub start: usize,
+    /// Byte extent of the parameter name inside its quotes.
+    pub param: std::ops::Range<usize>,
+    /// Byte offset just past the closing parenthesis, or past the
+    /// parameter name when the call is never closed.
+    pub end: usize,
+}
+
+/// Every `modparam("m", "p", ...)` statement in code position.
+pub(crate) fn modparam_statements(text: &str) -> Vec<ModparamStatement> {
     let classes = classify(text);
     let lines = Lines::new(text);
     let b = text.as_bytes();
@@ -614,11 +696,36 @@ pub fn modparam_calls(text: &str) -> Vec<ModparamCall> {
         }
         let pm = c.get(2).unwrap();
         let (line, col) = lines.line_col(pm.start());
-        out.push(ModparamCall {
-            module: module.to_string(),
-            param: param.to_string(),
-            line,
-            col,
+        // the value argument can hold parentheses of its own
+        let mut depth = 1usize;
+        let mut end = whole.end();
+        let mut i = whole.end();
+        while i < b.len() {
+            if classes[i] == Class::Code {
+                match b[i] {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            i += 1;
+        }
+        out.push(ModparamStatement {
+            call: ModparamCall {
+                module: module.to_string(),
+                param: param.to_string(),
+                line,
+                col,
+            },
+            start,
+            param: pm.range(),
+            end,
         });
     }
     out
@@ -652,7 +759,9 @@ pub fn pvars(text: &str) -> Vec<(u32, u32, u32)> {
 /// the first argument.
 pub fn modparam_context(line_prefix: &str) -> Option<String> {
     let re = re_modparam_ctx();
-    re.captures(line_prefix).map(|c| c[1].to_string())
+    re.captures(line_prefix)
+        .and_then(|c| c.get(1).or_else(|| c.get(2)))
+        .map(|m| m.as_str().to_string())
 }
 
 /// The `[A-Za-z0-9_]+` identifier covering byte column `col`, if any.

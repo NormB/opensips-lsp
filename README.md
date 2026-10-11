@@ -13,8 +13,9 @@ script language (`opensips.cfg`).
 | **Signature help** | The innermost unclosed call's signature with the active parameter, on `(` and `,`. |
 | **Go to definition** | `route(name)` references resolve to their `route[name]` block — in this file or any included file. |
 | **References / rename / highlights** | Every call site + definition of a route name, including `async`/`launch` resume routes and the `t_on_failure`/`t_on_reply`/`t_on_branch` strings that arm failure, onreply and branch routes; rename rewrites them all (charset-gated, quoted call sites handled) and refuses a name that is already defined. `prepareRename` blocks F2 off-symbol and pre-selects the name. |
-| **Document symbols** | All route blocks (`route`, `failure_route`, `onreply_route`, …) with full block extents, nested outline. |
-| **Folding** | Route-family blocks fold; brace matching is string/comment-safe. |
+| **Document symbols** | All route blocks (`route`, `failure_route`, `onreply_route`, …) with full block extents and the route name as the selection; the `if`/`else`/`switch`/`while` blocks inside a route nest under it; `loadmodule`, `modparam` and top-level parameter assignments are listed too. |
+| **Folding** | Route-family blocks and the blocks inside them fold, as do multi-line block comments and runs of `#` comment lines; brace matching is string/comment-safe. |
+| **Selection range** | Expand selection grows from the word to each enclosing block, the route block and the document. |
 | **Workspace symbols** | Ctrl+T route search across open files and includes. |
 | **Code lenses** | Reference counts above route definitions (include-closure-wide). |
 | **Call hierarchy** | The route call graph: who calls `route[X]`, and what `route[X]` calls, across the include closure. Main-table only — a `failure_route` is armed by a module-function string the server cannot see, so it makes calls but reports no callers. |
