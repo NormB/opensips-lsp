@@ -242,16 +242,17 @@ impl Backend {
     ) -> Vec<Diagnostic> {
         let mut all = logic::analyzer_diagnostics_in_closure(files, path, text);
         all.extend(logic::catalog_diagnostics(cat, origin, text));
+        let lines = Self::lines_of(text);
         all.into_iter()
             .map(|d| {
-                let lt = Self::doc_line(text, d.line);
+                let lt = Self::line_in(&lines, d.line);
                 Diagnostic {
                     range: Range {
                         start: Position::new(
                             d.line,
-                            analyze::byte_to_utf16(&lt, d.col_start as usize),
+                            analyze::byte_to_utf16(lt, d.col_start as usize),
                         ),
-                        end: Position::new(d.line, analyze::byte_to_utf16(&lt, d.col_end as usize)),
+                        end: Position::new(d.line, analyze::byte_to_utf16(lt, d.col_end as usize)),
                     },
                     severity: Some(DiagnosticSeverity::WARNING),
                     source: Some("opensips-lsp".into()),
@@ -373,19 +374,33 @@ impl Backend {
         text.lines().nth(line as usize).unwrap_or("").to_string()
     }
 
+    /// The text split into lines once.  Handlers that produce one item
+    /// per route, call or diagnostic index this instead of calling
+    /// [`Self::doc_line`] per item, which walks the text from the top
+    /// each time and made those handlers quadratic.
+    fn lines_of(text: &str) -> Vec<&str> {
+        text.lines().collect()
+    }
+
+    /// Line `n` of a [`Self::lines_of`] table; empty past the end.
+    fn line_in<'a>(lines: &[&'a str], n: u32) -> &'a str {
+        lines.get(n as usize).copied().unwrap_or("")
+    }
+
     /// Whole-line rewrites as LSP edits.  Each edit replaces exactly
     /// one line's content and never its newline, so an edit list can
     /// be applied in any order and the document's line structure is
     /// untouched.
     fn line_edits(text: &str, edits: Vec<crate::format::LineEdit>) -> Vec<TextEdit> {
+        let lines = Self::lines_of(text);
         edits
             .into_iter()
             .map(|e| {
-                let old = Self::doc_line(text, e.line);
+                let old = Self::line_in(&lines, e.line);
                 TextEdit {
                     range: Range {
                         start: Position::new(e.line, 0),
-                        end: Position::new(e.line, analyze::byte_to_utf16(&old, old.len())),
+                        end: Position::new(e.line, analyze::byte_to_utf16(old, old.len())),
                     },
                     new_text: e.text,
                 }
@@ -424,11 +439,11 @@ impl Backend {
     /// `selection_range` is the name itself, which is what gets
     /// highlighted on navigation.  `data` carries the route name so
     /// the follow-up calls need not re-derive it from a position.
-    fn hierarchy_item(uri: &Uri, b: &analyze::Block, text: &str) -> CallHierarchyItem {
-        let name_line = Self::doc_line(text, b.name_line);
-        let name_start = analyze::byte_to_utf16(&name_line, b.name_col as usize);
-        let kw_line = Self::doc_line(text, b.line);
-        let end_line = Self::doc_line(text, b.end_line);
+    fn hierarchy_item(uri: &Uri, b: &analyze::Block, lines: &[&str]) -> CallHierarchyItem {
+        let name_line = Self::line_in(lines, b.name_line);
+        let name_start = analyze::byte_to_utf16(name_line, b.name_col as usize);
+        let kw_line = Self::line_in(lines, b.line);
+        let end_line = Self::line_in(lines, b.end_line);
         CallHierarchyItem {
             name: if b.name.is_empty() {
                 b.kind.clone()
@@ -440,10 +455,10 @@ impl Backend {
             detail: None,
             uri: uri.clone(),
             range: Range {
-                start: Position::new(b.line, analyze::byte_to_utf16(&kw_line, b.col as usize)),
+                start: Position::new(b.line, analyze::byte_to_utf16(kw_line, b.col as usize)),
                 end: Position::new(
                     b.end_line,
-                    analyze::byte_to_utf16(&end_line, b.end_col as usize),
+                    analyze::byte_to_utf16(end_line, b.end_col as usize),
                 ),
             },
             selection_range: Range {
@@ -458,9 +473,9 @@ impl Backend {
     }
 
     /// The UTF-16 range of one `route(NAME)` call site's name.
-    fn call_range(text: &str, call: &analyze::Located) -> Range {
-        let line = Self::doc_line(text, call.line);
-        let start = analyze::byte_to_utf16(&line, call.col as usize);
+    fn call_range(lines: &[&str], call: &analyze::Located) -> Range {
+        let line = Self::line_in(lines, call.line);
+        let start = analyze::byte_to_utf16(line, call.col as usize);
         Range {
             start: Position::new(call.line, start),
             end: Position::new(
@@ -834,10 +849,10 @@ impl Backend {
     }
 
     /// UTF-16 range of one route-name occurrence.
-    fn occurrence_range(text: &str, l: &analyze::Located) -> Range {
-        let lt = Self::doc_line(text, l.line);
-        let s = analyze::byte_to_utf16(&lt, l.col as usize);
-        let e = analyze::byte_to_utf16(&lt, l.col as usize + l.name.len());
+    fn occurrence_range(lines: &[&str], l: &analyze::Located) -> Range {
+        let lt = Self::line_in(lines, l.line);
+        let s = analyze::byte_to_utf16(lt, l.col as usize);
+        let e = analyze::byte_to_utf16(lt, l.col as usize + l.name.len());
         Range {
             start: Position::new(l.line, s),
             end: Position::new(l.line, e),
@@ -2006,16 +2021,16 @@ impl LanguageServer for Backend {
         let analysis = self
             .memo
             .get_or_compute(p.text_document.uri.as_str(), version, &text);
+        let lines = Self::lines_of(&text);
         #[allow(deprecated)]
         let syms: Vec<DocumentSymbol> = analysis
             .blocks
             .iter()
             .map(|b| {
-                let lt = Self::doc_line(&text, b.line);
-                let start = Position::new(b.line, analyze::byte_to_utf16(&lt, b.col as usize));
-                let et = Self::doc_line(&text, b.end_line);
-                let end =
-                    Position::new(b.end_line, analyze::byte_to_utf16(&et, b.end_col as usize));
+                let lt = Self::line_in(&lines, b.line);
+                let start = Position::new(b.line, analyze::byte_to_utf16(lt, b.col as usize));
+                let et = Self::line_in(&lines, b.end_line);
+                let end = Position::new(b.end_line, analyze::byte_to_utf16(et, b.end_col as usize));
                 DocumentSymbol {
                     name: if b.name.is_empty() {
                         if b.kind == "route" {
@@ -2096,11 +2111,12 @@ impl LanguageServer for Backend {
             let Some(furi) = Uri::from_file_path(path) else {
                 continue;
             };
+            let lines = Self::lines_of(ftext);
             for (l, is_def) in logic::ns_occurrences(ftext, &name, &ns) {
                 if include_decl || !is_def {
                     locs.push(Location {
                         uri: furi.clone(),
-                        range: Self::occurrence_range(ftext, &l),
+                        range: Self::occurrence_range(&lines, &l),
                     });
                 }
             }
@@ -2120,10 +2136,11 @@ impl LanguageServer for Backend {
         let Some((name, ns)) = Self::route_name_at(&text, pos) else {
             return Ok(None);
         };
+        let lines = Self::lines_of(&text);
         let hls = logic::ns_occurrences(&text, &name, &ns)
             .into_iter()
             .map(|(l, is_def)| DocumentHighlight {
-                range: Self::occurrence_range(&text, &l),
+                range: Self::occurrence_range(&lines, &l),
                 kind: Some(if is_def {
                     DocumentHighlightKind::WRITE
                 } else {
@@ -2158,10 +2175,11 @@ impl LanguageServer for Backend {
             let Some(furi) = Uri::from_file_path(path) else {
                 continue;
             };
+            let lines = Self::lines_of(ftext);
             let edits: Vec<TextEdit> = logic::ns_occurrences(ftext, &name, &ns)
                 .into_iter()
                 .map(|(l, _)| TextEdit {
-                    range: Self::occurrence_range(ftext, &l),
+                    range: Self::occurrence_range(&lines, &l),
                     new_text: new_name.clone(),
                 })
                 .collect();
@@ -2194,12 +2212,13 @@ impl LanguageServer for Backend {
                 let Some(furi) = Uri::from_file_path(&path) else {
                     continue;
                 };
+                let lines = Self::lines_of(&ftext);
                 for b in analyze::route_blocks(&ftext) {
                     if b.name.is_empty() || !b.name.to_lowercase().contains(&query) {
                         continue;
                     }
-                    let lt = Self::doc_line(&ftext, b.line);
-                    let c = analyze::byte_to_utf16(&lt, b.col as usize);
+                    let lt = Self::line_in(&lines, b.line);
+                    let c = analyze::byte_to_utf16(lt, b.col as usize);
                     // LSP 3.17 deprecates `SymbolInformation` here in
                     // favour of `WorkspaceSymbol`, and for this server
                     // that is a distinction without a difference:
@@ -2249,9 +2268,10 @@ impl LanguageServer for Backend {
         };
         // the exact occurrence span under the cursor becomes the edit
         // range the editor pre-selects
+        let lines = Self::lines_of(&text);
         let hit = logic::ns_occurrences(&text, &name, &ns)
             .into_iter()
-            .map(|(l, _)| Self::occurrence_range(&text, &l))
+            .map(|(l, _)| Self::occurrence_range(&lines, &l))
             .find(|r| {
                 r.start.line == pos.line
                     && r.start.character <= pos.character
@@ -2491,6 +2511,9 @@ impl LanguageServer for Backend {
         };
         let files = self.closure_for(&uri, &text);
         let analysis = self.memo.get_or_compute(uri.as_str(), version, &text);
+        // every file is scanned once, not once per route
+        let counts = logic::route_ref_counts(&files);
+        let lines = Self::lines_of(&text);
         let lenses = analysis
             .blocks
             .iter()
@@ -2498,17 +2521,9 @@ impl LanguageServer for Backend {
             // arming isn't tracked, so a count would mislead
             .filter(|b| b.kind == "route" && !b.name.is_empty())
             .map(|b| {
-                let n: usize = files
-                    .iter()
-                    .map(|(_, t)| {
-                        analyze::route_refs(t)
-                            .into_iter()
-                            .filter(|r| r.name == b.name)
-                            .count()
-                    })
-                    .sum();
-                let lt = Self::doc_line(&text, b.name_line);
-                let c = analyze::byte_to_utf16(&lt, b.name_col as usize);
+                let n = counts.get(&b.name).copied().unwrap_or(0);
+                let lt = Self::line_in(&lines, b.name_line);
+                let c = analyze::byte_to_utf16(lt, b.name_col as usize);
                 CodeLens {
                     range: Range {
                         start: Position::new(b.name_line, c),
@@ -2541,13 +2556,14 @@ impl LanguageServer for Backend {
         let core = self.core.read().unwrap();
         // the client asks for a viewport, so only pay for what is on
         // screen
+        let lines = Self::lines_of(&text);
         let hints = logic::parameter_hints(&cat, &core, &text)
             .into_iter()
             .filter(|h| h.line >= p.range.start.line && h.line <= p.range.end.line)
             .map(|h| {
-                let lt = Self::doc_line(&text, h.line);
+                let lt = Self::line_in(&lines, h.line);
                 InlayHint {
-                    position: Position::new(h.line, analyze::byte_to_utf16(&lt, h.col as usize)),
+                    position: Position::new(h.line, analyze::byte_to_utf16(lt, h.col as usize)),
                     label: InlayHintLabel::String(h.label),
                     kind: Some(InlayHintKind::PARAMETER),
                     text_edits: None,
@@ -2585,7 +2601,9 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         Ok(Some(vec![Self::hierarchy_item(
-            &def_uri, &block, &def_text,
+            &def_uri,
+            &block,
+            &Self::lines_of(&def_text),
         )]))
     }
 
@@ -2602,6 +2620,7 @@ impl LanguageServer for Backend {
             let Some(uri) = Uri::from_file_path(path) else {
                 continue;
             };
+            let lines = Self::lines_of(text);
             for (caller, call) in logic::call_edges(text) {
                 if call.name != name {
                     continue;
@@ -2609,8 +2628,8 @@ impl LanguageServer for Backend {
                 // a call outside every block cannot be attributed to a
                 // caller; the real parser rejects that config anyway
                 let Some(caller) = caller else { continue };
-                let range = Self::call_range(text, &call);
-                let item = Self::hierarchy_item(&uri, &caller, text);
+                let range = Self::call_range(&lines, &call);
+                let item = Self::hierarchy_item(&uri, &caller, &lines);
                 match out.iter_mut().find(|c| {
                     c.from.uri == item.uri && c.from.selection_range == item.selection_range
                 }) {
@@ -2637,13 +2656,14 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let mut out: Vec<CallHierarchyOutgoingCall> = Vec::new();
+        let def_lines = Self::lines_of(&def_text);
         for call in analyze::route_refs(&def_text)
             .into_iter()
             .filter(|c| c.line >= block.line && c.line <= block.end_line)
         {
-            let range = Self::call_range(&def_text, &call);
+            let range = Self::call_range(&def_lines, &call);
             let to = match Self::main_definition(&files, &call.name) {
-                Some((uri, text, b)) => Self::hierarchy_item(&uri, &b, &text),
+                Some((uri, text, b)) => Self::hierarchy_item(&uri, &b, &Self::lines_of(&text)),
                 // a target defined nowhere is still an edge the reader
                 // should see; say so rather than dropping it silently
                 None => CallHierarchyItem {

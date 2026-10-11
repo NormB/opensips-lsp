@@ -427,10 +427,9 @@ fn hint_name(param: &str) -> Option<String> {
 fn signature_of(
     catalog: &[ModuleDoc],
     core: &crate::catalog::CoreDocs,
-    doc: &str,
+    loaded: &[String],
     name: &str,
 ) -> Option<String> {
-    let loaded = loaded_names(doc);
     let sig = |m: &ModuleDoc| {
         m.functions
             .iter()
@@ -468,11 +467,13 @@ pub fn parameter_hints(
     doc: &str,
 ) -> Vec<Hint> {
     let mut out = Vec::new();
+    // once per document, not once per call
+    let loaded = loaded_names(doc);
     for call in analyze::calls(doc) {
         if call.args.is_empty() {
             continue;
         }
-        let Some(sig) = signature_of(catalog, core, doc, &call.name) else {
+        let Some(sig) = signature_of(catalog, core, &loaded, &call.name) else {
             continue;
         };
         let params = split_params(&sig);
@@ -487,6 +488,20 @@ pub fn parameter_hints(
         }
     }
     out
+}
+
+/// How many `route(NAME)` call sites each route name has across
+/// `files`, scanning each file once.
+pub fn route_ref_counts(
+    files: &[(std::path::PathBuf, String)],
+) -> std::collections::HashMap<String, usize> {
+    let mut counts = std::collections::HashMap::new();
+    for (_, text) in files {
+        for r in analyze::route_refs(text) {
+            *counts.entry(r.name).or_insert(0) += 1;
+        }
+    }
+    counts
 }
 
 /// The modules `doc` loads, by name.
