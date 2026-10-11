@@ -2,6 +2,53 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.25.0] — 2026-10-11
+
+**Large configs stay fast, rename follows every use of a route, and the
+tree-sitter grammar parses every config OpenSIPS accepts.**
+
+- **Requests no longer slow down with the square of the file size.**
+  Every scanner recomputed a line number by counting newlines from the
+  top of the file, once per match: `route_blocks` took 73 s on a
+  6000-route config and now takes under half a second. The code lens
+  re-scanned every file once per route, inlay hints re-read the loaded
+  modules once per call, and converting a line number to its text
+  walked the document from the top for every diagnostic, symbol, hint
+  and edit; on a 3000-route document the code lens no longer times out,
+  and seven common requests answer in about 1.5 s together in the test
+  suite's debug build.
+- **Renaming a `failure_route`, `onreply_route` or `branch_route`
+  rewrites the `t_on_failure("x")`, `t_on_reply("x")` and
+  `t_on_branch("x")` strings that arm it.** It used to edit only the
+  definition, leaving the call naming a route that no longer existed.
+  References, highlights and go-to-definition see those strings too.
+- **The resume route of `async(f(...), x)` and `launch(f(...), x)` is
+  a reference to `route[x]`**, for references, rename, the code lens,
+  call hierarchy and the "route is not defined" warning.
+- **Rename refuses a name that is already defined** in the same
+  namespace, naming the file that defines it. The result would define
+  the route twice, which `opensips -C` rejects.
+- **Formatting a CRLF file no longer doubles its carriage returns.**
+  Every reformatted line used to end in `\r\r\n`.
+- **`opensips-lsp check --bin ... fn.cfg` works with a relative path.**
+  A bare file name failed with "cannot run", and `sub/fn.cfg` was
+  handed to the checker from inside `sub/`.
+- **Nested block comments are comments.** OpenSIPS nests `/* */`;
+  `/* a /* b */ route(x); */` no longer reports `x` as undefined, and
+  `check --strict` no longer fails on it.
+- **The tree-sitter grammar parses every config in the OpenSIPS 4.0.1
+  tree that `opensips -C` accepts**, which the test suite now checks.
+  New: nested block comments (through `src/scanner.c`, which editors
+  building the grammar must compile along with `src/parser.c`),
+  multi-line strings, adjacent strings, the bitwise operators, `not`,
+  every assignment operator, `return -1;`, IPv4 addresses and
+  networks, `include_file` inside a route, and socket parameters
+  (`use_workers`, `as`, `anycast`, ...). `!$a == 1` now parses as
+  `!($a == 1)`, as in OpenSIPS.
+- **The grammar ships `queries/highlights.scm` and `queries/folds.scm`.**
+  The Zed setup script in `docs/ZED.md` downloads the highlight query
+  into the extension it builds.
+
 ## [0.24.7] — 2026-10-07
 
 **A release with no behavior change: two weekly dependency updates, and
