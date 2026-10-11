@@ -298,3 +298,18 @@ fn pvars_are_classifier_scoped() {
         let _ = pvars(s);
     }
 }
+
+/// OpenSIPS block comments nest: cfg.lex counts `comment_nest` up on
+/// every `/*` inside a comment and leaves the comment only when it
+/// returns to zero.  `opensips -C` 4.0.1 accepts the first config
+/// below, so the `route(ghost)` inside it is not a call.
+#[test]
+fn block_comments_nest() {
+    let t = "/* outer /* inner */ route(ghost); */\n\
+             route[real] {\n    route(after);\n}\n\
+             /* a /* b */ route[gone] { exit; } */\n";
+    let refs: Vec<String> = route_refs(t).into_iter().map(|r| r.name).collect();
+    assert_eq!(refs, vec!["after"]);
+    let defs: Vec<String> = route_defs(t).into_iter().map(|d| d.name).collect();
+    assert_eq!(defs, vec!["real"]);
+}

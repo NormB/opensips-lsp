@@ -130,3 +130,35 @@ fn range_formatting_edits_only_the_requested_lines() {
     );
     let _ = child.kill();
 }
+
+/// Apply LSP edits that each stay within one line, the way an editor
+/// does: replace the UTF-16 range (ASCII here) of that line's content.
+fn apply(text: &str, edits: &[serde_json::Value]) -> String {
+    let mut lines: Vec<String> = text.split('\n').map(str::to_string).collect();
+    for e in edits {
+        let l = e["range"]["start"]["line"].as_u64().unwrap() as usize;
+        let s = e["range"]["start"]["character"].as_u64().unwrap() as usize;
+        let en = e["range"]["end"]["character"].as_u64().unwrap() as usize;
+        lines[l].replace_range(s..en, e["newText"].as_str().unwrap());
+    }
+    lines.join("\n")
+}
+
+#[test]
+fn formatting_a_crlf_document_keeps_one_carriage_return_per_line() {
+    let src = "route {\r\nexit;\r\n}\r\n";
+    let (mut child, rx, mut stdin, uri) = boot("crlf", src);
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{
+            "textDocument":{"uri":uri},"options":opts(false, 4)}}),
+    );
+    let r = wait_for(&rx, |v| v["id"] == 2, "formatting");
+    let edits = r["result"].as_array().expect("an edit array");
+    assert_eq!(
+        apply(src, edits),
+        "route {\r\n\texit;\r\n}\r\n",
+        "the edits doubled a carriage return: {r}"
+    );
+    let _ = child.kill();
+}

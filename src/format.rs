@@ -214,9 +214,16 @@ pub fn format_lines(text: &str, opts: &Options) -> Vec<LineEdit> {
         .into_iter()
         .enumerate()
         .filter(|(i, new)| originals[*i].text != new)
-        .map(|(i, text)| LineEdit {
-            line: i as u32,
-            text,
+        .map(|(i, mut text)| {
+            // the `\r` of a CRLF ending is part of the ending, which an
+            // edit never touches
+            if text.ends_with('\r') {
+                text.pop();
+            }
+            LineEdit {
+                line: i as u32,
+                text,
+            }
         })
         .collect()
 }

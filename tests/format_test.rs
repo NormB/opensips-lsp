@@ -331,3 +331,19 @@ fn a_statement_ending_line_still_reindents_the_next() {
         );
     }
 }
+
+/// A CRLF document's carriage returns belong to the line endings, and
+/// a `LineEdit` carries the line WITHOUT its ending (see its docs): an
+/// edit whose text ended in `\r` doubled every reformatted line's
+/// carriage return once the server applied it up to, not over, the
+/// existing one.
+#[test]
+fn crlf_edits_carry_no_line_ending() {
+    let src = "route {\r\nexit;\r\n}\r\n";
+    let edits = format_lines(src, &tabs());
+    assert_eq!(edits.len(), 1, "{edits:?}");
+    assert_eq!(edits[0].line, 1);
+    assert_eq!(edits[0].text, "\texit;");
+    // and the whole-document form keeps the CRLF endings intact
+    assert_eq!(format(src, &tabs()), "route {\r\n\texit;\r\n}\r\n");
+}

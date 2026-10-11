@@ -295,3 +295,43 @@ fn an_unsupported_release_is_reported_not_swallowed() {
     assert!(stderr.contains("using"), "stderr: {stderr}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The checker runs in the config's directory, so relative includes
+/// resolve as they do for the real server, and is handed the config
+/// by a path that is valid from there.  A bare `fn.cfg` used to make
+/// the working directory the empty path (the spawn failed: "cannot
+/// run"), and `sub/fn.cfg` was handed over unchanged while the
+/// checker already ran inside `sub/`, so it could not open it.
+#[test]
+fn check_accepts_relative_paths() {
+    let dir = setup("relative");
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::fs::write(dir.join("fn.cfg"), "route {\n    exit;\n}\n").unwrap();
+    std::fs::write(dir.join("sub/fn.cfg"), "route {\n    exit;\n}\n").unwrap();
+    // stub checker: fails unless the last argument opens from its cwd
+    let stub = dir.join("stub.sh");
+    std::fs::write(
+        &stub,
+        "#!/bin/sh\nfor a in \"$@\"; do cfg=\"$a\"; done\n[ -f \"$cfg\" ] && exit 0\necho \"CRITICAL:core:yyerror: parse error in $cfg:1:1-2: cannot open from $(pwd)\" >&2\nexit 255\n",
+    )
+    .unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut p = std::fs::metadata(&stub).unwrap().permissions();
+    p.set_mode(0o755);
+    std::fs::set_permissions(&stub, p).unwrap();
+    for rel in ["fn.cfg", "sub/fn.cfg", "./sub/fn.cfg"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .current_dir(&dir)
+            .args(["check", "--bin", stub.to_str().unwrap(), rel])
+            .output()
+            .unwrap();
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "{rel}: stdout {} stderr {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
