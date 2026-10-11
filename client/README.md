@@ -29,7 +29,10 @@ extension and it just works.
 - **Signature help** — type `(` or `,` in a call and the signature
   pops up with the active parameter highlighted.
 - **References & rename** — Shift+F12 lists every call site of a
-  route; F2 renames it everywhere, quoted call sites included.
+  route, including `async`/`launch` resume routes and the
+  `t_on_failure("x")` strings that arm failure routes; F2 renames it
+  everywhere, quoted call sites included, and refuses a name that is
+  already defined.
 - **Instant warnings** — undefined `route()` targets, duplicate
   route definitions, and modparams your OpenSIPS version doesn't
   document are flagged as you type, no save needed.

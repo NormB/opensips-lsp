@@ -634,6 +634,12 @@ pub fn route_symbol_ns_at(doc: &str, line: u32, col: u32) -> Option<(String, Rou
     {
         return Some((r.name, RouteNs::Main));
     }
+    if let Some((r, kind)) = analyze::armed_route_refs(doc)
+        .into_iter()
+        .find(|(r, _)| in_span(r, &r.name, line, col))
+    {
+        return Some((r.name, RouteNs::Kind(kind.to_string())));
+    }
     analyze::route_blocks(doc)
         .into_iter()
         .filter(|b| !b.name.is_empty())
@@ -657,9 +663,11 @@ pub fn route_symbol_ns_at(doc: &str, line: u32, col: u32) -> Option<(String, Rou
 
 /// Every occurrence of `name` within its namespace in `doc`.  The
 /// bool is `true` for definitions.  Main-namespace occurrences are
-/// `route(NAME)` call sites plus `route[NAME]` definitions; per-kind
-/// namespaces list only that kind's definition name spans (their call
-/// sites are strings inside module functions like `t_on_failure`).
+/// the request-route references of [`analyze::route_refs`] plus
+/// `route[NAME]` definitions; a per-kind namespace has its definition
+/// name spans plus, for failure, onreply and branch routes, the
+/// strings `t_on_failure`, `t_on_reply` and `t_on_branch` arm them
+/// with ([`analyze::armed_route_refs`]).
 pub fn ns_occurrences(doc: &str, name: &str, ns: &RouteNs) -> Vec<(Located, bool)> {
     if name.is_empty() {
         return Vec::new();
@@ -677,6 +685,14 @@ pub fn ns_occurrences(doc: &str, name: &str, ns: &RouteNs) -> Vec<(Located, bool
         RouteNs::Main => "route",
         RouteNs::Kind(k) => k.as_str(),
     };
+    if let RouteNs::Kind(k) = ns {
+        out.extend(
+            analyze::armed_route_refs(doc)
+                .into_iter()
+                .filter(|(r, kind)| r.name == name && kind == k)
+                .map(|(r, _)| (r, false)),
+        );
+    }
     for b in analyze::route_blocks(doc) {
         if b.name == name && b.kind == want_kind {
             out.push((
@@ -690,6 +706,38 @@ pub fn ns_occurrences(doc: &str, name: &str, ns: &RouteNs) -> Vec<(Located, bool
         }
     }
     out
+}
+
+/// Where `new_name` is already defined in namespace `ns` across
+/// `files`, if anywhere.
+///
+/// Renaming onto such a name would leave two definitions of it, which
+/// `opensips -C` rejects (`Script route <x> is redefined`).  A name
+/// that is only called, never defined, is free.
+pub fn rename_conflict(
+    files: &[(std::path::PathBuf, String)],
+    new_name: &str,
+    ns: &RouteNs,
+) -> Option<(std::path::PathBuf, Located)> {
+    let kind = match ns {
+        RouteNs::Main => "route",
+        RouteNs::Kind(k) => k.as_str(),
+    };
+    files.iter().find_map(|(p, t)| {
+        analyze::route_blocks(t)
+            .into_iter()
+            .find(|b| b.kind == kind && b.name == new_name)
+            .map(|b| {
+                (
+                    p.clone(),
+                    Located {
+                        name: b.name,
+                        line: b.name_line,
+                        col: b.name_col,
+                    },
+                )
+            })
+    })
 }
 
 /// [`route_symbol_ns_at`], name only.

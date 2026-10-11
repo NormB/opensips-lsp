@@ -190,65 +190,72 @@ pub fn calls(text: &str) -> Vec<Call> {
         if j >= b.len() || b[j] != b'(' || class[j] != Class::Code {
             continue;
         }
-        // walk the argument list, tracking nesting and quotes so a
-        // comma inside either is not a separator
-        let mut depth = 0i32;
-        let mut quote: Option<u8> = None;
-        let mut seg_start = j + 1;
-        let mut args: Vec<(u32, u32)> = Vec::new();
-        let mut k = j;
-        let mut closed = false;
-        while k < b.len() {
-            let c = b[k];
-            match quote {
-                Some(q) => {
-                    if c == b'\\' {
-                        k += 2;
-                        continue;
-                    }
-                    if c == q {
-                        quote = None;
-                    }
-                }
-                None => match c {
-                    b'"' | b'\'' => quote = Some(c),
-                    b'(' => depth += 1,
-                    b')' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            push_arg(text, &lines, seg_start, k, &mut args);
-                            closed = true;
-                            break;
-                        }
-                    }
-                    b',' if depth == 1 => {
-                        push_arg(text, &lines, seg_start, k, &mut args);
-                        seg_start = k + 1;
-                    }
-                    _ => {}
-                },
-            }
-            k += 1;
-        }
+        let args = arg_starts(text, j)
+            .map(|v| v.into_iter().map(|a| lines.line_col(a)).collect())
+            .unwrap_or_default();
         let (line, col) = lines.line_col(name_start);
         out.push(Call {
             name: text[name_start..name_end].to_string(),
             line,
             col,
-            args: if closed { args } else { Vec::new() },
+            args,
         });
         i = name_end;
     }
     out
 }
 
-/// Record `text[from..to]` as an argument, unless it is blank.
-fn push_arg(text: &str, lines: &Lines, from: usize, to: usize, out: &mut Vec<(u32, u32)>) {
+/// Byte offsets of the first real character of each top-level
+/// argument of the call whose `(` is at `open`; `None` when the list
+/// never closes.  Nesting and quotes are tracked, so a comma inside
+/// either is not a separator, and a blank argument is left out.
+fn arg_starts(text: &str, open: usize) -> Option<Vec<usize>> {
+    let b = text.as_bytes();
+    let mut depth = 0i32;
+    let mut quote: Option<u8> = None;
+    let mut seg_start = open + 1;
+    let mut args = Vec::new();
+    let mut k = open;
+    while k < b.len() {
+        let c = b[k];
+        match quote {
+            Some(q) => {
+                if c == b'\\' {
+                    k += 2;
+                    continue;
+                }
+                if c == q {
+                    quote = None;
+                }
+            }
+            None => match c {
+                b'"' | b'\'' => quote = Some(c),
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        push_arg(text, seg_start, k, &mut args);
+                        return Some(args);
+                    }
+                }
+                b',' if depth == 1 => {
+                    push_arg(text, seg_start, k, &mut args);
+                    seg_start = k + 1;
+                }
+                _ => {}
+            },
+        }
+        k += 1;
+    }
+    None
+}
+
+/// Record where `text[from..to]` starts, unless it is blank.
+fn push_arg(text: &str, from: usize, to: usize, out: &mut Vec<usize>) {
     let seg = &text[from..to.min(text.len())];
-    let Some(off) = seg.find(|c: char| !c.is_whitespace()) else {
-        return;
-    };
-    out.push(lines.line_col(from + off));
+    if let Some(off) = seg.find(|c: char| !c.is_whitespace()) {
+        out.push(from + off);
+    }
 }
 
 /// Every `loadmodule "x.so"` in code position, as bare module names.
@@ -379,8 +386,115 @@ pub fn route_blocks(text: &str) -> Vec<Block> {
     out
 }
 
-/// Every `route(name)` call site (excluding `*_route(...)` look-alikes).
+/// Every request-route reference, in text order: `route(name)` call
+/// sites (excluding `*_route(...)` look-alikes) and the resume route
+/// named by the second argument of `async(...)` and `launch(...)`.
+///
+/// cfg.y resolves that second argument in the request route table
+/// (`ASYNC_TOKEN` / `LAUNCH_TOKEN`, `ref_script_route_by_name(...,
+/// sroutes->request, ...)`), as a `route_name`: an ID, a NUMBER or a
+/// STRING.
 pub fn route_refs(text: &str) -> Vec<Located> {
+    let mut out = route_call_refs(text);
+    out.extend(resume_route_refs(text));
+    out.sort_by_key(|r| (r.line, r.col));
+    out
+}
+
+static_regex!(re_resume_call, r"(async|launch)\s*\(");
+
+/// The route names in `async(f(...), NAME ...)` / `launch(f(...), NAME ...)`.
+fn resume_route_refs(text: &str) -> Vec<Located> {
+    let classes = classify(text);
+    let lines = Lines::new(text);
+    let b = text.as_bytes();
+    let mut out = Vec::new();
+    for m in re_resume_call().find_iter(text) {
+        let start = m.start();
+        if classes.get(start) != Some(&Class::Code) || (start > 0 && is_word(b[start - 1])) {
+            continue;
+        }
+        let Some(args) = arg_starts(text, m.end() - 1) else {
+            continue;
+        };
+        let Some(&at) = args.get(1) else {
+            continue;
+        };
+        // a quoted name is read inside its quotes; a bare one is an
+        // ID or a NUMBER
+        let (from, len) = match b[at] {
+            q @ (b'"' | b'\'') => {
+                let body = &text[at + 1..];
+                let Some(end) = body.find(q as char) else {
+                    continue;
+                };
+                (at + 1, end)
+            }
+            _ => (at, b[at..].iter().take_while(|&&c| is_word(c)).count()),
+        };
+        let name = &text[from..from + len];
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|c| is_word(c) || matches!(c, b'.' | b':' | b'-'))
+        {
+            continue;
+        }
+        let (line, col) = lines.line_col(from);
+        out.push(Located {
+            name: name.to_string(),
+            line,
+            col,
+        });
+    }
+    out
+}
+
+static_regex!(
+    re_armed_route,
+    r#"(t_on_failure|t_on_reply|t_on_branch)\s*\(\s*(?:"([A-Za-z0-9_.:-]+)"|'([A-Za-z0-9_.:-]+)')\s*\)"#
+);
+
+/// Every route name passed to `t_on_failure`, `t_on_reply` or
+/// `t_on_branch`, with the block kind it names.
+///
+/// tm resolves each one in its own table (`modules/tm/tm.c`:
+/// `fixup_froute`, `fixup_rroute`, `fixup_broute`).  `opensips -C`
+/// accepts the name double- or single-quoted and rejects it bare; a
+/// string carrying a pseudo-variable is not a fixed name and is not
+/// matched.
+pub fn armed_route_refs(text: &str) -> Vec<(Located, &'static str)> {
+    let classes = classify(text);
+    let lines = Lines::new(text);
+    let b = text.as_bytes();
+    let mut out = Vec::new();
+    for c in re_armed_route().captures_iter(text) {
+        let whole = c.get(0).unwrap();
+        let start = whole.start();
+        if classes.get(start) != Some(&Class::Code) || (start > 0 && is_word(b[start - 1])) {
+            continue;
+        }
+        let kind = match &c[1] {
+            "t_on_failure" => "failure_route",
+            "t_on_reply" => "onreply_route",
+            _ => "branch_route",
+        };
+        let name = c.get(2).or_else(|| c.get(3)).unwrap();
+        let (line, col) = lines.line_col(name.start());
+        out.push((
+            Located {
+                name: name.as_str().to_string(),
+                line,
+                col,
+            },
+            kind,
+        ));
+    }
+    out
+}
+
+/// `route(name)` call sites only.
+fn route_call_refs(text: &str) -> Vec<Located> {
     let classes = classify(text);
     let lines = Lines::new(text);
     let re = re_route_ref();

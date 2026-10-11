@@ -100,6 +100,23 @@ invokes only the main table (`route[x]`), so navigation, references,
 and rename never cross into a same-named `failure_route[x]`,
 `event_route[x]`, etc. — renaming one leaves the others untouched.
 
+What counts as a use of a name follows the parser and the `tm` module:
+
+- **Request routes** (`route[x]`) are used by `route(x)` and by the
+  resume route of `async(f(...), x)` and `launch(f(...), x)`, bare or
+  quoted. These also count for the code lens, call hierarchy,
+  go-to-definition and the "route is not defined" warning.
+- **Failure, onreply and branch routes** are used by the quoted name
+  passed to `t_on_failure("x")`, `t_on_reply("x")` and
+  `t_on_branch("x")`. Renaming `failure_route[x]` rewrites the string
+  inside the quotes. A string that holds a pseudo-variable, such as
+  `t_on_failure("$var(r)")`, names no fixed route and is left alone.
+
+A rename onto a name that is already defined in the same namespace is
+refused with an error naming the file that defines it: the result
+would define the route twice, and `opensips -C` rejects that
+(`Script route <x> is redefined`).
+
 #### Workspace symbols, code lenses
 
 **Ctrl+T** searches route definitions across every open file and its
@@ -144,14 +161,14 @@ A route called but defined nowhere still appears as an outgoing edge,
 marked `undefined` — the call is in the file, and dropping it would
 hide something the reader can see.
 
-The graph is the **main route table**. `route(NAME)` is the only call
-form the server can observe, so `route[NAME]` blocks are what take
-part. A `failure_route[NAME]` or `event_route[NAME]` is armed by a
-module function that takes the route name as a string
-(`t_on_failure("NAME")`), which the server does not track: those
-blocks can *make* calls, and do show up as callers, but asking for
-their own hierarchy declines rather than reporting "no callers" —
-which would be a confident wrong answer.
+The graph is the **main route table**. `route(NAME)` and the resume
+route of `async(...)` / `launch(...)` are the call forms it follows,
+so `route[NAME]` blocks are what take part. A `failure_route[NAME]`
+or `event_route[NAME]` is armed rather than called — by
+`t_on_failure("NAME")` and the like, or by an event — so those blocks
+can *make* calls, and do show up as callers, but asking for their own
+hierarchy declines rather than reporting "no callers", which would be
+a confident wrong answer.
 
 #### Quick fixes
 

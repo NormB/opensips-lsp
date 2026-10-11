@@ -12,7 +12,7 @@ script language (`opensips.cfg`).
 | **Hover** | Documentation for module functions, parameters, and modules, harvested from the OpenSIPS docs. |
 | **Signature help** | The innermost unclosed call's signature with the active parameter, on `(` and `,`. |
 | **Go to definition** | `route(name)` references resolve to their `route[name]` block — in this file or any included file. |
-| **References / rename / highlights** | Every call site + definition of a route name; rename rewrites them all (charset-gated, quoted call sites handled). `prepareRename` blocks F2 off-symbol and pre-selects the name. |
+| **References / rename / highlights** | Every call site + definition of a route name, including `async`/`launch` resume routes and the `t_on_failure`/`t_on_reply`/`t_on_branch` strings that arm failure, onreply and branch routes; rename rewrites them all (charset-gated, quoted call sites handled) and refuses a name that is already defined. `prepareRename` blocks F2 off-symbol and pre-selects the name. |
 | **Document symbols** | All route blocks (`route`, `failure_route`, `onreply_route`, …) with full block extents, nested outline. |
 | **Folding** | Route-family blocks fold; brace matching is string/comment-safe. |
 | **Workspace symbols** | Ctrl+T route search across open files and includes. |

@@ -2169,6 +2169,16 @@ impl LanguageServer for Backend {
         // rewrite every occurrence of the symbol's namespace in the
         // whole include closure
         let files = self.closure_for(&uri, &text);
+        // onto a name already defined there, the rename would leave
+        // two definitions, which the real parser rejects
+        if new_name != name
+            && let Some((path, _)) = logic::rename_conflict(&files, &new_name, &ns)
+        {
+            return Err(tower_lsp_server::jsonrpc::Error::invalid_params(format!(
+                "'{new_name}' is already defined in {}",
+                path.display()
+            )));
+        }
         let mut changes: std::collections::HashMap<Uri, Vec<TextEdit>> =
             std::collections::HashMap::new();
         for (path, ftext) in &files {

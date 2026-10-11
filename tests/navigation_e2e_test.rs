@@ -284,3 +284,66 @@ fn semantic_tokens_range_covers_only_the_slice() {
     child.kill().ok();
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// Edits a rename produced, as (line, start, end, newText), sorted.
+fn edits_of(v: &serde_json::Value, uri: &str) -> Vec<(u64, u64, u64, String)> {
+    let mut out: Vec<_> = v["result"]["changes"][uri]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|e| {
+            (
+                e["range"]["start"]["line"].as_u64().unwrap(),
+                e["range"]["start"]["character"].as_u64().unwrap(),
+                e["range"]["end"]["character"].as_u64().unwrap(),
+                e["newText"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+const ARMED: &str =
+    "route {\n    t_on_failure(\"fr\");\n    t_relay();\n}\nfailure_route[fr] {\n    exit;\n}\n";
+
+#[test]
+fn renaming_a_failure_route_rewrites_the_string_that_arms_it() {
+    let (mut child, rx, mut stdin, uri, _base) = boot("rename-armed", serde_json::json!({}), ARMED);
+    // on the NAME in failure_route[fr]
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":20,"method":"textDocument/rename","params":{
+        "textDocument":{"uri":uri},"position":{"line":4,"character":15},"newName":"on_fail"}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 20, "rename failure route");
+    assert_eq!(
+        edits_of(&v, &uri),
+        vec![
+            (1, 18, 20, "on_fail".to_string()),
+            (4, 14, 16, "on_fail".to_string()),
+        ],
+        "the t_on_failure string must follow the definition: {v}"
+    );
+    child.kill().ok();
+}
+
+#[test]
+fn a_rename_onto_an_existing_route_is_refused() {
+    let (mut child, rx, mut stdin, uri, _base) = boot("rename-taken", serde_json::json!({}), DOC);
+    // route[other_thing] renamed to `helper`, which already exists
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":21,"method":"textDocument/rename","params":{
+        "textDocument":{"uri":uri},"position":{"line":3,"character":8},"newName":"helper"}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 21, "rename onto a taken name");
+    assert!(v["result"].is_null(), "no edit may be offered: {v}");
+    let msg = v["error"]["message"].as_str().unwrap_or("");
+    assert!(
+        msg.contains("'helper'") && msg.contains("already defined"),
+        "the refusal must say why: {v}"
+    );
+    child.kill().ok();
+}
