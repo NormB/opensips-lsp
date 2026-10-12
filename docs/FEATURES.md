@@ -418,6 +418,12 @@ Three things it will not touch:
   it: the parse would not change, but the body would read as though it
   runs unconditionally.
 
+Inside a `switch`, the `case` and `default` labels sit one level in
+and what each guards one level further, the layout of the samples
+OpenSIPS ships (`modules/event_rabbitmq/samples/event_rabbitmq.cfg`) —
+formatting that file moves nothing in its switch. A label ends its
+line the way `;` does, so the line after it is re-indented.
+
 Indentation follows the editor: the `insertSpaces` and `tabSize` the
 client sends with the request decide tabs versus spaces and the width.
 Upstream `etc/opensips.cfg` is tab-indented, which is what a client

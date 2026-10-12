@@ -112,13 +112,43 @@ fn ends_statement(body: &str, start: usize, class: &[Class]) -> Option<bool> {
     last.map(|c| matches!(c, ';' | '{' | '}'))
 }
 
+/// Does this line open with a `case ...:` or `default:` label?
+fn is_label(trimmed: &str) -> bool {
+    let word = |w: &str| {
+        trimmed.strip_prefix(w).is_some_and(|rest| {
+            !rest
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+        })
+    };
+    word("case") || word("default")
+}
+
+/// The indent level of a line given the open braces around it: one
+/// per brace, plus one per brace whose body has had a `case` or
+/// `default` label — what follows a label is one level deeper than
+/// the label, as in the samples OpenSIPS ships.  Labels only stand
+/// directly in a switch body, so the brace they mark is that body; a
+/// label line itself is not under its own switch's earlier label.
+fn level(labelled: &[bool], label: bool) -> usize {
+    let own = labelled.len().saturating_sub(1);
+    labelled.len()
+        + labelled
+            .iter()
+            .enumerate()
+            .filter(|(i, l)| **l && !(label && *i == own))
+            .count()
+}
+
 /// The rewritten text of every line, in order.  Lines the formatter
 /// leaves alone come back byte-identical.
 fn formatted_lines(text: &str, opts: &Options) -> Vec<String> {
     let class = classify(text);
     let lines = lines_with_offsets(text);
     let mut out = Vec::with_capacity(lines.len());
-    let mut depth: usize = 0;
+    // one entry per open brace: has a label stood in its body yet
+    let mut frames: Vec<bool> = Vec::new();
     // whether the last line carrying code closed its statement; blank
     // and comment-only lines do not change the answer
     let mut prev_ended = true;
@@ -168,6 +198,7 @@ fn formatted_lines(text: &str, opts: &Options) -> Vec<String> {
             }
         }
 
+        let label = code_at(leading_ws) && is_label(trimmed);
         let indent = if trimmed.starts_with("#!") || !prev_ended {
             // not ours to move.  A `#!` line is a COMMENT here —
             // OpenSIPS has no preprocessor, whatever it may look like
@@ -178,23 +209,35 @@ fn formatted_lines(text: &str, opts: &Options) -> Vec<String> {
             // show what it belongs to
             body[..leading_ws].to_string()
         } else {
-            opts.indent(depth.saturating_sub(closers))
+            opts.indent(level(
+                &frames[..frames.len().saturating_sub(closers)],
+                label,
+            ))
         };
         out.push(format!("{indent}{trimmed}{cr}"));
-        if let Some(ended) = ends_statement(body, line.start, &class) {
+        if label {
+            // a label ends where its `:` is, and what follows it is
+            // the body it guards
+            prev_ended = true;
+        } else if let Some(ended) = ends_statement(body, line.start, &class) {
             prev_ended = ended;
         }
 
-        // net brace delta over the code positions of this line
+        // the braces in code on this line open and close frames
         for (off, ch) in body.char_indices() {
             if !code_at(off) {
                 continue;
             }
             match ch {
-                '{' => depth += 1,
-                '}' => depth = depth.saturating_sub(1),
+                '{' => frames.push(false),
+                '}' => {
+                    frames.pop();
+                }
                 _ => {}
             }
+        }
+        if label && let Some(f) = frames.last_mut() {
+            *f = true;
         }
     }
     out

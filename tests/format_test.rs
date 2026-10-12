@@ -7,6 +7,8 @@
 //! the safety proof cheap — a config that reformatted into a
 //! different parse would be worse than no formatter at all.
 
+mod common;
+
 use opensips_lsp::format::{Options, format, format_lines};
 
 fn tabs() -> Options {
@@ -346,4 +348,50 @@ fn crlf_edits_carry_no_line_ending() {
     assert_eq!(edits[0].text, "\texit;");
     // and the whole-document form keeps the CRLF endings intact
     assert_eq!(format(src, &tabs()), "route {\r\n\texit;\r\n}\r\n");
+}
+
+/// `case` and `default` labels sit one level inside the switch and
+/// what they guard one level further, as the samples OpenSIPS ships
+/// lay it out (`modules/event_rabbitmq/samples/event_rabbitmq.cfg`).
+#[test]
+fn a_case_body_is_indented_under_its_label() {
+    let src = "route {\nswitch ($rU) {\ncase \"1\":\ncase \"2\":\nexit;\ndefault:\nif ($rd) {\ndrop;\n}\n}\nexit;\n}\n";
+    assert_eq!(
+        format(src, &tabs()),
+        "route {\n\tswitch ($rU) {\n\t\tcase \"1\":\n\t\tcase \"2\":\n\t\t\texit;\n\t\tdefault:\n\t\t\tif ($rd) {\n\t\t\t\tdrop;\n\t\t\t}\n\t}\n\texit;\n}\n"
+    );
+    // a switch inside a case nests the same way
+    let nested =
+        "route {\nswitch ($rU) {\ncase 1:\nswitch ($rd) {\ndefault:\nexit;\n}\nbreak;\n}\n}\n";
+    assert_eq!(
+        format(nested, &tabs()),
+        "route {\n\tswitch ($rU) {\n\t\tcase 1:\n\t\t\tswitch ($rd) {\n\t\t\t\tdefault:\n\t\t\t\t\texit;\n\t\t\t}\n\t\t\tbreak;\n\t}\n}\n"
+    );
+    // `default` and `case` as parts of other words are not labels
+    let words = "route {\n$var(default_x) = 1;\ncase_x();\ncasex();\nexit;\n}\n";
+    assert_eq!(
+        format(words, &tabs()),
+        "route {\n\t$var(default_x) = 1;\n\tcase_x();\n\tcasex();\n\texit;\n}\n"
+    );
+}
+
+/// The shipped sample is already laid out this way: formatting it
+/// moves nothing inside its switch.
+#[test]
+fn the_shipped_samples_switch_is_left_as_it_is() {
+    let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
+    let text = std::fs::read_to_string(
+        std::path::Path::new(&tree).join("modules/event_rabbitmq/samples/event_rabbitmq.cfg"),
+    )
+    .unwrap();
+    let at = text
+        .lines()
+        .position(|l| l.trim() == "switch ($retcode) {")
+        .expect("the sample has its switch");
+    let moved: Vec<u32> = format_lines(&text, &tabs())
+        .into_iter()
+        .map(|e| e.line)
+        .filter(|&l| l as usize >= at && (l as usize) < at + 12)
+        .collect();
+    assert_eq!(moved, Vec::<u32>::new());
 }
