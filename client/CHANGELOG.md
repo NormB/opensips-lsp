@@ -2,6 +2,43 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.26.0] — 2026-10-11
+
+**Requests are answered while checks run, and the outline, folding and
+selection follow a config's structure.**
+
+- **Opening files no longer holds up other requests.** A check that
+  runs `opensips -C` now runs on its own task. Before, five files
+  opened together left a request waiting about 6 s behind their checks.
+- **The outline nests the `if`, `else`, `switch` and `while` blocks
+  inside a route under it**, named by their condition, and lists every
+  `loadmodule`, `modparam` (its module beside it) and top-level
+  parameter. Selecting a route highlights its name.
+- **Folding covers the blocks inside a route, multi-line block
+  comments and runs of `#` comment lines**, not just route blocks. A
+  `} else {` line stays visible when the block above it is folded.
+- **Expand selection** (`textDocument/selectionRange`) grows from the
+  word under the cursor to each enclosing block, the route and the
+  file.
+- **The formatter indents what a `case` or `default` label guards one
+  level under the label**, as the samples OpenSIPS ships do. The line
+  after a label used to be left where it was.
+- **Workspace diagnostics agree with the include tracking.** A fragment
+  included as `sub/../frag.inc` is no longer reported as a program of
+  its own, and a config with a latin-1 byte is reported instead of
+  skipped. `opensips-lsp check` reads such a config too, where it used
+  to stop with "cannot read".
+- **`.inc` and `.m4` fragments edited on disk are noticed.** The file
+  watcher covered only `*.cfg`.
+- **Single quotes work everywhere double quotes do**: `loadmodule
+  'tm.so'` loads the module for completion and checks, completion
+  after `loadmodule '`, `modparam('` and `route('` offers what it
+  offers after `"`, signature help counts arguments across `'a,b'`,
+  and a backslash inside `'...'` no longer escapes the closing quote.
+- **Completion offers nothing inside a comment.**
+- **Call hierarchy works on a line with non-ASCII text before the
+  route name.** The cursor column was read as a byte offset.
+
 ## [0.25.0] — 2026-10-11
 
 **Large configs stay fast, rename follows every use of a route, and the
