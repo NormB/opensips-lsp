@@ -2,6 +2,17 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.26.1] — 2026-10-15
+
+**A release with no behavior change: two weekly dependency updates, and
+nothing else.**
+
+- **`serde_json` 1.0.151 to 1.0.154**, the JSON library the server uses
+  to read editor settings and its built-in core catalog, from the weekly
+  Cargo dependency group in #95.
+- **`@types/node` 26.6.4 to 26.6.5**, a compile-time stub, from the weekly npm
+  dependency group in #94. No source file changed.
+
 ## [0.26.0] — 2026-10-11
 
 **Requests are answered while checks run, and the outline, folding and
