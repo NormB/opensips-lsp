@@ -141,3 +141,72 @@ impl Drop for Server {
         let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
+
+/// Every `.cfg` under `dir`, recursively, appended to `out`.
+pub fn cfgs_under(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            cfgs_under(&p, out);
+        } else if p.extension().is_some_and(|x| x == "cfg") {
+            out.push(p);
+        }
+    }
+}
+
+/// `opensips -C` on `f`, run from its directory as the server runs it;
+/// true when the parser reported a syntax error.
+pub fn syntax_error(bin: &str, f: &std::path::Path) -> bool {
+    let out = std::process::Command::new(bin)
+        .arg("-C")
+        .arg("-f")
+        .arg(f)
+        .current_dir(f.parent().unwrap())
+        .output()
+        .expect("spawn opensips -C");
+    let all = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    all.contains("syntax error")
+}
+
+/// One corpus case: (title, input, expected-tree text).
+pub fn parse_corpus(text: &str) -> Vec<(String, String, String)> {
+    let mut out = Vec::new();
+    let mut lines = text.lines().peekable();
+    while let Some(l) = lines.next() {
+        if !l.starts_with("====") {
+            continue;
+        }
+        let title = lines.next().unwrap_or("").trim().to_string();
+        // closing ==== of the header
+        for l in lines.by_ref() {
+            if l.starts_with("====") {
+                break;
+            }
+        }
+        let mut input = String::new();
+        for l in lines.by_ref() {
+            if l.starts_with("----") {
+                break;
+            }
+            input.push_str(l);
+            input.push('\n');
+        }
+        let mut expected = String::new();
+        while let Some(l) = lines.peek() {
+            if l.starts_with("====") {
+                break;
+            }
+            expected.push_str(lines.next().unwrap());
+            expected.push('\n');
+        }
+        out.push((title, input, expected));
+    }
+    out
+}

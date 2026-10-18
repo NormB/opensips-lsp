@@ -15,38 +15,6 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn cfgs_under(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for e in rd.flatten() {
-        let p = e.path();
-        if p.is_dir() {
-            cfgs_under(&p, out);
-        } else if p.extension().is_some_and(|x| x == "cfg") {
-            out.push(p);
-        }
-    }
-}
-
-/// `opensips -C` on `f`, run from its directory as the server runs it;
-/// true when the parser reported a syntax error.
-fn syntax_error(bin: &str, f: &Path) -> bool {
-    let out = Command::new(bin)
-        .arg("-C")
-        .arg("-f")
-        .arg(f)
-        .current_dir(f.parent().unwrap())
-        .output()
-        .expect("spawn opensips -C");
-    let all = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
-    );
-    all.contains("syntax error")
-}
-
 #[test]
 fn the_grammar_parses_every_config_the_real_parser_accepts() {
     let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
@@ -54,22 +22,23 @@ fn the_grammar_parses_every_config_the_real_parser_accepts() {
     let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/grammar");
 
     let mut shipped = Vec::new();
-    cfgs_under(&tree, &mut shipped);
+    common::cfgs_under(&tree, &mut shipped);
     shipped.sort();
     let mut fixture_files = Vec::new();
-    cfgs_under(&fixtures, &mut fixture_files);
+    common::cfgs_under(&fixtures, &mut fixture_files);
     fixture_files.sort();
     assert!(!fixture_files.is_empty(), "the fixtures went missing");
 
     for f in &fixture_files {
         assert!(
-            !syntax_error(&bin, f),
+            !common::syntax_error(&bin, f),
             "{}: a fixture the real parser rejects proves nothing",
             f.display()
         );
     }
-    let (accepted, rejected): (Vec<PathBuf>, Vec<PathBuf>) =
-        shipped.into_iter().partition(|f| !syntax_error(&bin, f));
+    let (accepted, rejected): (Vec<PathBuf>, Vec<PathBuf>) = shipped
+        .into_iter()
+        .partition(|f| !common::syntax_error(&bin, f));
     // POSITIVE CONTROL: a tree with nothing accepted makes this vacuous
     assert!(
         accepted.len() >= 20,

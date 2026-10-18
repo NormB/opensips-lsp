@@ -5,43 +5,9 @@
 //! must match.  Extending the grammar (new corpus cases) without
 //! teaching the scanner, or vice versa, trips this gate.
 
-use opensips_lsp::analyze;
+mod common;
 
-/// One corpus case: (title, input, expected-tree text).
-fn parse_corpus(text: &str) -> Vec<(String, String, String)> {
-    let mut out = Vec::new();
-    let mut lines = text.lines().peekable();
-    while let Some(l) = lines.next() {
-        if !l.starts_with("====") {
-            continue;
-        }
-        let title = lines.next().unwrap_or("").trim().to_string();
-        // closing ==== of the header
-        for l in lines.by_ref() {
-            if l.starts_with("====") {
-                break;
-            }
-        }
-        let mut input = String::new();
-        for l in lines.by_ref() {
-            if l.starts_with("----") {
-                break;
-            }
-            input.push_str(l);
-            input.push('\n');
-        }
-        let mut expected = String::new();
-        while let Some(l) = lines.peek() {
-            if l.starts_with("====") {
-                break;
-            }
-            expected.push_str(lines.next().unwrap());
-            expected.push('\n');
-        }
-        out.push((title, input, expected));
-    }
-    out
-}
+use opensips_lsp::analyze;
 
 fn count(hay: &str, node: &str) -> usize {
     hay.matches(&format!("({node}")).count()
@@ -51,7 +17,7 @@ fn count(hay: &str, node: &str) -> usize {
 fn corpus_parser_detects_mismatches() {
     // self-test: the gate machinery must SEE a divergence
     let mini = "================\ncase\n================\n\nroute[a] { exit; }\n\n----------------\n\n(source_file (route_definition (route_kind) name: (identifier) (block (keyword_statement))) (route_definition))\n";
-    let cases = parse_corpus(mini);
+    let cases = common::parse_corpus(mini);
     assert_eq!(cases.len(), 1);
     let (_, input, expected) = &cases[0];
     assert_eq!(analyze::route_blocks(input).len(), 1);
@@ -78,7 +44,7 @@ fn grammar_and_scanner_agree_on_the_corpus() {
             continue;
         }
         let text = std::fs::read_to_string(&path).expect("corpus file");
-        for (title, input, expected) in parse_corpus(&text) {
+        for (title, input, expected) in common::parse_corpus(&text) {
             // A case the grammar cannot parse says nothing about what
             // the language contains: past an ERROR node tree-sitter is
             // recovering, and it recovers `!!import_file "x"` into an
