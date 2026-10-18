@@ -203,3 +203,20 @@ fn one_fold_per_start_line_and_it_is_the_widest() {
         .collect();
     assert_eq!(got, vec![(0, 3)]);
 }
+
+/// A `{` inside `$(...)` is variable text (cfg.lex state SCRIPTVARS),
+/// not a block, and a `#` there opens no comment, so the route ends at
+/// its own brace and the route after it is still in the outline.
+#[test]
+fn a_script_variable_with_braces_and_hashes_is_not_a_block() {
+    let t = "route {\n    $ru = $(ru{re.subst,/a#//g});\n}\nroute[next] {\n    exit;\n}\n";
+    let mut got = Vec::new();
+    flat(&outline(t), 0, &mut got);
+    assert_eq!(
+        got,
+        vec![
+            "route (main) Route 0:0-2:1 sel 0:0-0:5",
+            "route[next] Route 3:0-5:1 sel 3:6-3:10",
+        ]
+    );
+}

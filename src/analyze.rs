@@ -20,9 +20,15 @@ pub(crate) enum Class {
     Code,
     Str,
     Comment,
+    /// The inside of `$(...)` or `$name(...)`: cfg.lex reads it in
+    /// state SCRIPTVARS as part of one SCRIPTVAR token while a
+    /// parenthesis is open, so a brace, `#` or quote in there is
+    /// variable text, never code, a comment or a string.
+    ScriptVar,
 }
 
-/// Per-byte classification: code, string interior, or comment.
+/// Per-byte classification: code, string interior, comment, or
+/// script-variable interior.
 pub(crate) fn classify(text: &str) -> Vec<Class> {
     scan(text).0
 }
@@ -80,6 +86,34 @@ fn scan(text: &str) -> (Vec<Class>, Class) {
                     open = Class::Comment;
                 }
             }
+            b'$' if script_var_open(b, i).is_some() => {
+                // `$`, the name and `(` count as code, the interior as
+                // a script variable and the closing `)` as code again,
+                // as a quoted string's quotes do.  cfg.lex counts
+                // parentheses (`np`) and takes every other byte while
+                // one is open, a newline included; this ends the
+                // variable at the newline, so a `$(` being typed does
+                // not swallow the rest of the document.
+                i = script_var_open(b, i).unwrap();
+                let mut depth = 1usize;
+                while i < b.len() && b[i] != b'\n' {
+                    match b[i] {
+                        b'(' => depth += 1,
+                        b')' => depth -= 1,
+                        _ => {}
+                    }
+                    if depth == 0 {
+                        break;
+                    }
+                    out[i] = Class::ScriptVar;
+                    i += 1;
+                }
+                if i < b.len() && b[i] == b')' {
+                    i += 1; // the closing parenthesis
+                } else if i == b.len() {
+                    open = Class::ScriptVar;
+                }
+            }
             // OpenSIPS strings come double- OR single-quoted; cfg.lex
             // gives only the double-quoted STRING1 backslash escapes,
             // the single-quoted STRING2 ends at the next `'`
@@ -104,6 +138,22 @@ fn scan(text: &str) -> (Vec<Class>, Class) {
         }
     }
     (out, open)
+}
+
+/// Just past the `(` when the `$` at `i` opens a script variable whose
+/// parentheses cfg.lex reads in state SCRIPTVARS: `$(` or `$name(`,
+/// `name` being an `ID` (`{LETTER}{ALPHANUM}*`).
+fn script_var_open(b: &[u8], i: usize) -> Option<usize> {
+    let mut j = i + 1;
+    if b.get(j).is_some_and(|c| c.is_ascii_alphabetic()) {
+        while b
+            .get(j)
+            .is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_')
+        {
+            j += 1;
+        }
+    }
+    (b.get(j) == Some(&b'(')).then_some(j + 1)
 }
 
 /// Line starts of a text, built once so each byte offset → (line,
@@ -745,7 +795,7 @@ pub fn pvars(text: &str) -> Vec<(u32, u32, u32)> {
     let mut out = Vec::new();
     for m in re_pvar_tok().find_iter(text) {
         match classes.get(m.start()) {
-            Some(&Class::Code) | Some(&Class::Str) => {}
+            Some(&Class::Code) | Some(&Class::Str) | Some(&Class::ScriptVar) => {}
             _ => continue,
         }
         let (line, col) = lines.line_col(m.start());

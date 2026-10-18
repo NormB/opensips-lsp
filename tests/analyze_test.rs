@@ -352,3 +352,56 @@ fn loadmodule_takes_a_single_quoted_string_too() {
     let names: Vec<String> = loaded_modules(t).into_iter().map(|m| m.name).collect();
     assert_eq!(names, vec!["tm", "sl"]);
 }
+
+/// cfg.lex reads `$` in state SCRIPTVARS and, while a parenthesis is
+/// open (`np` > 0), takes every byte as part of the variable
+/// (`<SCRIPTVARS>.  { yymore(); }`): a `#` or a quote in
+/// `$(var(a){re.subst,/"//g})` opens no comment and no string.
+/// `tests/grammar/pvar_transformations.cfg` holds the same constructs
+/// to `opensips -C` 4.0.1.
+#[test]
+fn a_script_variable_body_opens_no_comment_or_string() {
+    use opensips_lsp::analyze::in_comment;
+    let t = "route {\n\
+             \t$ru = $(ru{re.subst,/;transport=[A-Za-z]*#//g});\n\
+             \t$var(a) = $(var(a){re.subst,/\"//g});\n\
+             \t$var(c) = $hdr(X#Y);\n\
+             \troute(after);\n\
+             }\n\
+             route[after] {\n\texit; # real\n}\n";
+    let spans: Vec<(String, u32, u32)> = route_blocks(t)
+        .into_iter()
+        .map(|b| (b.name, b.line, b.end_line))
+        .collect();
+    assert_eq!(spans, vec![("".into(), 0, 5), ("after".into(), 6, 8)]);
+    let refs: Vec<String> = route_refs(t).into_iter().map(|r| r.name).collect();
+    assert_eq!(refs, vec!["after"]);
+    let at = |needle: &str| t.find(needle).unwrap() + needle.len();
+    assert!(!in_comment(t, at("]*#")), "`#` inside $(...)");
+    assert!(!in_comment(t, at("X#")), "`#` inside $hdr(...)");
+    assert!(in_comment(t, at("# re")), "a `#` after the variable closes");
+}
+
+/// A `$(` with no `)` on its line ends there: one being typed must not
+/// turn the rest of the document into variable text.
+#[test]
+fn an_unclosed_script_variable_ends_at_its_line() {
+    let t = "route {\n\t$var(a) = $(ru{s.len\n}\nroute[n] {\n\texit;\n}\n";
+    let spans: Vec<(String, u32, u32)> = route_blocks(t)
+        .into_iter()
+        .map(|b| (b.name, b.line, b.end_line))
+        .collect();
+    assert_eq!(spans, vec![("".into(), 0, 2), ("n".into(), 3, 5)]);
+}
+
+/// A variable nested in another's parentheses is still a variable to
+/// highlight, though cfg.lex reads it as text of the outer one.
+#[test]
+fn a_script_variable_nested_in_another_is_still_reported() {
+    let t = "$var(x) = $hdr($var(n));";
+    let got: Vec<&str> = pvars(t)
+        .into_iter()
+        .map(|(_, c, n)| &t[c as usize..(c + n) as usize])
+        .collect();
+    assert_eq!(got, vec!["$var(x)", "$hdr", "$var(n)"]);
+}
