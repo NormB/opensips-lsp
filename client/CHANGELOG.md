@@ -2,6 +2,29 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.26.2] — 2026-10-19
+
+**Script variables with `#`, quotes or braces inside them no longer
+break the outline, and the built-in catalog moves to OpenSIPS 4.0.2
+and 3.6.9.**
+
+- **A `$(...)` or `$name(...)` variable is read the way OpenSIPS reads
+  it.** Inside its parentheses, a `#` does not start a comment, a quote
+  does not start a string and a brace does not open a block. Before, a
+  line such as `$ru = $(ru{re.subst,/a#//g});` made its route run to
+  the end of the file: the outline listed the routes after it inside
+  that route, beside an invented block named `$ru = $(ru`.
+- **The built-in catalog is harvested from OpenSIPS 4.0.2, and the
+  `opensipsVersion` choices are now `3.5.9`, `3.6.9` and `4.0.2`.** A
+  setting of `3.6.8` or `4.0.1` is reported as unrecognized and the
+  newest release (`4.0.2`) is used; set `3.6.9` to keep checking
+  against the 3.6 line. The new core parameter `REACTOR_DBG_FD_CHECK`
+  completes and hovers.
+- **The documentation states what the tests prove.** The real-binary
+  proof runs against OpenSIPS 4.0.2; 3.6.9 and 3.5.9 are checked
+  against their source trees. The documented counts are now 193
+  modules and 68 core functions, as the server reports.
+
 ## [0.26.1] — 2026-10-15
 
 **A release with no behavior change: two weekly dependency updates, and
