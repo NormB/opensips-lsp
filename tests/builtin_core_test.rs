@@ -119,12 +119,11 @@ fn the_vendored_catalogue_matches_a_fresh_harvest_in_its_text_too() {
         ("functions", &b.core.functions, &fresh.functions),
         ("pvars", &b.core.pvars, &fresh.pvars),
     ] {
-        for (s, h) in shipped.iter().zip(harvested.iter()) {
-            compared += 1;
-            if s.doc != h.doc || s.detail != h.detail {
-                differ.push(format!("{what}/{}", s.name));
-            }
-        }
+        compared += shipped
+            .iter()
+            .filter(|s| harvested.iter().any(|h| h.name == s.name))
+            .count();
+        differ.extend(text_differences(what, shipped, harvested));
     }
     // POSITIVE CONTROL: both sides were read.
     assert!(compared > 200, "only {compared} entries compared");
@@ -132,6 +131,62 @@ fn the_vendored_catalogue_matches_a_fresh_harvest_in_its_text_too() {
         differ.is_empty(),
         "vendored text differs from the pinned tree — regenerate. This is the \
          half the name comparison cannot see: {differ:?}"
+    );
+}
+
+/// The entries whose text differs between the shipped and the
+/// harvested list, as `what/name`, paired by name: an entry on one
+/// side only is reported once, and does not shift the others.
+fn text_differences(
+    what: &str,
+    shipped: &[catalog::Item],
+    harvested: &[catalog::Item],
+) -> Vec<String> {
+    let by_name =
+        |items: &[catalog::Item]| -> std::collections::BTreeMap<String, (String, String)> {
+            items
+                .iter()
+                .map(|i| (i.name.clone(), (i.detail.clone(), i.doc.clone())))
+                .collect()
+        };
+    let (s, h) = (by_name(shipped), by_name(harvested));
+    let names: std::collections::BTreeSet<&String> = s.keys().chain(h.keys()).collect();
+    names
+        .into_iter()
+        .filter(|n| s.get(*n) != h.get(*n))
+        .map(|n| format!("{what}/{n}"))
+        .collect()
+}
+
+/// One release adding one entry must be reported as that one entry.
+///
+/// Pairing the two lists by position made every entry after an
+/// insertion look changed: 4.0.2 added `REACTOR_DBG_FD_CHECK` and the
+/// gate named 49 parameters, of which only that one had changed.
+#[test]
+fn an_inserted_entry_is_the_only_difference_reported() {
+    let item = |name: &str, doc: &str| catalog::Item {
+        name: name.to_string(),
+        detail: "core parameter".to_string(),
+        doc: doc.to_string(),
+    };
+    let shipped = vec![item("a", "A"), item("c", "C"), item("d", "D")];
+    let harvested = vec![
+        item("a", "A"),
+        item("b", "B"),
+        item("c", "C"),
+        item("d", "D"),
+    ];
+    assert_eq!(
+        text_differences("params", &shipped, &harvested),
+        vec!["params/b"]
+    );
+
+    // and a real text change is still reported, by name
+    let changed = vec![item("a", "A"), item("c", "changed"), item("d", "D")];
+    assert_eq!(
+        text_differences("params", &shipped, &changed),
+        vec!["params/c"]
     );
 }
 
