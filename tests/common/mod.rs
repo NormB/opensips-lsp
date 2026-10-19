@@ -223,11 +223,28 @@ pub fn parse_corpus(text: &str) -> Vec<(String, String, String)> {
 /// be unique within the binary; the process id is appended. Nothing is
 /// created: the path is reserved, and anything stale left at it is
 /// removed. Hold the guard for as long as the path is used.
+///
+/// Two live guards on one path panic. A helper that clears "its" path
+/// while a test still holds the same one deletes the test's fixture,
+/// and two tests running in parallel on one path clobber each other;
+/// both happened here, and both passed silently.
 pub struct Scratch(std::path::PathBuf);
+
+static LIVE: std::sync::Mutex<std::collections::BTreeSet<std::path::PathBuf>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
 
 impl Scratch {
     pub fn new(name: &str) -> Self {
         let path = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
+        let fresh = LIVE
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(path.clone());
+        assert!(
+            fresh,
+            "{} is already held by another live Scratch: give each test and helper its own name",
+            path.display()
+        );
         remove_path(&path);
         Scratch(path)
     }
@@ -253,6 +270,9 @@ impl AsRef<std::path::Path> for Scratch {
 impl Drop for Scratch {
     fn drop(&mut self) {
         remove_path(&self.0);
+        LIVE.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
     }
 }
 

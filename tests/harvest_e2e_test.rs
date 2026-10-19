@@ -37,7 +37,7 @@ fn boot(
     std::process::ChildStdin,
     std::path::PathBuf,
 ) {
-    let base_scratch = common::Scratch::new(&format!("oslsp-harv-{tag}"));
+    let base_scratch = common::Scratch::new(&format!("oslsp-harv-boot-{tag}"));
     let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(&base).unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"));
@@ -89,6 +89,12 @@ fn harvest_reports_progress_when_the_client_answers_the_create() {
     mk_tree(&tree);
 
     let (_scratch, mut child, rx, mut stdin, _) = boot("prog", Some(&tree));
+
+    assert!(
+        tree.exists(),
+        "booting must leave the configured tree in place: {}",
+        tree.display()
+    );
     let create = wait_for(
         &rx,
         |v| v["method"] == "window/workDoneProgress/create",
@@ -148,6 +154,12 @@ fn a_client_that_never_answers_the_create_still_gets_a_ready_server() {
     mk_tree(&tree);
 
     let (_scratch, mut child, rx, _stdin, _) = boot("mute", Some(&tree));
+
+    assert!(
+        tree.exists(),
+        "booting must leave the configured tree in place: {}",
+        tree.display()
+    );
     // the create arrives and is deliberately left unanswered
     wait_for(
         &rx,
@@ -175,6 +187,12 @@ fn a_configured_tree_documenting_nothing_warns_visibly() {
     std::fs::create_dir_all(&tree).unwrap();
 
     let (_scratch, mut child, rx, _stdin, _) = boot("empty", Some(&tree));
+
+    assert!(
+        tree.exists(),
+        "booting must leave the configured tree in place: {}",
+        tree.display()
+    );
     let warn = wait_for(
         &rx,
         |v| {

@@ -10,17 +10,18 @@
 mod common;
 use opensips_lsp::logic;
 
+/// The tests here run in parallel and each calls this several times,
+/// so every call gets its own directory.
 fn messages(text: &str) -> Vec<String> {
-    let dir_scratch = common::Scratch::new("oslsp-inert");
-    let dir = dir_scratch.path().to_path_buf();
-    let _ = std::fs::create_dir_all(&dir);
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = common::Scratch::new(&format!("oslsp-inert-{n}"));
+    std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("t.cfg");
-    let out = logic::analyzer_diagnostics(&path, text, &|_| None)
+    logic::analyzer_diagnostics(&path, text, &|_| None)
         .into_iter()
         .map(|d| format!("{}:{}: {}", d.line, d.col_start, d.message))
-        .collect();
-    let _ = std::fs::remove_dir_all(&dir);
-    out
+        .collect()
 }
 
 #[test]

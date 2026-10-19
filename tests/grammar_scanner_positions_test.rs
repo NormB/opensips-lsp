@@ -377,13 +377,11 @@ fn every_construct_kind_is_stated_by_both_sides() {
     // `grammar_facts` would silently state nothing for it and every
     // config would "agree" on zero of them.
     let text = "loadmodule \"tm.so\"\nmodparam(\"tm\", \"fr_timeout\", 5)\ninclude_file \"a.cfg\"\nroute[x] {\n    exit;\n}\n";
-    let dir = Path::new(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("grammar-positions-kinds-{}", std::process::id()));
+    let dir = common::Scratch::new("oslsp-grammar-positions-kinds");
     std::fs::create_dir_all(&dir).unwrap();
     let f = dir.join("kinds.cfg");
     std::fs::write(&f, text).unwrap();
     let trees = parse_with_grammar(std::slice::from_ref(&f));
-    std::fs::remove_dir_all(&dir).unwrap();
     let facts = grammar_facts(text, &trees[0]);
     for kind in ["route ", "loadmodule ", "modparam ", "include "] {
         assert!(
@@ -411,8 +409,7 @@ fn grammar_and_scanner_agree_on_every_accepted_config() {
     assert!(!fixture_files.is_empty(), "the fixtures went missing");
     files.extend(fixture_files);
 
-    let scratch = Path::new(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("grammar-positions-corpus-{}", std::process::id()));
+    let scratch = common::Scratch::new("oslsp-grammar-positions-corpus");
     std::fs::create_dir_all(&scratch).unwrap();
     let corpus = corpus_inputs();
     assert!(corpus.len() >= 8, "corpus went missing? {}", corpus.len());
@@ -430,7 +427,6 @@ fn grammar_and_scanner_agree_on_every_accepted_config() {
         .iter()
         .map(|f| std::fs::read_to_string(f).unwrap())
         .collect();
-    std::fs::remove_dir_all(&scratch).unwrap();
 
     let mut report = Vec::new();
     let mut facts = 0;
