@@ -22,8 +22,8 @@ fn hover_text(tag: &str, opts: serde_json::Value) -> String {
 }
 
 fn hover_text_at(tag: &str, opts: serde_json::Value, body: &str, line: u32, ch: u32) -> String {
-    let dir = std::env::temp_dir().join(format!("oslsp-vhints-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new(&format!("oslsp-vhints-{tag}"));
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("t.cfg");
     std::fs::write(&cfg, body).unwrap();

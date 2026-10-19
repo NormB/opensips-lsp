@@ -2,13 +2,15 @@
 //! wiki tree from the in-repo docs (docs/ + README are the source of
 //! truth; the GitHub wiki is a generated mirror).
 
+mod common;
+
 use std::process::Command;
 
 #[test]
 fn wiki_tree_is_generated_from_docs() {
     let root = env!("CARGO_MANIFEST_DIR");
-    let out = std::env::temp_dir().join(format!("oslsp-wiki-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&out);
+    let out_scratch = common::Scratch::new("oslsp-wiki");
+    let out = out_scratch.path().to_path_buf();
 
     let status = Command::new("python3")
         .arg(format!("{root}/scripts/build-wiki.py"))
@@ -48,6 +50,4 @@ fn wiki_tree_is_generated_from_docs() {
     let sidebar = std::fs::read_to_string(out.join("_Sidebar.md")).unwrap();
     assert!(sidebar.contains("Admin-Guide") && sidebar.contains("Editor-Setup"));
     assert!(sidebar.contains("Getting-Started"));
-
-    let _ = std::fs::remove_dir_all(&out);
 }

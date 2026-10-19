@@ -13,14 +13,15 @@ use std::process::{Command, Stdio};
 fn boot(
     tag: &str,
 ) -> (
+    common::Scratch,
     Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     std::path::PathBuf,
     serde_json::Value,
 ) {
-    let base = std::env::temp_dir().join(format!("oslsp-watch-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new(&format!("oslsp-watch-{tag}"));
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(base.join("tree/modules/mymod")).unwrap();
     std::fs::write(
         base.join("tree/modules/mymod/README.md"),
@@ -73,14 +74,14 @@ fn boot(
         },
         "harvest-ready",
     );
-    (child, rx, stdin, base, req)
+    (base_scratch, child, rx, stdin, base, req)
 }
 
 /// The server must ask to be told: a watcher nobody registered is a
 /// watcher that never fires.
 #[test]
 fn the_server_registers_for_the_files_it_reads() {
-    let (mut child, _rx, _stdin, base, req) = boot("register");
+    let (_scratch, mut child, _rx, _stdin, _, req) = boot("register");
 
     let regs = req["params"]["registrations"]
         .as_array()
@@ -112,7 +113,6 @@ fn the_server_registers_for_the_files_it_reads() {
         "the tree lives outside the workspace, so its watcher is relative to the tree: {patterns:?}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// An include edited on disk changes what the open document means,
@@ -124,7 +124,7 @@ fn the_server_registers_for_the_files_it_reads() {
 /// rather than by chance.
 #[test]
 fn an_include_changing_on_disk_republishes_diagnostics() {
-    let (mut child, rx, mut stdin, base, _) = boot("include");
+    let (_scratch, mut child, rx, mut stdin, base, _) = boot("include");
     let inc = base.join("inc.cfg");
     let notify = |stdin: &mut std::process::ChildStdin| {
         write_msg(
@@ -186,14 +186,13 @@ fn an_include_changing_on_disk_republishes_diagnostics() {
         Some(0)
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// A rebuilt documentation tree must be re-read, not served from the
 /// cache entry made before it changed.
 #[test]
 fn a_changed_documentation_tree_is_reharvested() {
-    let (mut child, rx, mut stdin, base, _) = boot("tree");
+    let (_scratch, mut child, rx, mut stdin, base, _) = boot("tree");
     let cfg = base.join("t.cfg");
     let text = "loadmodule \"mymod.so\"\nroute {\n    \n}\n";
     std::fs::write(&cfg, text).unwrap();
@@ -256,5 +255,4 @@ fn a_changed_documentation_tree_is_reharvested() {
     }
     assert!(found, "the rebuilt tree was never re-read");
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }

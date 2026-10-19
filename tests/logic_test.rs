@@ -1,3 +1,5 @@
+mod common;
+
 use opensips_lsp::catalog::{Item, ModuleDoc};
 use opensips_lsp::logic::{
     CompKind, SemKind, analyzer_diagnostics, attribute_foreign_diag, catalog_diagnostics,
@@ -1273,8 +1275,8 @@ fn the_graph_tracks_a_model_through_random_edits() {
 /// every file in the folder.
 #[test]
 fn the_workspace_sweep_reaches_configs_not_named_cfg() {
-    let dir = std::env::temp_dir().join(format!("oslsp-sweep-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-sweep");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(dir.join("include")).unwrap();
     std::fs::write(
         dir.join("proxy.inc"),

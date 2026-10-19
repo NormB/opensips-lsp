@@ -31,13 +31,14 @@ fn boot(
     tag: &str,
     text: &str,
 ) -> (
+    common::Scratch,
     Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     String,
 ) {
-    let dir = std::env::temp_dir().join(format!("oslsp-ch-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new(&format!("oslsp-ch-{tag}"));
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("t.cfg");
     std::fs::write(&cfg, text).unwrap();
@@ -74,7 +75,7 @@ fn boot(
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    (child, rx, stdin, uri)
+    (dir_scratch, child, rx, stdin, uri)
 }
 
 fn prepare(
@@ -95,7 +96,7 @@ fn prepare(
 
 #[test]
 fn prepare_resolves_a_call_site_to_the_route_it_targets() {
-    let (mut child, rx, mut stdin, uri) = boot("prep", MAIN);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("prep", MAIN);
     // cursor on RELAY inside `route(RELAY);` on line 1
     let r = prepare(&mut stdin, &rx, &uri, 2, 1, 11);
     let items = r.as_array().expect("an item array");
@@ -109,7 +110,7 @@ fn prepare_resolves_a_call_site_to_the_route_it_targets() {
 
 #[test]
 fn a_per_kind_block_has_no_hierarchy_of_its_own() {
-    let (mut child, rx, mut stdin, uri) = boot("kind", MAIN);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("kind", MAIN);
     // cursor on RELAY in `failure_route[RELAY]` (line 11)
     let r = prepare(&mut stdin, &rx, &uri, 2, 11, 15);
     assert!(
@@ -121,7 +122,7 @@ fn a_per_kind_block_has_no_hierarchy_of_its_own() {
 
 #[test]
 fn incoming_calls_group_by_caller_and_keep_every_call_site() {
-    let (mut child, rx, mut stdin, uri) = boot("in", MAIN);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("in", MAIN);
     let item = prepare(&mut stdin, &rx, &uri, 2, 1, 11)[0].clone();
     write_msg(
         &mut stdin,
@@ -155,7 +156,7 @@ fn incoming_calls_group_by_caller_and_keep_every_call_site() {
 
 #[test]
 fn outgoing_calls_list_targets_and_name_the_undefined_ones() {
-    let (mut child, rx, mut stdin, uri) = boot("out", MAIN);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("out", MAIN);
     let item = prepare(&mut stdin, &rx, &uri, 2, 1, 11)[0].clone();
     write_msg(
         &mut stdin,
@@ -182,8 +183,8 @@ fn outgoing_calls_list_targets_and_name_the_undefined_ones() {
 
 #[test]
 fn the_graph_spans_the_include_closure() {
-    let dir = std::env::temp_dir().join(format!("oslsp-ch-inc-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-ch-inc");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("inc.cfg"),
@@ -246,7 +247,6 @@ fn the_graph_spans_the_include_closure() {
         "the caller item must point at the included file"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn prepare_takes_a_utf16_position() {
     // UTF-16 column 24 and byte column 32; reading the LSP column as a
     // byte offset lands on the space before `route(`
     let text = "route {\n    xlog(\"€€€€\"); route(RELAY);\n}\nroute[RELAY] {\n    exit;\n}\n";
-    let (mut child, rx, mut stdin, uri) = boot("utf16", text);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("utf16", text);
     let r = prepare(&mut stdin, &rx, &uri, 2, 1, 25);
     let items = r
         .as_array()

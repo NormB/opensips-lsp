@@ -83,8 +83,8 @@ fn the_real_parser_opens_it(bin: &str, dir: &std::path::Path, tag: &str, cfg: &s
 #[test]
 fn the_analyzer_sees_exactly_what_the_flattener_opens() {
     let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
-    let dir = std::env::temp_dir().join(format!("oslsp-flatten-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-flatten");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let missing = dir.join("definitely-missing.inc");
     assert!(!missing.exists(), "the probe file must not exist");
@@ -126,7 +126,6 @@ fn the_analyzer_sees_exactly_what_the_flattener_opens() {
         disagreements.len(),
         disagreements.join("\n")
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The rule stated directly, so a failure says which half broke

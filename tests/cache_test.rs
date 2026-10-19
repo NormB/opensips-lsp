@@ -1,11 +1,12 @@
 //! Catalog cache: harvest results are cached per source tree and
 //! invalidated when the tree changes.
 
+mod common;
+
 use opensips_lsp::catalog::{CoreDocs, Item, ModuleDoc, load_cached, save_cache, tree_fingerprint};
 
-fn mk_tree(tag: &str) -> std::path::PathBuf {
-    let root = std::env::temp_dir().join(format!("oslsp-cache-tree-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+fn mk_tree(tag: &str) -> common::Scratch {
+    let root = common::Scratch::new(&format!("oslsp-cache-tree-{tag}"));
     std::fs::create_dir_all(root.join("modules").join("m")).unwrap();
     std::fs::create_dir_all(root.join("docs").join("manual")).unwrap();
     root
@@ -41,8 +42,8 @@ fn sample() -> (Vec<ModuleDoc>, CoreDocs) {
 #[test]
 fn cache_roundtrips_and_invalidates_on_tree_change() {
     let tree = mk_tree("rt");
-    let cache = std::env::temp_dir().join(format!("oslsp-cache-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&cache);
+    let cache_scratch = common::Scratch::new("oslsp-cache");
+    let cache = cache_scratch.path().to_path_buf();
     let (mods, core) = sample();
 
     // nothing cached yet
@@ -69,21 +70,17 @@ fn cache_roundtrips_and_invalidates_on_tree_change() {
         load_cached(&tree, &cache).is_none(),
         "stale cache must miss after the tree changes"
     );
-
-    let _ = std::fs::remove_dir_all(&tree);
-    let _ = std::fs::remove_dir_all(&cache);
 }
 
 #[test]
 fn corrupt_cache_is_a_miss_not_a_panic() {
     let tree = mk_tree("corrupt");
-    let cache = std::env::temp_dir().join(format!("oslsp-cache-c-{}", std::process::id()));
+    let cache_scratch = common::Scratch::new("oslsp-cache-c");
+    let cache = cache_scratch.path().to_path_buf();
     std::fs::create_dir_all(&cache).unwrap();
     let fp = tree_fingerprint(&tree);
     std::fs::write(cache.join(format!("{fp}.json")), b"{not json").unwrap();
     assert!(load_cached(&tree, &cache).is_none());
-    let _ = std::fs::remove_dir_all(&tree);
-    let _ = std::fs::remove_dir_all(&cache);
 }
 
 #[test]
@@ -91,21 +88,19 @@ fn distinct_trees_have_distinct_fingerprints() {
     let a = mk_tree("a");
     let b = mk_tree("b");
     assert_ne!(tree_fingerprint(&a), tree_fingerprint(&b));
-    let _ = std::fs::remove_dir_all(&a);
-    let _ = std::fs::remove_dir_all(&b);
 }
 
 #[test]
 fn cache_writes_are_atomic_and_leave_no_temp_files() {
     let tree = mk_tree("atomic");
-    let cache = std::env::temp_dir().join(format!("oslsp-cache-a-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&cache);
+    let cache_scratch = common::Scratch::new("oslsp-cache-a");
+    let cache = cache_scratch.path().to_path_buf();
     let (mods, core) = sample();
 
     // hammer: concurrent writers and readers; a torn write would make
     // a reader parse a partial file (load must be Some(valid) or None,
     // and must never panic)
-    let tree2 = tree.clone();
+    let tree2 = tree.to_path_buf();
     let cache2 = cache.clone();
     let writer = std::thread::spawn(move || {
         for _ in 0..200 {
@@ -131,9 +126,6 @@ fn cache_writes_are_atomic_and_leave_no_temp_files() {
     // a stray temp file from a crashed writer must be ignored by load
     std::fs::write(cache.join("deadbeef.json.tmp"), b"{torn").unwrap();
     assert!(load_cached(&tree, &cache).is_some());
-
-    let _ = std::fs::remove_dir_all(&tree);
-    let _ = std::fs::remove_dir_all(&cache);
 }
 
 #[test]
@@ -147,8 +139,8 @@ fn editing_a_harvested_files_content_invalidates_the_cache() {
         "### Exported Parameters\n\n#### p1 (string)\n\nOld doc.\n",
     )
     .unwrap();
-    let cache = std::env::temp_dir().join(format!("oslsp-cache-e-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&cache);
+    let cache_scratch = common::Scratch::new("oslsp-cache-e");
+    let cache = cache_scratch.path().to_path_buf();
     let (mods, core) = sample();
     save_cache(&tree, &cache, &mods, &core).expect("save");
     assert!(load_cached(&tree, &cache).is_some(), "warm hit");
@@ -180,9 +172,6 @@ fn editing_a_harvested_files_content_invalidates_the_cache() {
         load_cached(&tree, &cache).is_none(),
         "a new harvested file must miss"
     );
-
-    let _ = std::fs::remove_dir_all(&tree);
-    let _ = std::fs::remove_dir_all(&cache);
 }
 
 /// Editing the routes page must invalidate the cache.
@@ -211,7 +200,6 @@ fn editing_the_routes_page_invalidates_the_cache() {
         before, after,
         "an edit to Script-Routes.md must change the fingerprint"
     );
-    let _ = std::fs::remove_dir_all(&tree);
 }
 
 /// Every manual page the core harvest reads must be in the

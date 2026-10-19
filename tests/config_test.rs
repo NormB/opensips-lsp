@@ -1,3 +1,5 @@
+mod common;
+
 use opensips_lsp::logic::{diag_matches_file, resolve_bin};
 
 #[test]
@@ -75,8 +77,8 @@ fn existing_same_basename_files_do_not_cross_attach() {
     // the include-file attack: /a/test.cfg's error must not attach to
     // /b/test.cfg just because the basenames collide — when both paths
     // exist, canonical identity decides
-    let base = std::env::temp_dir().join(format!("oslsp-canon-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("oslsp-canon");
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(base.join("a")).unwrap();
     std::fs::create_dir_all(base.join("b")).unwrap();
     std::fs::write(base.join("a/test.cfg"), "x").unwrap();
@@ -88,13 +90,12 @@ fn existing_same_basename_files_do_not_cross_attach() {
         "distinct existing files with equal basenames must not match"
     );
     assert!(diag_matches_file(&a.display().to_string(), &a));
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn symlinked_spellings_of_the_same_file_match_canonically() {
-    let base = std::env::temp_dir().join(format!("oslsp-link-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("oslsp-link");
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(base.join("real")).unwrap();
     std::fs::write(base.join("real/t.cfg"), "x").unwrap();
     std::os::unix::fs::symlink(base.join("real"), base.join("link")).unwrap();
@@ -102,5 +103,4 @@ fn symlinked_spellings_of_the_same_file_match_canonically() {
     let real = base.join("real/t.cfg");
     assert!(diag_matches_file(&real.display().to_string(), &via_link));
     assert!(diag_matches_file(&via_link.display().to_string(), &real));
-    let _ = std::fs::remove_dir_all(&base);
 }

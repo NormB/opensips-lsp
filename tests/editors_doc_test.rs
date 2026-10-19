@@ -9,6 +9,8 @@
 //! derives its expectation from the source, so the page cannot drift
 //! from the thing it documents again.
 
+mod common;
+
 use std::collections::BTreeSet;
 
 fn root() -> &'static str {
@@ -188,7 +190,8 @@ fn fenced<'a>(doc: &'a str, lang: &str, after: &str) -> &'a str {
 fn the_zed_walkthrough_is_valid_shell() {
     let walk = read("docs/ZED.md");
     let block = fenced(&walk, "sh", "## 1. Build the extension");
-    let dir = std::env::temp_dir().join(format!("oslsp-zed-{}", std::process::id()));
+    let dir_scratch = common::Scratch::new("oslsp-zed");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("block.sh");
     std::fs::write(&path, block).unwrap();

@@ -300,8 +300,8 @@ fn harvesting_the_tree_directly_reconciles_against_c() {
 /// the splice resolves.
 #[test]
 fn an_unresolved_splice_drops_nothing() {
-    let dir = std::env::temp_dir().join(format!("oslsp-cguard-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-cguard");
+    let dir = dir_scratch.path().to_path_buf();
 
     let readme = "# m\n\n### Exported Parameters\n\n#### documented_only (integer)\n\nIn the README, never exported.\n\n#### really_exported (integer)\n\nIn both.\n";
     for (module, table) in [
@@ -349,8 +349,6 @@ fn an_unresolved_splice_drops_nothing() {
         resolved.iter().any(|n| n == "really_exported"),
         "the exported parameter must survive; got {resolved:?}"
     );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A conditional entry must not make a table look unresolved.

@@ -121,13 +121,14 @@ fn boot(
     tag: &str,
     assistance: Option<bool>,
 ) -> (
+    common::Scratch,
     Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     String,
 ) {
-    let base = std::env::temp_dir().join(format!("oslsp-assist-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new(&format!("oslsp-assist-{tag}"));
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(&base).unwrap();
     let cfg = base.join("t.cfg");
     let text = "route {\n    xlog(\"L_INFO\", \"x\");\n}\n";
@@ -167,7 +168,7 @@ fn boot(
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    (child, rx, stdin, uri)
+    (base_scratch, child, rx, stdin, uri)
 }
 
 fn hover(
@@ -208,7 +209,7 @@ fn completion(
 
 #[test]
 fn assistance_is_on_unless_it_is_turned_off() {
-    let (mut child, rx, mut stdin, uri) = boot("on", None);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("on", None);
     assert!(
         !hover(&mut stdin, &rx, &uri, 2).is_null(),
         "the default must be a working editor"
@@ -222,7 +223,7 @@ fn assistance_is_on_unless_it_is_turned_off() {
 
 #[test]
 fn turning_it_off_stops_hovers_and_completion() {
-    let (mut child, rx, mut stdin, uri) = boot("off", Some(false));
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("off", Some(false));
     assert!(
         hover(&mut stdin, &rx, &uri, 2).is_null(),
         "hover must answer nothing when assistance is off"
@@ -236,7 +237,7 @@ fn turning_it_off_stops_hovers_and_completion() {
 
 #[test]
 fn the_toggle_takes_effect_without_a_restart() {
-    let (mut child, rx, mut stdin, uri) = boot("live", None);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("live", None);
     assert!(
         !hover(&mut stdin, &rx, &uri, 2).is_null(),
         "on to begin with"
@@ -299,7 +300,7 @@ fn diagnostics_are_not_part_of_the_toggle() {
 /// changing something unrelated.
 #[test]
 fn a_payload_that_omits_the_toggle_leaves_it_alone() {
-    let (mut child, rx, mut stdin, uri) = boot("keep", Some(false));
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("keep", Some(false));
     assert!(
         hover(&mut stdin, &rx, &uri, 2).is_null(),
         "off to begin with"
@@ -333,7 +334,7 @@ fn a_payload_that_omits_the_toggle_leaves_it_alone() {
 /// other is worse than one that works in neither.
 #[test]
 fn the_namespaced_payload_shape_toggles_too() {
-    let (mut child, rx, mut stdin, uri) = boot("nested", None);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("nested", None);
     assert!(
         !hover(&mut stdin, &rx, &uri, 2).is_null(),
         "on to begin with"

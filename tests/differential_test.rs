@@ -67,8 +67,8 @@ fn analyzer_is_silent_on_binary_accepted_configs() {
     // constructs, including past false-positive shapes: route(0),
     // include-defined targets, numeric routes) keeps the gate
     // non-vacuous everywhere
-    let base = std::env::temp_dir().join(format!("oslsp-diff-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("oslsp-diff");
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(&base).unwrap();
     std::fs::write(
         base.join("inc.cfg"),
@@ -123,8 +123,8 @@ fn analyzer_is_silent_on_binary_accepted_configs() {
 #[test]
 fn rename_round_trip_survives_the_real_parser() {
     let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
-    let dir = std::env::temp_dir().join(format!("oslsp-rt-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-rt");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("rt.cfg");
     let original = "socket=udp:127.0.0.1:15999\nloadmodule \"proto_udp.so\"\nroute[old_target] {\n    exit;\n}\nroute {\n    route(old_target);\n    exit;\n}\n";
@@ -168,7 +168,6 @@ fn rename_round_trip_survives_the_real_parser() {
         check(&out_cfg),
         "the real parser rejects the renamed config:\n{renamed}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The README's own `modparam` examples, as ground truth for what the

@@ -11,13 +11,14 @@ fn boot(
     tag: &str,
     text: &str,
 ) -> (
+    common::Scratch,
     Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     String,
 ) {
-    let dir = std::env::temp_dir().join(format!("oslsp-rf-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new(&format!("oslsp-rf-{tag}"));
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("t.cfg");
     std::fs::write(&cfg, text).unwrap();
@@ -49,7 +50,7 @@ fn boot(
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    (child, rx, stdin, uri)
+    (dir_scratch, child, rx, stdin, uri)
 }
 
 fn actions(
@@ -105,7 +106,7 @@ fn apply(text: &str, action: &serde_json::Value, uri: &str) -> String {
 fn extracting_a_selection_produces_an_applicable_edit() {
     let src =
         "loadmodule \"tm.so\"\nroute {\n    xlog(\"one\");\n    xlog(\"two\");\n    exit;\n}\n";
-    let (mut child, rx, mut stdin, uri) = boot("extract", src);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("extract", src);
     let acts = actions(&mut stdin, &rx, &uri, 2, 2, 4);
     let extract = acts
         .iter()
@@ -126,7 +127,7 @@ fn extracting_a_selection_produces_an_applicable_edit() {
 #[test]
 fn a_selection_that_would_change_behaviour_offers_no_extraction() {
     let src = "route {\n    xlog(\"x\");\n    return;\n}\n";
-    let (mut child, rx, mut stdin, uri) = boot("return", src);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("return", src);
     let acts = actions(&mut stdin, &rx, &uri, 2, 1, 3);
     assert!(
         !acts.iter().any(|a| a["kind"] == "refactor.extract"),
@@ -139,7 +140,7 @@ fn a_selection_that_would_change_behaviour_offers_no_extraction() {
 fn duplicate_loadmodules_can_be_removed_and_the_result_is_clean() {
     let src =
         "loadmodule \"tm.so\"\nloadmodule \"sl.so\"\nloadmodule \"tm.so\"\nroute {\n    exit;\n}\n";
-    let (mut child, rx, mut stdin, uri) = boot("dupes", src);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("dupes", src);
     let acts = actions(&mut stdin, &rx, &uri, 2, 0, 0);
     let organize = acts
         .iter()
@@ -163,7 +164,7 @@ fn duplicate_loadmodules_can_be_removed_and_the_result_is_clean() {
 #[test]
 fn a_document_without_duplicates_offers_no_removal() {
     let src = "loadmodule \"tm.so\"\nroute {\n    exit;\n}\n";
-    let (mut child, rx, mut stdin, uri) = boot("nodupes", src);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("nodupes", src);
     let acts = actions(&mut stdin, &rx, &uri, 2, 0, 0);
     assert!(
         !acts.iter().any(|a| a["kind"] == "source.organizeImports"),

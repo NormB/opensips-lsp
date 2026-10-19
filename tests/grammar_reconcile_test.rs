@@ -644,8 +644,8 @@ fn an_alias_of_a_documented_call_is_filed_as_a_call() {
     // This tree has no function alias, so the rule cannot be observed
     // on it: a synthetic one is the only way to make the assertion
     // bite rather than pass on an empty set.
-    let dir = std::env::temp_dir().join(format!("oslsp-alias-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-alias");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(dir.join("docs/manual")).unwrap();
     std::fs::write(
         dir.join("cfg.lex"),

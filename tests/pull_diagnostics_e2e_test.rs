@@ -27,13 +27,14 @@ fn boot(
     tag: &str,
     pull: bool,
 ) -> (
+    common::Scratch,
     Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     std::path::PathBuf,
 ) {
-    let base = std::env::temp_dir().join(format!("oslsp-pull-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new(&format!("oslsp-pull-{tag}"));
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(&base).unwrap();
 
     let mut child = Server::new(
@@ -62,7 +63,7 @@ fn boot(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    (child, rx, stdin, base)
+    (base_scratch, child, rx, stdin, base)
 }
 
 fn open(stdin: &mut std::process::ChildStdin, uri: &str, text: &str) {
@@ -75,7 +76,7 @@ fn open(stdin: &mut std::process::ChildStdin, uri: &str, text: &str) {
 
 #[test]
 fn a_document_report_carries_the_analyzer_findings() {
-    let (mut child, rx, mut stdin, base) = boot("doc", true);
+    let (_scratch, mut child, rx, mut stdin, base) = boot("doc", true);
     let cfg = base.join("t.cfg");
     let text = "route {\n    route(MISSING);\n}\n";
     std::fs::write(&cfg, text).unwrap();
@@ -102,12 +103,11 @@ fn a_document_report_carries_the_analyzer_findings() {
         "a report needs an identity for the unchanged case"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn an_unchanged_document_reports_unchanged() {
-    let (mut child, rx, mut stdin, base) = boot("unchanged", true);
+    let (_scratch, mut child, rx, mut stdin, base) = boot("unchanged", true);
     let cfg = base.join("t.cfg");
     let text = "route {\n    route(MISSING);\n}\n";
     std::fs::write(&cfg, text).unwrap();
@@ -134,12 +134,11 @@ fn an_unchanged_document_reports_unchanged() {
         again["result"]
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn a_pulling_client_is_not_also_pushed_to() {
-    let (mut child, rx, mut stdin, base) = boot("nopush", true);
+    let (_scratch, mut child, rx, mut stdin, base) = boot("nopush", true);
     let cfg = base.join("t.cfg");
     let text = "route {\n    route(MISSING);\n}\n";
     std::fs::write(&cfg, text).unwrap();
@@ -177,12 +176,11 @@ fn a_pulling_client_is_not_also_pushed_to() {
         "a pulling client must not also receive pushed diagnostics"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn a_pushing_client_still_gets_pushed_diagnostics() {
-    let (mut child, rx, mut stdin, base) = boot("push", false);
+    let (_scratch, mut child, rx, mut stdin, base) = boot("push", false);
     let cfg = base.join("t.cfg");
     let text = "route {\n    route(MISSING);\n}\n";
     std::fs::write(&cfg, text).unwrap();
@@ -206,13 +204,12 @@ fn a_pushing_client_still_gets_pushed_diagnostics() {
             .is_empty()
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// The decision that makes workspace diagnostics honest.
 #[test]
 fn only_root_configs_are_reported_never_the_fragments_they_include() {
-    let (mut child, rx, mut stdin, base) = boot("workspace", true);
+    let (_scratch, mut child, rx, mut stdin, base) = boot("workspace", true);
     // main.cfg defines HELPER and includes the fragment that calls it;
     // the fragment on its own would look broken
     std::fs::write(
@@ -266,7 +263,6 @@ fn only_root_configs_are_reported_never_the_fragments_they_include() {
         "HELPER is defined in the root, so the fragment's call is fine: {msgs:?}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// The sweep must read the workspace the way the include graph does,
@@ -275,7 +271,7 @@ fn only_root_configs_are_reported_never_the_fragments_they_include() {
 /// include path, and a config with one byte that is not UTF-8.
 #[test]
 fn the_sweep_agrees_with_the_include_graph() {
-    let (mut child, rx, mut stdin, base) = boot("sweep-graph", true);
+    let (_scratch, mut child, rx, mut stdin, base) = boot("sweep-graph", true);
     std::fs::create_dir_all(base.join("sub")).unwrap();
     std::fs::write(
         base.join("frag.inc"),
@@ -318,5 +314,4 @@ fn the_sweep_agrees_with_the_include_graph() {
         "the latin-1 root is analysed: {latin}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }

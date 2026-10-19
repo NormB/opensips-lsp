@@ -347,8 +347,8 @@ fn every_offered_keyword_reaches_the_popup_with_its_text() {
 /// absent, and no other page supplies them.
 #[test]
 fn async_and_launch_come_from_the_async_page() {
-    let dir = std::env::temp_dir().join(format!("oslsp-async-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-async");
+    let dir = dir_scratch.path().to_path_buf();
     let manual = dir.join("docs").join("manual");
     std::fs::create_dir_all(&manual).unwrap();
 
@@ -381,5 +381,4 @@ fn async_and_launch_come_from_the_async_page() {
             .unwrap_or_else(|| panic!("{kw} must come from the async page"));
         assert!(!it.doc.trim().is_empty(), "{kw} must carry its text");
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }

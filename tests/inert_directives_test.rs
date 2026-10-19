@@ -11,7 +11,8 @@ mod common;
 use opensips_lsp::logic;
 
 fn messages(text: &str) -> Vec<String> {
-    let dir = std::env::temp_dir().join(format!("oslsp-inert-{}", std::process::id()));
+    let dir_scratch = common::Scratch::new("oslsp-inert");
+    let dir = dir_scratch.path().to_path_buf();
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("t.cfg");
     let out = logic::analyzer_diagnostics(&path, text, &|_| None)

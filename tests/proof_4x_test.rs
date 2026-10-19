@@ -33,7 +33,8 @@ fn full_stack_against_a_real_4x_tree() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
     let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
 
-    let dir = std::env::temp_dir().join(format!("oslsp-proof-{}", std::process::id()));
+    let dir_scratch = common::Scratch::new("oslsp-proof");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("proof.cfg");
     // an unknown modparam so the diagnostics leg has something to find
@@ -143,7 +144,6 @@ fn full_stack_against_a_real_4x_tree() {
     assert!(hover.contains("fr_timeout"), "hover: {hover}");
 
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The formatter's strongest claim, checked against the real parser:
@@ -186,8 +186,8 @@ fn formatting_never_changes_what_the_real_parser_accepts() {
          }}\n"
     );
 
-    let dir = std::env::temp_dir().join(format!("oslsp-fmtproof-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-fmtproof");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
 
     // The POSITIONED parse errors the real binary reports, as the
@@ -238,7 +238,6 @@ fn formatting_never_changes_what_the_real_parser_accepts() {
             "formatting was not idempotent under {label}"
         );
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// An included FRAGMENT, opened on its own, against the REAL checker.
@@ -263,8 +262,8 @@ fn a_fragment_is_checked_through_its_root_by_the_real_parser() {
     let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
     let mpath = common::required_env("OPENSIPS_LSP_TEST_MPATH");
 
-    let dir = std::env::temp_dir().join(format!("oslsp-fragproof-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-fragproof");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(dir.join("inc")).unwrap();
     std::fs::write(
         dir.join("opensips.cfg"),
@@ -360,7 +359,6 @@ fn a_fragment_is_checked_through_its_root_by_the_real_parser() {
         "a genuinely undefined route must still be flagged: {items:?}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Oracle: the REAL parser must see the same configuration whether it
@@ -378,8 +376,8 @@ fn the_real_parser_sees_the_same_program_whole_or_split() {
     let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
     let mpath = common::required_env("OPENSIPS_LSP_TEST_MPATH");
 
-    let dir = std::env::temp_dir().join(format!("oslsp-oracle-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-oracle");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(dir.join("inc")).unwrap();
 
     // three blocks, the middle one carrying a real syntax error
@@ -439,7 +437,6 @@ fn the_real_parser_sees_the_same_program_whole_or_split() {
         "the real parser reports something different once the same text \
          is split across includes — the premise this feature rests on"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Oracle: OpenSIPS reads a conditionally-guarded include ANYWAY.
@@ -455,8 +452,8 @@ fn the_real_parser_sees_the_same_program_whole_or_split() {
 fn the_real_parser_reads_a_conditional_include_anyway() {
     let bin = common::required_env("OPENSIPS_LSP_TEST_BIN");
 
-    let dir = std::env::temp_dir().join(format!("oslsp-cond-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-cond");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(dir.join("inc")).unwrap();
     // a file that cannot possibly parse
     std::fs::write(dir.join("inc/on.cfg"), "route[BROKEN] {\n    exit\n}\n").unwrap();
@@ -492,5 +489,4 @@ fn the_real_parser_reads_a_conditional_include_anyway() {
         "and WITHOUT it too — OpenSIPS does not compile the include out, so \
          the graph must keep claiming it"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }

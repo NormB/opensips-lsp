@@ -11,14 +11,15 @@ fn boot(
     opts: serde_json::Value,
     text: &str,
 ) -> (
+    common::Scratch,
     Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     String,
     std::path::PathBuf,
 ) {
-    let base = std::env::temp_dir().join(format!("oslsp-nav-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new(&format!("oslsp-nav-{tag}"));
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(&base).unwrap();
     let cfg = base.join("t.cfg");
     std::fs::write(&cfg, text).unwrap();
@@ -60,12 +61,12 @@ fn boot(
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    (child, rx, stdin, uri, base)
+    (base_scratch, child, rx, stdin, uri, base)
 }
 
 #[test]
 fn workspace_symbols_filter_across_open_docs() {
-    let (mut child, rx, mut stdin, _uri, base) =
+    let (_scratch, mut child, rx, mut stdin, _uri, _) =
         boot("ws", serde_json::json!({"opensipsPath":""}), DOC);
     write_msg(
         &mut stdin,
@@ -89,12 +90,11 @@ fn workspace_symbols_filter_across_open_docs() {
     let v = wait_for(&rx, |v| v["id"] == 4, "wsym-all");
     assert!(v["result"].as_array().unwrap().len() >= 2);
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn code_lens_counts_route_references() {
-    let (mut child, rx, mut stdin, uri, base) =
+    let (_scratch, mut child, rx, mut stdin, uri, _) =
         boot("cl", serde_json::json!({"opensipsPath":""}), DOC);
     write_msg(
         &mut stdin,
@@ -116,12 +116,11 @@ fn code_lens_counts_route_references() {
         .expect("lens on other_thing");
     assert_eq!(other["command"]["title"], "0 references");
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn code_lens_can_be_disabled() {
-    let (mut child, rx, mut stdin, uri, base) = boot(
+    let (_scratch, mut child, rx, mut stdin, uri, _) = boot(
         "cloff",
         serde_json::json!({"opensipsPath":"", "codeLensReferences": false}),
         DOC,
@@ -137,13 +136,12 @@ fn code_lens_can_be_disabled() {
         "no lenses when disabled: {v}"
     );
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn quick_fix_creates_a_route_stub() {
     let broken = "route {\n    route(missing);\n}\n";
-    let (mut child, rx, mut stdin, uri, base) =
+    let (_scratch, mut child, rx, mut stdin, uri, _) =
         boot("qf", serde_json::json!({"opensipsPath":""}), broken);
     // ask for actions carrying the analyzer diagnostic in context
     write_msg(
@@ -171,12 +169,11 @@ fn quick_fix_creates_a_route_stub() {
             .contains("route[missing]")
     );
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn semantic_tokens_over_stdio() {
-    let (mut child, rx, mut stdin, uri, base) = boot(
+    let (_scratch, mut child, rx, mut stdin, uri, _) = boot(
         "sem",
         serde_json::json!({"opensipsPath":""}),
         "route[ab] {\n    route(ab);\n}\n",
@@ -192,12 +189,12 @@ fn semantic_tokens_over_stdio() {
     let first: Vec<u64> = data[..5].iter().map(|x| x.as_u64().unwrap()).collect();
     assert_eq!(first, vec![0, 6, 2, 0, 0], "route name at line 0 col 6");
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn prepare_rename_gates_on_route_symbols() {
-    let (mut child, rx, mut stdin, uri, base) = boot("preprename", serde_json::json!({}), DOC);
+    let (_scratch, mut child, rx, mut stdin, uri, _) =
+        boot("preprename", serde_json::json!({}), DOC);
     // on the route(helper) call-site name (line 7, "helper" at col 10)
     write_msg(
         &mut stdin,
@@ -224,13 +221,13 @@ fn prepare_rename_gates_on_route_symbols() {
     let v = wait_for(&rx, |v| v["id"] == 11, "prepareRename off symbol");
     assert!(v["result"].is_null(), "off-symbol must be null: {v}");
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn document_links_cover_includes() {
     let text = "include_file \"inc.cfg\"\nimport_file 'opt.cfg'\nroute { exit; }\n";
-    let (mut child, rx, mut stdin, uri, base) = boot("doclink", serde_json::json!({}), text);
+    let (_scratch, mut child, rx, mut stdin, uri, base) =
+        boot("doclink", serde_json::json!({}), text);
     std::fs::write(base.join("inc.cfg"), "route[a] { exit; }\n").unwrap();
     // opt.cfg deliberately absent: import_file is optional — the link
     // is still produced (targets need not exist)
@@ -253,12 +250,11 @@ fn document_links_cover_includes() {
         "missing targets still get links: {links:?}"
     );
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn semantic_tokens_range_covers_only_the_slice() {
-    let (mut child, rx, mut stdin, uri, base) = boot("semrange", serde_json::json!({}), DOC);
+    let (_scratch, mut child, rx, mut stdin, uri, _) = boot("semrange", serde_json::json!({}), DOC);
     // whole-doc tokens: 2 named defs + 2 refs (main route is unnamed)
     write_msg(
         &mut stdin,
@@ -282,7 +278,6 @@ fn semantic_tokens_range_covers_only_the_slice() {
     assert_eq!(data[1], 10);
     assert_eq!(data[2], 6);
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// Edits a rename produced, as (line, start, end, newText), sorted.
@@ -310,7 +305,8 @@ const ARMED: &str =
 
 #[test]
 fn renaming_a_failure_route_rewrites_the_string_that_arms_it() {
-    let (mut child, rx, mut stdin, uri, _base) = boot("rename-armed", serde_json::json!({}), ARMED);
+    let (_scratch, mut child, rx, mut stdin, uri, _base) =
+        boot("rename-armed", serde_json::json!({}), ARMED);
     // on the NAME in failure_route[fr]
     write_msg(
         &mut stdin,
@@ -331,7 +327,8 @@ fn renaming_a_failure_route_rewrites_the_string_that_arms_it() {
 
 #[test]
 fn a_rename_onto_an_existing_route_is_refused() {
-    let (mut child, rx, mut stdin, uri, _base) = boot("rename-taken", serde_json::json!({}), DOC);
+    let (_scratch, mut child, rx, mut stdin, uri, _base) =
+        boot("rename-taken", serde_json::json!({}), DOC);
     // route[other_thing] renamed to `helper`, which already exists
     write_msg(
         &mut stdin,

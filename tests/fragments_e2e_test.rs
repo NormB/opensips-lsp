@@ -20,15 +20,15 @@ use std::process::{Command, Stdio};
 const ROOT_TEXT: &str = "include_file \"inc/routes.cfg\"\nroute[helper] {\n    exit;\n}\nroute {\n    route(entry);\n}\n";
 const FRAG_TEXT: &str = "route[entry] {\n    route(helper);\n    route(ghost);\n}\n";
 
-fn setup(tag: &str) -> (std::path::PathBuf, String, String) {
-    let base = std::env::temp_dir().join(format!("oslsp-frag-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+fn setup(tag: &str) -> (common::Scratch, std::path::PathBuf, String, String) {
+    let base_scratch = common::Scratch::new(&format!("oslsp-frag-{tag}"));
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(base.join("inc")).unwrap();
     std::fs::write(base.join("opensips.cfg"), ROOT_TEXT).unwrap();
     std::fs::write(base.join("inc/routes.cfg"), FRAG_TEXT).unwrap();
     let root_uri = format!("file://{}", base.join("opensips.cfg").display());
     let frag_uri = format!("file://{}", base.join("inc/routes.cfg").display());
-    (base, root_uri, frag_uri)
+    (base_scratch, base, root_uri, frag_uri)
 }
 
 fn start(
@@ -95,7 +95,7 @@ fn did_open(stdin: &mut std::process::ChildStdin, uri: &str, text: &str) {
 
 #[test]
 fn the_server_names_the_root_a_fragment_belongs_to() {
-    let (base, root_uri, frag_uri) = setup("root");
+    let (_scratch, base, root_uri, frag_uri) = setup("root");
     let (mut child, rx, mut stdin) = start(&base, "");
     // the fragment's context is the root that includes it...
     write_msg(
@@ -126,12 +126,11 @@ fn the_server_names_the_root_a_fragment_belongs_to() {
     let v = wait_for(&rx, |v| v["id"] == 4, "analysisRoot(unknown)");
     assert!(v["result"].is_null(), "{v}");
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn a_fragment_opened_alone_is_analysed_in_its_roots_closure() {
-    let (base, _root_uri, frag_uri) = setup("analyze");
+    let (_scratch, base, _root_uri, frag_uri) = setup("analyze");
     let (mut child, rx, mut stdin) = start(&base, "");
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
     let v = wait_for(
@@ -155,12 +154,11 @@ fn a_fragment_opened_alone_is_analysed_in_its_roots_closure() {
          flagging it is an artefact of analysing the fragment alone: {msgs:?}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn navigation_from_a_fragment_reaches_the_root_that_includes_it() {
-    let (base, root_uri, frag_uri) = setup("nav");
+    let (_scratch, base, root_uri, frag_uri) = setup("nav");
     let (mut child, rx, mut stdin) = start(&base, "");
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
     // definition of `helper` (fragment line 1) lives in the root
@@ -194,12 +192,11 @@ fn navigation_from_a_fragment_reaches_the_root_that_includes_it() {
         "the root's route must be offered: {labels:?}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn the_checker_runs_on_the_root_and_the_fragments_errors_come_back_to_it() {
-    let (base, _root_uri, frag_uri) = setup("check");
+    let (_scratch, base, _root_uri, frag_uri) = setup("check");
     // Stub checker: records argv, then reports one error located in
     // the FRAGMENT, spelled the way opensips spells an include — the
     // path as written in the directive.
@@ -262,7 +259,6 @@ fn the_checker_runs_on_the_root_and_the_fragments_errors_come_back_to_it() {
         "the fragment must not be handed to the checker: {args:?}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// The root is found by reading the configs under the workspace
@@ -274,7 +270,7 @@ fn the_checker_runs_on_the_root_and_the_fragments_errors_come_back_to_it() {
 /// rewriting.
 #[test]
 fn without_a_workspace_folder_there_is_nothing_to_find_the_root_in() {
-    let (base, _root_uri, frag_uri) = setup("nows");
+    let (_scratch, base, _root_uri, frag_uri) = setup("nows");
     let (mut child, rx, mut stdin) = start_in(&base, "", false);
     write_msg(
         &mut stdin,
@@ -287,7 +283,6 @@ fn without_a_workspace_folder_there_is_nothing_to_find_the_root_in() {
         "with no folder open the include graph is empty: {v}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// Adding the `include_file` line is the FIX for a fragment that was
@@ -297,7 +292,7 @@ fn without_a_workspace_folder_there_is_nothing_to_find_the_root_in() {
 /// the user tries is something that will not help.
 #[test]
 fn adding_an_include_clears_the_fragment_it_now_belongs_to() {
-    let (base, root_uri, frag_uri) = setup("live");
+    let (_scratch, base, root_uri, frag_uri) = setup("live");
     // start from a root that does NOT include the fragment
     let root_without = ROOT_TEXT.replace("include_file \"inc/routes.cfg\"\n", "");
     std::fs::write(base.join("opensips.cfg"), &root_without).unwrap();
@@ -351,7 +346,6 @@ fn adding_an_include_clears_the_fragment_it_now_belongs_to() {
         "{v}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// The include graph is built from a BOUNDED scan of the workspace.
@@ -361,7 +355,7 @@ fn adding_an_include_clears_the_fragment_it_now_belongs_to() {
 /// cannot see is a cap they cannot work around.
 #[test]
 fn a_truncated_workspace_scan_says_so() {
-    let (base, _root_uri, frag_uri) = setup("cap");
+    let (_scratch, base, _root_uri, frag_uri) = setup("cap");
     let noise = base.join("noise");
     std::fs::create_dir_all(&noise).unwrap();
     for i in 0..520 {
@@ -389,7 +383,6 @@ fn a_truncated_workspace_scan_says_so() {
         "the line must say who is speaking: {msg}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// The call graph, asked from inside a fragment.
@@ -402,7 +395,7 @@ fn a_truncated_workspace_scan_says_so() {
 /// the file on screen calls two lines up.
 #[test]
 fn call_hierarchy_from_a_fragment_sees_the_whole_closure() {
-    let (base, root_uri, frag_uri) = setup("callh");
+    let (_scratch, base, root_uri, frag_uri) = setup("callh");
     let (mut child, rx, mut stdin) = start(&base, "");
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
     write_msg(
@@ -456,7 +449,6 @@ fn call_hierarchy_from_a_fragment_sees_the_whole_closure() {
          an empty list, not an unanswerable question: {v}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// A fragment the ROOT's closure cannot reach.
@@ -470,8 +462,8 @@ fn call_hierarchy_from_a_fragment_sees_the_whole_closure() {
 /// context must only ever ADD to what the file could already see.
 #[test]
 fn a_fragment_outside_the_roots_closure_keeps_its_own_includes() {
-    let base = std::env::temp_dir().join(format!("frag-wide-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("frag-wide");
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(&base).unwrap();
     const N: usize = 90;
     let mut root = String::from("");
@@ -525,7 +517,6 @@ fn a_fragment_outside_the_roots_closure_keeps_its_own_includes() {
          above is analysis and not silence: {msgs:?}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// Differential: the same question, asked of the same text, laid out
@@ -542,8 +533,8 @@ fn a_fragment_outside_the_roots_closure_keeps_its_own_includes() {
 /// identical text in the other layout disagreed.
 #[test]
 fn every_request_answers_the_same_shape_split_as_whole() {
-    let base = std::env::temp_dir().join(format!("frag-diff-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("frag-diff");
+    let base = base_scratch.path().to_path_buf();
     let whole_dir = base.join("whole");
     let split_dir = base.join("split");
     std::fs::create_dir_all(&whole_dir).unwrap();
@@ -727,7 +718,6 @@ fn every_request_answers_the_same_shape_split_as_whole() {
     );
 
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// Hostile and malformed URIs to `opensips/analysisRoot`.
@@ -739,7 +729,7 @@ fn every_request_answers_the_same_shape_split_as_whole() {
 /// this early takes the whole server down for every open file.
 #[test]
 fn analysis_root_survives_whatever_the_editor_hands_it() {
-    let (base, _root_uri, frag_uri) = setup("hostile");
+    let (_scratch, base, _root_uri, frag_uri) = setup("hostile");
     let (mut child, rx, mut stdin) = start(&base, "");
     let dir = base.display().to_string();
     let hostile = [
@@ -793,7 +783,6 @@ fn analysis_root_survives_whatever_the_editor_hands_it() {
         "the server must still answer correctly after that: {v}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// The two diagnostic channels must not disagree about a fragment.
@@ -805,7 +794,7 @@ fn analysis_root_survives_whatever_the_editor_hands_it() {
 /// channel and another way on the other.
 #[test]
 fn pull_and_push_agree_about_a_fragment() {
-    let (base, root_uri, frag_uri) = setup("channels");
+    let (_scratch, base, root_uri, frag_uri) = setup("channels");
 
     // push: a client that declares no diagnostic support
     let (mut pusher, rx, mut stdin) = start(&base, "");
@@ -892,7 +881,6 @@ fn pull_and_push_agree_about_a_fragment() {
         "a fragment is not a program and must not be swept: {uris:?}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// Many fragments open at once, edited in a burst.
@@ -905,8 +893,8 @@ fn pull_and_push_agree_about_a_fragment() {
 /// one file.
 #[test]
 fn many_fragments_open_and_edited_at_once_stay_correct() {
-    let base = std::env::temp_dir().join(format!("frag-load-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("frag-load");
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(base.join("inc")).unwrap();
     const N: usize = 12;
     let mut root = String::new();
@@ -954,7 +942,6 @@ fn many_fragments_open_and_edited_at_once_stay_correct() {
         );
     }
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// One definition of "a config this server can read".
@@ -970,8 +957,8 @@ fn many_fragments_open_and_edited_at_once_stay_correct() {
 /// includes with it.
 #[test]
 fn a_config_the_scan_accepts_is_a_config_the_closure_can_load() {
-    let base = std::env::temp_dir().join(format!("frag-read-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("frag-read");
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(base.join("inc")).unwrap();
     let frag = "route[F] {\n    route(TOP);\n    route(NOWHERE);\n}\n";
     std::fs::write(base.join("inc/f.cfg"), frag).unwrap();
@@ -1022,7 +1009,6 @@ fn a_config_the_scan_accepts_is_a_config_the_closure_can_load() {
         "and the analyzer is still running: {msgs:?}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// A config too large to load is too large to claim, and says so.
@@ -1032,8 +1018,8 @@ fn a_config_the_scan_accepts_is_a_config_the_closure_can_load() {
 /// "found, but its routes are not in scope" is the worst of both.
 #[test]
 fn a_root_too_large_to_load_is_not_claimed_and_is_announced() {
-    let base = std::env::temp_dir().join(format!("frag-huge-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("frag-huge");
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(base.join("inc")).unwrap();
     let frag = "route[F] {\n    route(TOP);\n}\n";
     std::fs::write(base.join("inc/f.cfg"), frag).unwrap();
@@ -1080,7 +1066,6 @@ fn a_root_too_large_to_load_is_not_claimed_and_is_announced() {
         "the line must say who is speaking: {v}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// A fixture that is not the text it looks like passes while proving
@@ -1143,8 +1128,8 @@ fn encodings_do_not_change_what_a_fragment_is_part_of() {
         ("crlf", "\r\n", ""),
         ("bom", "\n", "\u{feff}"),
     ] {
-        let base = std::env::temp_dir().join(format!("frag-enc-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let base_scratch = common::Scratch::new(&format!("frag-enc-{tag}"));
+        let base = base_scratch.path().to_path_buf();
         std::fs::create_dir_all(base.join("inc")).unwrap();
         let root =
             format!("{bom}include_file \"inc/f.cfg\"{eol}route[TOP] {{{eol}    exit;{eol}}}{eol}");
@@ -1204,8 +1189,8 @@ fn encodings_do_not_change_what_a_fragment_is_part_of() {
 /// What the filesystem can be that a config file is not.
 #[test]
 fn the_filesystem_being_hostile_does_not_take_the_server_down() {
-    let base = std::env::temp_dir().join(format!("frag-fs-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("frag-fs");
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(base.join("inc")).unwrap();
     // the include target is a DIRECTORY that happens to be named .cfg
     std::fs::create_dir_all(base.join("inc/dir.cfg")).unwrap();
@@ -1276,7 +1261,6 @@ fn the_filesystem_being_hostile_does_not_take_the_server_down() {
     );
     assert!(v["result"].is_null(), "the root is gone: {v}");
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// Metamorphic: the same routes, whole and split, must be analysed
@@ -1298,8 +1282,8 @@ fn splitting_a_configuration_does_not_change_the_findings() {
     ];
     let tail = "route {\n    route(A);\n}\n";
 
-    let base = std::env::temp_dir().join(format!("frag-meta-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("frag-meta");
+    let base = base_scratch.path().to_path_buf();
     let whole_dir = base.join("whole");
     let split_dir = base.join("split");
     std::fs::create_dir_all(&whole_dir).unwrap();
@@ -1391,14 +1375,13 @@ fn splitting_a_configuration_does_not_change_the_findings() {
         "the same routes are analysed differently once split across includes"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// Lifecycle notifications out of order, malformed params, and random
 /// content — the things an editor and a user actually do.
 #[test]
 fn the_server_survives_a_client_behaving_badly() {
-    let (base, _root_uri, frag_uri) = setup("badclient");
+    let (_scratch, base, _root_uri, frag_uri) = setup("badclient");
     let (mut child, rx, mut stdin) = start(&base, "");
     // close before open, open twice, change a document never opened
     write_msg(
@@ -1493,7 +1476,6 @@ fn the_server_survives_a_client_behaving_badly() {
         "still correct after all of that: {v}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// The same question, asked repeatedly, must give the same answer.
@@ -1503,7 +1485,7 @@ fn the_server_survives_a_client_behaving_badly() {
 /// as an answer that drifts rather than as an error.
 #[test]
 fn repeated_questions_do_not_drift() {
-    let (base, root_uri, frag_uri) = setup("stable");
+    let (_scratch, base, root_uri, frag_uri) = setup("stable");
     let (mut child, rx, mut stdin) = start(&base, "");
     let mut answers: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut id = 80;
@@ -1554,7 +1536,6 @@ fn repeated_questions_do_not_drift() {
         "open/close churn moved the answer: {v}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// A folder added to the workspace after the server started.
@@ -1566,7 +1547,7 @@ fn repeated_questions_do_not_drift() {
 /// the window was reloaded, with nothing to suggest why.
 #[test]
 fn a_workspace_folder_added_later_is_picked_up() {
-    let (base, _root_uri, frag_uri) = setup("addfolder");
+    let (_scratch, base, _root_uri, frag_uri) = setup("addfolder");
     // start with NO folder at all
     let mut child = Server::new(
         Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
@@ -1658,7 +1639,6 @@ fn a_workspace_folder_added_later_is_picked_up() {
     );
     assert!(v["result"].is_null(), "the folder is gone again: {v}");
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// Edits, not shapes.
@@ -1671,7 +1651,7 @@ fn a_workspace_folder_added_later_is_picked_up() {
 /// rather than in its parent.
 #[test]
 fn the_edits_a_fragment_produces_are_correct_not_merely_present() {
-    let (base, root_uri, frag_uri) = setup("edits");
+    let (_scratch, base, root_uri, frag_uri) = setup("edits");
     let (mut child, rx, mut stdin) = start(&base, "");
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
     // Take the publish BEFORE anything else asks a question:
@@ -1784,7 +1764,6 @@ fn the_edits_a_fragment_produces_are_correct_not_merely_present() {
         }
     }
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// Every kind of watched-file event, not just "changed".
@@ -1793,7 +1772,7 @@ fn the_edits_a_fragment_produces_are_correct_not_merely_present() {
 /// what is on disk.  Only one of those three was ever exercised.
 #[test]
 fn a_root_appearing_and_vanishing_is_noticed() {
-    let (base, root_uri, frag_uri) = setup("events");
+    let (_scratch, base, root_uri, frag_uri) = setup("events");
     let root_path = base.join("opensips.cfg");
     let saved = std::fs::read_to_string(&root_path).unwrap();
     std::fs::remove_file(&root_path).unwrap();
@@ -1861,7 +1840,6 @@ fn a_root_appearing_and_vanishing_is_noticed() {
     );
     assert!(ask(&mut stdin, &mut id).is_null(), "a deleted root is gone");
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// Churn: open, edit and close many documents, then check the server
@@ -1872,7 +1850,7 @@ fn a_root_appearing_and_vanishing_is_noticed() {
 /// a wrong eviction shows up as an answer that was right once.
 #[test]
 fn state_survives_repeated_open_edit_close_cycles() {
-    let (base, root_uri, frag_uri) = setup("churn");
+    let (_scratch, base, root_uri, frag_uri) = setup("churn");
     let (mut child, rx, mut stdin) = start(&base, "");
     let mut id = 300;
     let ask = |stdin: &mut std::process::ChildStdin, id: &mut i32| -> String {
@@ -1921,7 +1899,6 @@ fn state_survives_repeated_open_edit_close_cycles() {
     assert!(msgs.iter().any(|m| m.contains("ghost")), "{msgs:?}");
     assert!(!msgs.iter().any(|m| m.contains("helper")), "{msgs:?}");
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// A conditionally-guarded include, end to end — and OpenSIPS is not
@@ -1936,8 +1913,8 @@ fn state_survives_repeated_open_edit_close_cycles() {
 #[test]
 fn a_conditionally_guarded_include_is_still_claimed() {
     for (defined, label) in [(true, "defined"), (false, "not-defined")] {
-        let base = std::env::temp_dir().join(format!("frag-cond-{label}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let base_scratch = common::Scratch::new(&format!("frag-cond-{label}"));
+        let base = base_scratch.path().to_path_buf();
         std::fs::create_dir_all(base.join("inc")).unwrap();
         let def = if defined { "#!define FEATURE_ON\n" } else { "" };
         std::fs::write(
@@ -1982,8 +1959,8 @@ fn a_conditionally_guarded_include_is_still_claimed() {
 #[test]
 fn a_configuration_split_into_many_cross_calling_fragments_is_clean() {
     const N: usize = 40;
-    let base = std::env::temp_dir().join(format!("frag-scale-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("frag-scale");
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(base.join("inc")).unwrap();
 
     // each fragment defines one route and calls its two neighbours,
@@ -2066,7 +2043,6 @@ fn a_configuration_split_into_many_cross_calling_fragments_is_clean() {
         );
     }
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// Every setting, with a FRAGMENT open.
@@ -2080,8 +2056,8 @@ fn a_configuration_split_into_many_cross_calling_fragments_is_clean() {
 #[test]
 fn every_setting_behaves_the_same_for_a_fragment() {
     let mk = |tag: &str| {
-        let base = std::env::temp_dir().join(format!("frag-set-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let base_scratch = common::Scratch::new(&format!("frag-set-{tag}"));
+        let base = base_scratch.path().to_path_buf();
         std::fs::create_dir_all(base.join("inc")).unwrap();
         std::fs::write(
             base.join("opensips.cfg"),
@@ -2091,7 +2067,7 @@ fn every_setting_behaves_the_same_for_a_fragment() {
         let frag = "route[entry] {\n    route(helper);\n    route(G1);\n    route(G2);\n    route(G3);\n}\n";
         std::fs::write(base.join("inc/f.cfg"), frag).unwrap();
         let uri = format!("file://{}", base.join("inc/f.cfg").display());
-        (base, uri, frag)
+        (base_scratch, uri, frag)
     };
 
     let boot = |base: &std::path::Path, opts: serde_json::Value| {
@@ -2225,5 +2201,4 @@ fn every_setting_behaves_the_same_for_a_fragment() {
         "and still in the ROOT's context, not the fragment's own: {msgs:?}"
     );
     let _ = child.kill();
-    let _ = std::fs::remove_dir_all(&base);
 }

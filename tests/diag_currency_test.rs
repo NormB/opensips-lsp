@@ -21,9 +21,16 @@ echo "CRITICAL:core:yyerror: parse error in $cfg:1:2-3: planted" >&2
 exit 255
 "#;
 
-fn setup(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, String) {
-    let dir = std::env::temp_dir().join(format!("oslsp-cur-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+fn setup(
+    tag: &str,
+) -> (
+    common::Scratch,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    String,
+) {
+    let dir_scratch = common::Scratch::new(&format!("oslsp-cur-{tag}"));
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let stub = dir.join("stub.sh");
     std::fs::write(&stub, STUB).unwrap();
@@ -34,12 +41,12 @@ fn setup(tag: &str) -> (std::path::PathBuf, std::path::PathBuf, String) {
     let cfg = dir.join("t.cfg");
     std::fs::write(&cfg, "route{}\n").unwrap();
     let uri = format!("file://{}", cfg.display());
-    (dir, stub, uri)
+    (dir_scratch, dir, stub, uri)
 }
 
 #[test]
 fn failed_checks_clear_stale_diagnostics_and_publishes_carry_versions() {
-    let (dir, stub, uri) = setup("clear");
+    let (_scratch, dir, stub, uri) = setup("clear");
     std::fs::write(dir.join("mode"), "error").unwrap();
 
     let mut child = Server::new(
@@ -98,12 +105,11 @@ fn failed_checks_clear_stale_diagnostics_and_publishes_carry_versions() {
     );
 
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn midflight_buffer_change_suppresses_the_stale_result() {
-    let (dir, stub, uri) = setup("race");
+    let (_scratch, dir, stub, uri) = setup("race");
     std::fs::write(dir.join("mode"), "error").unwrap();
 
     let mut child = Server::new(
@@ -168,13 +174,12 @@ fn midflight_buffer_change_suppresses_the_stale_result() {
     );
 
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn output_flood_is_capped_and_clears_diagnostics() {
-    let dir = std::env::temp_dir().join(format!("oslsp-flood-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-flood");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let stub = dir.join("flood.sh");
     // ~8 MiB of noise, then a "valid" error line that must never be seen
@@ -248,7 +253,6 @@ fn output_flood_is_capped_and_clears_diagnostics() {
         "capped run must clear, not publish flood-derived results: {d}"
     );
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A check runs a subprocess and can take seconds; opening a document
@@ -260,7 +264,7 @@ fn output_flood_is_capped_and_clears_diagnostics() {
 /// them until two checks had finished.
 #[test]
 fn requests_are_answered_while_checks_run() {
-    let (dir, stub, _) = setup("busy");
+    let (_scratch, dir, stub, _) = setup("busy");
     std::fs::write(dir.join("mode"), "slow").unwrap();
     let mut child = Server::new(
         Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
@@ -319,5 +323,4 @@ fn requests_are_answered_while_checks_run() {
         );
     }
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }

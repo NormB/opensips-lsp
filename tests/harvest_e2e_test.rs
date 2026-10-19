@@ -31,13 +31,14 @@ fn boot(
     tag: &str,
     src: Option<&std::path::Path>,
 ) -> (
+    common::Scratch,
     Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     std::path::PathBuf,
 ) {
-    let base = std::env::temp_dir().join(format!("oslsp-harv-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new(&format!("oslsp-harv-{tag}"));
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(&base).unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"));
     cmd.env("OPENSIPS_LSP_BIN", "")
@@ -66,7 +67,7 @@ fn boot(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    (child, rx, stdin, base)
+    (base_scratch, child, rx, stdin, base)
 }
 
 fn is_ready(v: &serde_json::Value) -> bool {
@@ -82,12 +83,12 @@ fn is_ready(v: &serde_json::Value) -> bool {
 /// server.
 #[test]
 fn harvest_reports_progress_when_the_client_answers_the_create() {
-    let outer = std::env::temp_dir().join(format!("oslsp-harv-tree-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&outer);
+    let outer_scratch = common::Scratch::new("oslsp-harv-tree");
+    let outer = outer_scratch.path().to_path_buf();
     let tree = outer.join("tree");
     mk_tree(&tree);
 
-    let (mut child, rx, mut stdin, base) = boot("prog", Some(&tree));
+    let (_scratch, mut child, rx, mut stdin, _) = boot("prog", Some(&tree));
     let create = wait_for(
         &rx,
         |v| v["method"] == "window/workDoneProgress/create",
@@ -131,8 +132,6 @@ fn harvest_reports_progress_when_the_client_answers_the_create() {
     wait_for(&rx, is_ready, "ready");
 
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
-    let _ = std::fs::remove_dir_all(&outer);
 }
 
 /// A client that never answers the create must not stall startup.
@@ -143,12 +142,12 @@ fn harvest_reports_progress_when_the_client_answers_the_create() {
 /// useful. Nothing else in the suite would notice.
 #[test]
 fn a_client_that_never_answers_the_create_still_gets_a_ready_server() {
-    let outer = std::env::temp_dir().join(format!("oslsp-harv-mute-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&outer);
+    let outer_scratch = common::Scratch::new("oslsp-harv-mute");
+    let outer = outer_scratch.path().to_path_buf();
     let tree = outer.join("tree");
     mk_tree(&tree);
 
-    let (mut child, rx, _stdin, base) = boot("mute", Some(&tree));
+    let (_scratch, mut child, rx, _stdin, _) = boot("mute", Some(&tree));
     // the create arrives and is deliberately left unanswered
     wait_for(
         &rx,
@@ -164,20 +163,18 @@ fn a_client_that_never_answers_the_create_still_gets_a_ready_server() {
     );
 
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
-    let _ = std::fs::remove_dir_all(&outer);
 }
 
 /// A tree the user explicitly configured that documents nothing is a
 /// misconfiguration, and saying so is the only way they find out.
 #[test]
 fn a_configured_tree_documenting_nothing_warns_visibly() {
-    let outer = std::env::temp_dir().join(format!("oslsp-harv-empty-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&outer);
+    let outer_scratch = common::Scratch::new("oslsp-harv-empty");
+    let outer = outer_scratch.path().to_path_buf();
     let tree = outer.join("empty-tree");
     std::fs::create_dir_all(&tree).unwrap();
 
-    let (mut child, rx, _stdin, base) = boot("empty", Some(&tree));
+    let (_scratch, mut child, rx, _stdin, _) = boot("empty", Some(&tree));
     let warn = wait_for(
         &rx,
         |v| {
@@ -205,8 +202,6 @@ fn a_configured_tree_documenting_nothing_warns_visibly() {
     );
 
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
-    let _ = std::fs::remove_dir_all(&outer);
 }
 
 /// No configured tree is the default, not a misconfiguration: the
@@ -214,7 +209,7 @@ fn a_configured_tree_documenting_nothing_warns_visibly() {
 /// user to ignore the warning that matters.
 #[test]
 fn an_unconfigured_tree_stays_silent() {
-    let (mut child, rx, _stdin, base) = boot("silent", None);
+    let (_scratch, mut child, rx, _stdin, _) = boot("silent", None);
     let ready = wait_for(&rx, is_ready, "ready");
     assert!(
         ready["params"]["message"]
@@ -231,5 +226,4 @@ fn an_unconfigured_tree_stays_silent() {
         );
     }
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }

@@ -33,8 +33,8 @@ fn big_cfg() -> String {
 
 #[test]
 fn per_item_requests_scale_with_the_document() {
-    let base = std::env::temp_dir().join(format!("oslsp-scale-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("oslsp-scale");
+    let base = base_scratch.path().to_path_buf();
     let tree = base.join("tree");
     std::fs::create_dir_all(tree.join("modules/tm")).unwrap();
     std::fs::write(

@@ -15,14 +15,15 @@ fn boot(
     tag: &str,
     text: &str,
 ) -> (
+    common::Scratch,
     Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     String,
     String,
 ) {
-    let dir = std::env::temp_dir().join(format!("oslsp-builtin-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new(&format!("oslsp-builtin-{tag}"));
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("t.cfg");
     std::fs::write(&cfg, text).unwrap();
@@ -74,7 +75,7 @@ fn boot(
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    (child, rx, stdin, uri, ready)
+    (dir_scratch, child, rx, stdin, uri, ready)
 }
 
 fn complete(
@@ -126,7 +127,7 @@ fn hover(
 /// nothing but control-flow keywords until a source tree was set.
 #[test]
 fn a_global_parameter_completes_with_no_source_tree_configured() {
-    let (mut child, rx, mut stdin, uri, ready) = boot("params", "log_\n");
+    let (_scratch, mut child, rx, mut stdin, uri, ready) = boot("params", "log_\n");
     // the line reads "core docs" alone or "core and module docs"
     // depending on what the harvest left empty; both must name core
     assert!(
@@ -154,7 +155,7 @@ fn a_global_parameter_completes_with_no_source_tree_configured() {
 /// so each needs its own witness rather than one standing for all.
 #[test]
 fn core_functions_and_pseudo_variables_complete_too() {
-    let (mut child, rx, mut stdin, uri, _) = boot("fns", "route {\n    \n}\n");
+    let (_scratch, mut child, rx, mut stdin, uri, _) = boot("fns", "route {\n    \n}\n");
     let labels = complete(&mut stdin, &rx, &uri, 2, 1, 4);
     assert!(
         labels.iter().any(|l| l == "xlog"),
@@ -163,7 +164,7 @@ fn core_functions_and_pseudo_variables_complete_too() {
     );
     let _ = child.kill();
 
-    let (mut child, rx, mut stdin, uri, _) = boot("pvars", "route {\n    $\n}\n");
+    let (_scratch, mut child, rx, mut stdin, uri, _) = boot("pvars", "route {\n    $\n}\n");
     let labels = complete(&mut stdin, &rx, &uri, 2, 1, 5);
     assert!(
         labels.iter().any(|l| l.starts_with("$ru") || l == "$ru"),
@@ -183,7 +184,7 @@ fn core_functions_and_pseudo_variables_complete_too() {
 /// `version_in_hints_e2e_test.rs` covers both states.
 #[test]
 fn hover_documents_the_entry_without_repeating_the_release() {
-    let (mut child, rx, mut stdin, uri, _) = boot("hover", "log_level=2\n");
+    let (_scratch, mut child, rx, mut stdin, uri, _) = boot("hover", "log_level=2\n");
     write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{
@@ -216,7 +217,7 @@ fn hover_documents_the_entry_without_repeating_the_release() {
 /// completed, but nothing a real config actually calls did.
 #[test]
 fn a_module_function_completes_with_no_source_tree_configured() {
-    let (mut child, rx, mut stdin, uri, ready) = boot(
+    let (_scratch, mut child, rx, mut stdin, uri, ready) = boot(
         "modfn",
         "loadmodule \"sipmsgops.so\"\nroute {\n    is_\n}\n",
     );
@@ -238,7 +239,7 @@ fn a_module_function_completes_with_no_source_tree_configured() {
 /// none: it invites calls the config cannot make.
 #[test]
 fn a_module_function_stays_hidden_until_its_module_is_loaded() {
-    let (mut child, rx, mut stdin, uri, _) =
+    let (_scratch, mut child, rx, mut stdin, uri, _) =
         boot("modgate", "loadmodule \"tm.so\"\nroute {\n    is_\n}\n");
     let labels = complete(&mut stdin, &rx, &uri, 2, 2, 7);
     assert!(
@@ -258,7 +259,7 @@ fn a_module_function_stays_hidden_until_its_module_is_loaded() {
 /// anyone types in a fresh config completed to nothing.
 #[test]
 fn module_names_complete_inside_loadmodule_with_nothing_configured() {
-    let (mut child, rx, mut stdin, uri, _) = boot("modnames", "loadmodule \"");
+    let (_scratch, mut child, rx, mut stdin, uri, _) = boot("modnames", "loadmodule \"");
     let labels = complete(&mut stdin, &rx, &uri, 2, 0, 12);
     assert!(
         labels.len() > 100,
@@ -286,7 +287,7 @@ fn module_names_complete_inside_loadmodule_with_nothing_configured() {
 fn a_core_global_outranks_a_same_named_param_of_an_unloaded_module() {
     let (name, module) = colliding_param();
 
-    let (mut child, rx, mut stdin, uri, _) = boot("shadow", &format!("{name}=1\n"));
+    let (_scratch, mut child, rx, mut stdin, uri, _) = boot("shadow", &format!("{name}=1\n"));
     let text = hover(&mut stdin, &rx, &uri, 30, 0, 1);
     assert!(
         text.contains("core parameter"),
@@ -305,7 +306,7 @@ fn a_core_global_outranks_a_same_named_param_of_an_unloaded_module() {
     // Precedence alone got this wrong: with the module loaded, the
     // global assignment hovered as the module's parameter.
     let cfg = format!("loadmodule \"{module}.so\"\n{name}=1\n");
-    let (mut child, rx, mut stdin, uri, _) = boot("shadowglobal", &cfg);
+    let (_scratch, mut child, rx, mut stdin, uri, _) = boot("shadowglobal", &cfg);
     let text = hover(&mut stdin, &rx, &uri, 32, 1, 1);
     assert!(
         text.contains("core parameter"),
@@ -322,7 +323,7 @@ fn a_core_global_outranks_a_same_named_param_of_an_unloaded_module() {
         .unwrap()
         .rfind(&name)
         .expect("the parameter name is on the modparam line") as u32;
-    let (mut child, rx, mut stdin, uri, _) = boot("shadowload", &cfg);
+    let (_scratch, mut child, rx, mut stdin, uri, _) = boot("shadowload", &cfg);
     let text = hover(&mut stdin, &rx, &uri, 31, 1, col + 1);
     assert!(
         text.contains(&format!("modparam of `{module}`")),

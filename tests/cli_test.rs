@@ -1,11 +1,12 @@
 //! The `opensips-lsp check` CLI mode: the same analyzer (plus the
 //! real `-C` when a binary is configured) as a CI/git-hook command.
 
+mod common;
+
 use std::process::Command;
 
-fn setup(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("oslsp-cli-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+fn setup(tag: &str) -> common::Scratch {
+    let dir = common::Scratch::new(&format!("oslsp-cli-{tag}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
@@ -34,7 +35,6 @@ fn check_reports_analyzer_warnings_and_exits_zero() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "--strict fails on warnings");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -68,7 +68,6 @@ fn check_runs_the_configured_binary_and_fails_on_errors() {
         "got: {stdout}"
     );
     assert_eq!(out.status.code(), Some(1), "errors exit 1");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -99,7 +98,6 @@ fn check_clean_file_exits_zero_and_bad_usage_exits_two() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The CLI must know about fragments too.
@@ -170,7 +168,6 @@ fn check_understands_a_split_configuration() {
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     assert!(stdout.contains("NOWHERE"), "{stdout}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The CLI runs the same `modparam` catalogue check the editor does.
@@ -216,7 +213,6 @@ fn check_runs_the_catalogue_check_and_names_the_catalogue() {
         stderr.contains("modparam checks against OpenSIPS"),
         "the run must say what it judged against; stderr: {stderr}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The release checked against is selectable, and selecting one the
@@ -269,7 +265,6 @@ fn the_checked_release_is_selectable() {
         !older_out.contains("bin_async_local_connect_timeout"),
         "3.6.9 exports it, so there is nothing to warn about; stdout: {older_out}"
     );
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// An unsupported release must not quietly become the newest — the
@@ -294,7 +289,6 @@ fn an_unsupported_release_is_reported_not_swallowed() {
     // and it must say what it DID use, and what it could have used
     assert!(stderr.contains("supported:"), "stderr: {stderr}");
     assert!(stderr.contains("using"), "stderr: {stderr}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The checker runs in the config's directory, so relative includes
@@ -334,7 +328,6 @@ fn check_accepts_relative_paths() {
             String::from_utf8_lossy(&out.stderr)
         );
     }
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -356,5 +349,4 @@ fn check_reads_a_config_that_is_not_utf8() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(out.status.code(), Some(0));
-    let _ = std::fs::remove_dir_all(&dir);
 }

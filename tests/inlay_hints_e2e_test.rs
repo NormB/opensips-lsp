@@ -36,13 +36,14 @@ fn boot(
     tag: &str,
     opts: serde_json::Value,
 ) -> (
+    common::Scratch,
     Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     String,
 ) {
-    let base = std::env::temp_dir().join(format!("oslsp-hint-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new(&format!("oslsp-hint-{tag}"));
+    let base = base_scratch.path().to_path_buf();
     let tree = base.join("tree");
     mk_tree(&tree);
     let cfg = base.join("t.cfg");
@@ -93,7 +94,7 @@ fn boot(
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":CFG}}}),
     );
-    (child, rx, stdin, uri)
+    (base_scratch, child, rx, stdin, uri)
 }
 
 fn hints(
@@ -128,7 +129,7 @@ fn hints(
 
 #[test]
 fn documented_call_arguments_get_their_parameter_names() {
-    let (mut child, rx, mut stdin, uri) = boot("basic", serde_json::json!({}));
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("basic", serde_json::json!({}));
     let got = hints(&mut stdin, &rx, &uri, 2, 0, 20);
     assert_eq!(
         got,
@@ -143,7 +144,7 @@ fn documented_call_arguments_get_their_parameter_names() {
 
 #[test]
 fn undocumented_calls_and_keywords_get_nothing() {
-    let (mut child, rx, mut stdin, uri) = boot("keywords", serde_json::json!({}));
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("keywords", serde_json::json!({}));
     let got = hints(&mut stdin, &rx, &uri, 2, 0, 20);
     assert!(
         got.iter().all(|(l, _, _)| *l == 2),
@@ -154,7 +155,7 @@ fn undocumented_calls_and_keywords_get_nothing() {
 
 #[test]
 fn a_call_with_no_arguments_is_not_hinted() {
-    let (mut child, rx, mut stdin, uri) = boot("noargs", serde_json::json!({}));
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("noargs", serde_json::json!({}));
     let got = hints(&mut stdin, &rx, &uri, 2, 3, 3);
     assert!(got.is_empty(), "t_newtran() takes nothing: {got:?}");
     let _ = child.kill();
@@ -162,7 +163,7 @@ fn a_call_with_no_arguments_is_not_hinted() {
 
 #[test]
 fn hints_are_limited_to_the_requested_range() {
-    let (mut child, rx, mut stdin, uri) = boot("range", serde_json::json!({}));
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("range", serde_json::json!({}));
     let got = hints(&mut stdin, &rx, &uri, 2, 4, 8);
     assert!(got.is_empty(), "line 2 is outside the viewport: {got:?}");
     let _ = child.kill();
@@ -170,7 +171,7 @@ fn hints_are_limited_to_the_requested_range() {
 
 #[test]
 fn the_setting_turns_them_off() {
-    let (mut child, rx, mut stdin, uri) =
+    let (_scratch, mut child, rx, mut stdin, uri) =
         boot("off", serde_json::json!({"inlayHintParameterNames": false}));
     let got = hints(&mut stdin, &rx, &uri, 2, 0, 20);
     assert!(got.is_empty(), "hints were disabled: {got:?}");
@@ -179,7 +180,7 @@ fn the_setting_turns_them_off() {
 
 #[test]
 fn the_setting_applies_live() {
-    let (mut child, rx, mut stdin, uri) = boot(
+    let (_scratch, mut child, rx, mut stdin, uri) = boot(
         "live",
         serde_json::json!({"inlayHintParameterNames": false}),
     );

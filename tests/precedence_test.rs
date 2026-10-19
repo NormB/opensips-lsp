@@ -2,6 +2,8 @@
 //! most current documentation and must win; docbook
 //! (`modules/*/doc/*_admin.xml`) is the fallback for older trees.
 
+mod common;
+
 use opensips_lsp::catalog::harvest_tree;
 
 fn write(path: &std::path::Path, content: &str) {
@@ -11,8 +13,8 @@ fn write(path: &std::path::Path, content: &str) {
 
 #[test]
 fn readme_md_wins_over_docbook_when_both_exist() {
-    let root = std::env::temp_dir().join(format!("oslsp-prec-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let root_scratch = common::Scratch::new("oslsp-prec");
+    let root = root_scratch.path().to_path_buf();
     let m = root.join("modules").join("both");
     write(
         &m.join("README.md"),
@@ -35,13 +37,12 @@ fn readme_md_wins_over_docbook_when_both_exist() {
         vec!["from_markdown"],
         "README.md must win: {names:?}"
     );
-    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
 fn docbook_is_the_fallback_when_no_readme() {
-    let root = std::env::temp_dir().join(format!("oslsp-prec-db-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let root_scratch = common::Scratch::new("oslsp-prec-db");
+    let root = root_scratch.path().to_path_buf();
     let m = root.join("modules").join("legacy");
     write(
         &m.join("doc").join("legacy_admin.xml"),
@@ -55,14 +56,13 @@ fn docbook_is_the_fallback_when_no_readme() {
         .find(|x| x.name == "legacy")
         .expect("module harvested");
     assert_eq!(legacy.params[0].name, "old_param");
-    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
 fn empty_readme_falls_back_to_docbook() {
     // a placeholder README.md must not mask real docbook docs
-    let root = std::env::temp_dir().join(format!("oslsp-prec-e-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let root_scratch = common::Scratch::new("oslsp-prec-e");
+    let root = root_scratch.path().to_path_buf();
     let m = root.join("modules").join("mixed");
     write(
         &m.join("README.md"),
@@ -77,7 +77,6 @@ fn empty_readme_falls_back_to_docbook() {
     let mods = harvest_tree(&root);
     let mixed = mods.iter().find(|x| x.name == "mixed").expect("harvested");
     assert_eq!(mixed.params[0].name, "real_param");
-    let _ = std::fs::remove_dir_all(&root);
 }
 
 /// A module that exports nothing is still a module.
@@ -90,8 +89,8 @@ fn empty_readme_falls_back_to_docbook() {
 /// docbook; with nothing to fall through to, it is the answer.
 #[test]
 fn a_module_that_exports_nothing_is_still_in_the_catalogue() {
-    let root = std::env::temp_dir().join(format!("oslsp-prec-empty-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let root_scratch = common::Scratch::new("oslsp-prec-empty");
+    let root = root_scratch.path().to_path_buf();
     write(
         &root.join("modules").join("xml").join("README.md"),
         "# xml\n\n### Exported Parameters\n\n*None*.\n\n### Exported Functions\n\n*None*.\n",
@@ -116,5 +115,4 @@ fn a_module_that_exports_nothing_is_still_in_the_catalogue() {
     assert!(x.params.is_empty() && x.functions.is_empty());
     let l = mods.iter().find(|m| m.name == "legacy").unwrap();
     assert_eq!(l.params[0].name, "old_param", "docbook must still win here");
-    let _ = std::fs::remove_dir_all(&root);
 }

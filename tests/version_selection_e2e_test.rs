@@ -29,8 +29,8 @@ const CFG: &str = "route {\n    xlog(\"x\");\n}\nmodparam(\"proto_bin\", \"bin_a
 /// Boot with no configured tree, so the built-in catalogue — and the
 /// requested release — is what answers.
 fn diagnostics_for(tag: &str, version: Option<&str>) -> Vec<String> {
-    let base = std::env::temp_dir().join(format!("oslsp-vsel-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new(&format!("oslsp-vsel-{tag}"));
+    let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(&base).unwrap();
     let cfg = base.join("v.cfg");
     std::fs::write(&cfg, CFG).unwrap();

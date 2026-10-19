@@ -10,6 +10,8 @@
 //! that can go stale, so this fails when it has: it regenerates into a
 //! scratch copy and compares.
 
+mod common;
+
 use std::process::Command;
 
 fn grammar_dir() -> std::path::PathBuf {
@@ -52,8 +54,8 @@ fn the_committed_parser_matches_grammar_js() {
     };
     assert!(p.status.success(), "tree-sitter-cli could not be resolved");
 
-    let scratch = std::env::temp_dir().join(format!("ts-opensips-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&scratch);
+    let scratch_scratch = common::Scratch::new("ts-opensips");
+    let scratch = scratch_scratch.path().to_path_buf();
     std::fs::create_dir_all(&scratch).unwrap();
     for f in ["grammar.js", "package.json", "tree-sitter.json"] {
         std::fs::copy(dir.join(f), scratch.join(f)).unwrap();

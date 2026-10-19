@@ -11,13 +11,14 @@ fn boot(
     tag: &str,
     text: &str,
 ) -> (
+    common::Scratch,
     Server,
     std::sync::mpsc::Receiver<serde_json::Value>,
     std::process::ChildStdin,
     String,
 ) {
-    let dir = std::env::temp_dir().join(format!("oslsp-fmt-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new(&format!("oslsp-fmt-{tag}"));
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("t.cfg");
     std::fs::write(&cfg, text).unwrap();
@@ -59,7 +60,7 @@ fn boot(
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    (child, rx, stdin, uri)
+    (dir_scratch, child, rx, stdin, uri)
 }
 
 fn opts(insert_spaces: bool, tab_size: u32) -> serde_json::Value {
@@ -69,7 +70,7 @@ fn opts(insert_spaces: bool, tab_size: u32) -> serde_json::Value {
 #[test]
 fn formatting_returns_whole_line_edits_and_honours_client_options() {
     let src = "route {\nexit;\n}\n";
-    let (mut child, rx, mut stdin, uri) = boot("basic", src);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("basic", src);
 
     write_msg(
         &mut stdin,
@@ -93,7 +94,7 @@ fn formatting_returns_whole_line_edits_and_honours_client_options() {
 
 #[test]
 fn an_already_formatted_document_produces_no_edits() {
-    let (mut child, rx, mut stdin, uri) = boot("clean", "route {\n\texit;\n}\n");
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("clean", "route {\n\texit;\n}\n");
     write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{
@@ -111,7 +112,7 @@ fn an_already_formatted_document_produces_no_edits() {
 #[test]
 fn range_formatting_edits_only_the_requested_lines() {
     let src = "route {\nexit;\n}\nroute[A] {\nexit;\n}\n";
-    let (mut child, rx, mut stdin, uri) = boot("range", src);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("range", src);
     write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/rangeFormatting","params":{
@@ -147,7 +148,7 @@ fn apply(text: &str, edits: &[serde_json::Value]) -> String {
 #[test]
 fn formatting_a_crlf_document_keeps_one_carriage_return_per_line() {
     let src = "route {\r\nexit;\r\n}\r\n";
-    let (mut child, rx, mut stdin, uri) = boot("crlf", src);
+    let (_scratch, mut child, rx, mut stdin, uri) = boot("crlf", src);
     write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{

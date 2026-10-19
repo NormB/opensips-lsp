@@ -8,7 +8,8 @@ use std::time::Duration;
 
 #[test]
 fn diagnostics_flow_over_stdio() {
-    let dir = std::env::temp_dir().join(format!("oslsp-e2e-{}", std::process::id()));
+    let dir_scratch = common::Scratch::new("oslsp-e2e");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
 
     // deterministic stub standing in for the opensips binary
@@ -102,12 +103,12 @@ fn diagnostics_flow_over_stdio() {
         std::thread::sleep(Duration::from_millis(50));
     };
     assert!(status.success(), "clean exit, got {status:?}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn hanging_opensips_check_is_bounded_and_reported() {
-    let dir = std::env::temp_dir().join(format!("oslsp-e2e-hang-{}", std::process::id()));
+    let dir_scratch = common::Scratch::new("oslsp-e2e-hang");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let stub = dir.join("opensips-hang.sh");
     std::fs::write(&stub, "#!/bin/sh\nsleep 60\n").unwrap();
@@ -166,12 +167,12 @@ fn hanging_opensips_check_is_bounded_and_reported() {
             .contains("timed out")
     );
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn empty_opensips_bin_disables_checks_entirely() {
-    let dir = std::env::temp_dir().join(format!("oslsp-e2e-off-{}", std::process::id()));
+    let dir_scratch = common::Scratch::new("oslsp-e2e-off");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("t.cfg");
     std::fs::write(&cfg, "route{}\n").unwrap();
@@ -222,12 +223,12 @@ fn empty_opensips_bin_disables_checks_entirely() {
     }
     assert!(!saw_diags, "diagnostics must be fully disabled");
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn symbol_columns_are_utf16_on_multibyte_lines() {
-    let dir = std::env::temp_dir().join(format!("oslsp-utf16-{}", std::process::id()));
+    let dir_scratch = common::Scratch::new("oslsp-utf16");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("u.cfg");
     // the comment holds é (2 bytes / 1 unit) and 😀 (4 bytes / 2 units):
@@ -280,12 +281,12 @@ fn symbol_columns_are_utf16_on_multibyte_lines() {
     );
     assert_eq!(sym["selectionRange"]["end"]["character"], 17);
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn folding_and_nested_symbols_over_stdio() {
-    let dir = std::env::temp_dir().join(format!("oslsp-fold-{}", std::process::id()));
+    let dir_scratch = common::Scratch::new("oslsp-fold");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("fold.cfg");
     let text = "loadmodule \"tm.so\"\nroute {\n    if (1) {\n        exit;\n    }\n}\nfailure_route[fr] {\n    xlog(\"}\");\n}\n";
@@ -368,12 +369,12 @@ fn folding_and_nested_symbols_over_stdio() {
     assert_eq!(syms[2]["range"]["end"]["line"], 8);
     assert_eq!(syms[2]["selectionRange"]["start"]["character"], 14);
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn references_rename_highlight_over_stdio() {
-    let dir = std::env::temp_dir().join(format!("oslsp-refs-{}", std::process::id()));
+    let dir_scratch = common::Scratch::new("oslsp-refs");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("refs.cfg");
     let text =
@@ -480,13 +481,12 @@ fn references_rename_highlight_over_stdio() {
         "illegal new name must be a jsonrpc error: {v}"
     );
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn check_invocation_carries_the_opensips_flags() {
-    let dir = std::env::temp_dir().join(format!("oslsp-argv-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-argv");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     // recording stub: append its argv to a file, one arg per line
     let log = dir.join("argv.log");
@@ -547,7 +547,6 @@ fn check_invocation_carries_the_opensips_flags() {
         "exact opensips check argv"
     );
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -555,8 +554,8 @@ fn check_runs_in_the_configs_own_directory() {
     // relative include_file / module paths resolve against the
     // checker's cwd — the server must run it from the cfg's dir,
     // exactly like the CLI does
-    let dir = std::env::temp_dir().join(format!("oslsp-cwd-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-cwd");
+    let dir = dir_scratch.path().to_path_buf();
     let conf = dir.join("conf");
     std::fs::create_dir_all(&conf).unwrap();
     let log = dir.join("pwd.log");
@@ -611,7 +610,6 @@ fn check_runs_in_the_configs_own_directory() {
     let want = std::fs::canonicalize(&conf).unwrap();
     assert_eq!(got, want, "checker must run from the cfg's directory");
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -619,8 +617,8 @@ fn a_newer_save_supersedes_a_slow_running_check() {
     // latest-wins: the running -C for stale content is killed the
     // moment a newer check for the same document arrives — the fresh
     // result must not wait out the slow run (nor its timeout)
-    let dir = std::env::temp_dir().join(format!("oslsp-super-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let dir_scratch = common::Scratch::new("oslsp-super");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let stub = dir.join("slowfast.sh");
     // SLOW content: hang far past every test budget; FAST: clean exit
@@ -701,12 +699,12 @@ fn a_newer_save_supersedes_a_slow_running_check() {
     assert!(msgs.contains("fresh"), "newest run's diagnostic: {msgs}");
     assert!(!msgs.contains("slow"), "killed run must not leak: {msgs}");
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
 fn selection_range_grows_outward_over_stdio() {
-    let dir = std::env::temp_dir().join(format!("oslsp-selrange-{}", std::process::id()));
+    let dir_scratch = common::Scratch::new("oslsp-selrange");
+    let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
     let cfg = dir.join("s.cfg");
     // `é` is two bytes and one UTF-16 unit, so every column on line 1
@@ -772,5 +770,4 @@ fn selection_range_grows_outward_over_stdio() {
         ]
     );
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&dir);
 }

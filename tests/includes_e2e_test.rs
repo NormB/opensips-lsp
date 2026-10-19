@@ -55,8 +55,8 @@ fn start(
 
 #[test]
 fn cross_file_definition_and_route_completion() {
-    let base = std::env::temp_dir().join(format!("oslsp-inc-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("oslsp-inc");
+    let base = base_scratch.path().to_path_buf();
     let (uri, text) = setup(&base);
     let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
     write_msg(
@@ -95,13 +95,12 @@ fn cross_file_definition_and_route_completion() {
         "include-defined route completes: {labels:?}"
     );
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn analyzer_diags_appear_on_change_without_save() {
-    let base = std::env::temp_dir().join(format!("oslsp-and-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("oslsp-and");
+    let base = base_scratch.path().to_path_buf();
     let (uri, text) = setup(&base);
     let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
     write_msg(
@@ -154,13 +153,12 @@ fn analyzer_diags_appear_on_change_without_save() {
             .is_empty()
     );
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn analyzer_diags_can_be_disabled() {
-    let base = std::env::temp_dir().join(format!("oslsp-anoff-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("oslsp-anoff");
+    let base = base_scratch.path().to_path_buf();
     let (uri, _) = setup(&base);
     let (mut child, rx, mut stdin) = start(
         &base,
@@ -201,13 +199,12 @@ fn analyzer_diags_can_be_disabled() {
         );
     }
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn references_and_rename_cross_include_files() {
-    let base = std::env::temp_dir().join(format!("oslsp-xref-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("oslsp-xref");
+    let base = base_scratch.path().to_path_buf();
     let (uri, text) = setup(&base);
     let inc_path = base.join("inc.cfg");
     let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
@@ -252,13 +249,12 @@ fn references_and_rename_cross_include_files() {
     assert_eq!(inc_edits.len(), 1);
     assert_eq!(inc_edits[0]["newText"], "assist");
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
 fn include_file_errors_surface_on_the_root_document() {
-    let base = std::env::temp_dir().join(format!("oslsp-fdiag-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&base);
+    let base_scratch = common::Scratch::new("oslsp-fdiag");
+    let base = base_scratch.path().to_path_buf();
     let (uri, text) = setup(&base);
     // stub checker attributing the error to the INCLUDE's absolute
     // path, exactly like the real parser does
@@ -306,5 +302,4 @@ fn include_file_errors_surface_on_the_root_document() {
     // anchored at the include_file directive (line 0)
     assert_eq!(ds[0]["range"]["start"]["line"], 0);
     child.kill().ok();
-    let _ = std::fs::remove_dir_all(&base);
 }
