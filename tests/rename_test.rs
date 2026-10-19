@@ -1,7 +1,7 @@
 //! What rename, references and highlights treat as an occurrence of a
 //! route name, and when a rename must be refused.
 //!
-//! Ground truth, OpenSIPS 4.0.1:
+//! Ground truth, OpenSIPS 4.0.2:
 //!
 //! - `t_on_failure`, `t_on_reply` and `t_on_branch` take one
 //!   `CMD_PARAM_STR` whose fixup resolves it as a failure, onreply or

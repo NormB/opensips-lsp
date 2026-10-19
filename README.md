@@ -42,10 +42,12 @@ most current and win; docbook (`modules/*/doc/*_admin.xml`) is the
 fallback for older trees or placeholder READMEs. Core-language docs
 (functions, parameters, pseudo-variables) come from `docs/manual/`.
 
-Supported and version-proven: **OpenSIPS 4.0.x** (4.0.1) and
-**3.6.x** (3.6.8) — the proof suite runs against a real tree and
-binary of each (`OPENSIPS_LSP_TEST_TREE`/`OPENSIPS_LSP_TEST_BIN`),
-built from the tag rather than from a moving branch.  Nothing pins a
+Supported and version-proven: **OpenSIPS 4.0.x** — the proof suite
+runs against a real tree and binary built from tag 4.0.2
+(`OPENSIPS_LSP_TEST_TREE`/`OPENSIPS_LSP_TEST_BIN`), not from a moving
+branch. The built-in catalogue also covers **3.6.x** (3.6.9) and
+**3.5.x** (3.5.9); the suite holds it against a fresh harvest of each
+of those tags' source trees (`OPENSIPS_LSP_TEST_TREES`).  Nothing pins a
 version: module and core docs come from the tree you point at, and
 diagnostics from your own binary.
 
@@ -56,7 +58,7 @@ Via LSP `initializationOptions` (or environment fallback):
 | Option | Env | Default | Meaning |
 |---|---|---|---|
 | `opensipsPath` | `OPENSIPS_LSP_BIN` | `opensips` | Binary used for `-C` diagnostics. |
-| `opensipsSrc` | `OPENSIPS_LSP_SRC` | *(none)* | Source tree to harvest documentation from. Not needed to get started: the core language and all 186 documented modules are built in, harvested from OpenSIPS 4.0.1 and used whenever no tree is configured, so `log_level`, `loadmodule "` and `is_method` all complete on a fresh install. A configured tree wins and replaces them wholesale, which is what you want when your build differs from 4.0.1. |
+| `opensipsSrc` | `OPENSIPS_LSP_SRC` | *(none)* | Source tree to harvest documentation from. Not needed to get started: the core language and all 193 documented modules are built in, harvested from OpenSIPS 4.0.2 and used whenever no tree is configured, so `log_level`, `loadmodule "` and `is_method` all complete on a fresh install. A configured tree wins and replaces them wholesale, which is what you want when your build differs from 4.0.2. |
 
 Diagnostics fidelity note: `-C` loads the modules the cfg references,
 so it needs a tree/installation where those `.so` files exist (an

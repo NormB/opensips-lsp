@@ -301,7 +301,7 @@ fn pvars_are_classifier_scoped() {
 
 /// OpenSIPS block comments nest: cfg.lex counts `comment_nest` up on
 /// every `/*` inside a comment and leaves the comment only when it
-/// returns to zero.  `opensips -C` 4.0.1 accepts the first config
+/// returns to zero.  `opensips -C` 4.0.2 accepts the first config
 /// below, so the `route(ghost)` inside it is not a call.
 #[test]
 fn block_comments_nest() {
@@ -358,7 +358,7 @@ fn loadmodule_takes_a_single_quoted_string_too() {
 /// (`<SCRIPTVARS>.  { yymore(); }`): a `#` or a quote in
 /// `$(var(a){re.subst,/"//g})` opens no comment and no string.
 /// `tests/grammar/pvar_transformations.cfg` holds the same constructs
-/// to `opensips -C` 4.0.1.
+/// to `opensips -C` 4.0.2.
 #[test]
 fn a_script_variable_body_opens_no_comment_or_string() {
     use opensips_lsp::analyze::in_comment;

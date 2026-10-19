@@ -1927,7 +1927,7 @@ fn state_survives_repeated_open_edit_close_cycles() {
 /// A conditionally-guarded include, end to end — and OpenSIPS is not
 /// Kamailio here.
 ///
-/// OpenSIPS 4.0.1 reads an `include_file` inside an unmet `#!ifdef`
+/// OpenSIPS 4.0.2 reads an `include_file` inside an unmet `#!ifdef`
 /// anyway (pinned by the proof suite against the real binary), so the
 /// file IS part of that configuration and must be claimed either way.
 /// The sibling server skips them, because Kamailio genuinely does not

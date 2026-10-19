@@ -1,7 +1,7 @@
 //! Regenerate the built-in module catalogue from several pinned trees.
 //!
 //!     cargo run --example gen_versioned_catalog -- \
-//!         3.5.9=/path/to/3.5.9 3.6.8=/path/to/3.6.8 4.0.1=/path/to/4.0.1 \
+//!         3.5.9=/path/to/3.5.9 3.6.9=/path/to/3.6.9 4.0.2=/path/to/4.0.2 \
 //!         > src/modules_builtin.json
 //!
 //! Releases must be given oldest first: the first becomes the base and

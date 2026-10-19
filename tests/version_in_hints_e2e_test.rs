@@ -108,7 +108,7 @@ fn with_the_setting_on_a_hover_names_the_release_and_the_escape_hatch() {
         "the hover must still document the entry: {text:?}"
     );
     assert!(
-        text.contains("Built-in core documentation from OpenSIPS 4.0.1"),
+        text.contains("Built-in core documentation from OpenSIPS 4.0.2"),
         "asked for, so it names the release the CORE docs came from: {text:?}"
     );
     assert!(
@@ -126,14 +126,14 @@ fn with_the_setting_on_a_hover_names_the_release_and_the_escape_hatch() {
 fn a_core_entry_names_its_own_release_not_the_selected_one() {
     let text = hover_text(
         "selected",
-        serde_json::json!({"versionInHints": true, "opensipsVersion": "3.6.8"}),
+        serde_json::json!({"versionInHints": true, "opensipsVersion": "3.6.9"}),
     );
     assert!(
-        text.contains("Built-in core documentation from OpenSIPS 4.0.1"),
+        text.contains("Built-in core documentation from OpenSIPS 4.0.2"),
         "core docs are pinned; the note must say where they came from: {text:?}"
     );
     assert!(
-        !text.contains("core documentation from OpenSIPS 3.6.8"),
+        !text.contains("core documentation from OpenSIPS 3.6.9"),
         "the chosen release does not apply to core docs: {text:?}"
     );
 }
@@ -151,26 +151,26 @@ fn a_core_entry_names_its_own_release_not_the_selected_one() {
 fn a_module_entry_follows_the_selected_release_while_core_does_not() {
     let body =
         "log_level=2\nloadmodule \"usrloc.so\"\nmodparam(\"usrloc\", \"user_column\", \"u\")\n";
-    let opts = serde_json::json!({"versionInHints": true, "opensipsVersion": "3.6.8"});
+    let opts = serde_json::json!({"versionInHints": true, "opensipsVersion": "3.6.9"});
 
     // the module parameter: follows the selection
     let module = hover_text_at("kinds-mod", opts.clone(), body, 2, 22);
     assert!(
-        module.contains("module documentation from OpenSIPS 3.6.8"),
+        module.contains("module documentation from OpenSIPS 3.6.9"),
         "a module entry must name the release in use: {module:?}"
     );
 
     // the core parameter, same server settings: names its own
     let core = hover_text_at("kinds-core", opts, body, 0, 3);
     assert!(
-        core.contains("core documentation from OpenSIPS 4.0.1"),
+        core.contains("core documentation from OpenSIPS 4.0.2"),
         "a core entry must name where the core docs came from: {core:?}"
     );
 
     // and they must genuinely differ, or this proves nothing
     assert_ne!(
-        module.contains("3.6.8"),
-        core.contains("3.6.8"),
+        module.contains("3.6.9"),
+        core.contains("3.6.9"),
         "the two catalogues are pinned differently and must read differently"
     );
 }

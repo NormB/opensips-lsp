@@ -358,7 +358,7 @@ rebuilds the graph when one is added or removed; without that, "Add
 Folder to Workspace" left every fragment in the new folder
 unrecognised until the window was reloaded.
 
-**A conditionally-guarded include IS claimed.** OpenSIPS 4.0.1 reads
+**A conditionally-guarded include IS claimed.** OpenSIPS 4.0.2 reads
 an `include_file` inside an unmet `#!ifdef` anyway — the file is
 opened and its syntax errors are reported — so it really is part of
 that configuration and is claimed either way. Kamailio's preprocessor
@@ -496,12 +496,12 @@ rooted at the tree.
 #### Documentation before you configure anything
 
 Two catalogues — the core language and every documented module — are
-built in, harvested from OpenSIPS 4.0.1 and used when no source tree
+built in, harvested from OpenSIPS 4.0.2 and used when no source tree
 is configured:
 
 - **the core language** — parameters, functions and pseudo-variables
   like `log_level`, `socket`, `mpath`, which are not a module at all;
-- **every documented module** — 186 of them, with their exported
+- **every documented module** — 193 of them, with their exported
   functions and parameters, so `loadmodule "` offers real names and a
   call like `is_method` completes and hovers.
 
@@ -536,7 +536,7 @@ it honest:
   diagnostic on the `loadmodule` line itself.
 
 What the built-ins cannot tell you is whether a module is installed on
-*your* system: the name list is what 4.0.1 documents, not what you
+*your* system: the name list is what 4.0.2 documents, not what you
 compiled.
 
 #### CLI check mode

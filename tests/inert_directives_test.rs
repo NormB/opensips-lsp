@@ -2,7 +2,7 @@
 //!
 //! OpenSIPS's `cfg.lex` has `COM_LINE #` and the rule
 //! `<INITIAL>{COM_LINE}.*{CR} { count(); }`, and contains no
-//! preprocessor token at all — verified against the real 4.0.1 tree by
+//! preprocessor token at all — verified against the real 4.0.2 tree by
 //! the gate below.  So a config carried over from Kamailio still
 //! parses while every `#!ifdef` in it has quietly stopped guarding
 //! anything, which is the sort of silence worth a warning.

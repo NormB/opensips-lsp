@@ -170,7 +170,7 @@ Everything below is optional. Put it in Zed's `settings.json`:
   OpenSIPS binary with `-C` and reports what the parser says.
 - **`opensipsSrc`** points at a source tree matching your build. The
   core language and every documented module are already built in from
-  OpenSIPS 4.0.1; set this when you want documentation exact to your
+  OpenSIPS 4.0.2; set this when you want documentation exact to your
   own version instead. It replaces the built-in catalogues rather than
   merging with them.
 

@@ -84,9 +84,9 @@ extension and it just works.
   the server.
 - **Core language and every module, out of the box** — parameters,
   functions and pseudo-variables (`log_level`, `socket`, `mpath`) and
-  the exported functions and parameters of 186 modules (`is_method`,
+  the exported functions and parameters of 193 modules (`is_method`,
   `t_relay`, …) complete before you configure anything, from
-  catalogues harvested from OpenSIPS 4.0.1 and shipped with the
+  catalogues harvested from OpenSIPS 4.0.2 and shipped with the
   extension. Module functions still appear only in a config that
   loads the module. Hover says which version the docs came from;
   point `opensipsSrc` at your own source tree for docs exact to your

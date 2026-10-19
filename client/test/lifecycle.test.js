@@ -296,10 +296,10 @@ const lastInit = () => clients[clients.length - 1].clientOptions.initializationO
         'nothing is shown until the server names its catalogue',
     );
 
-    announce({ describe: 'OpenSIPS 4.0.1 (built in)', version: '4.0.1' });
+    announce({ describe: 'OpenSIPS 4.0.2 (built in)', version: '4.0.2' });
     assert.strictEqual(statusItem.shown, true, 'it appears once announced');
     assert.ok(
-        statusItem.text.includes('OpenSIPS 4.0.1'),
+        statusItem.text.includes('OpenSIPS 4.0.2'),
         `the release must be visible: ${statusItem.text}`,
     );
 

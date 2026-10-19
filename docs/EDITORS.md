@@ -14,7 +14,7 @@ Install the server first — either grab a prebuilt binary from the
 
 **You do not need a source tree to get started.** The core language
 and all documented modules are built in, harvested from OpenSIPS
-4.0.1, so completion and hover work immediately. Set `opensipsSrc`
+4.0.2, so completion and hover work immediately. Set `opensipsSrc`
 when you want documentation exact to your own build — it replaces the
 built-in catalogues wholesale. Every setting is optional; the full
 list is in [`docs/FEATURES.md`](FEATURES.md).

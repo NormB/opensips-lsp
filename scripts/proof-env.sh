@@ -20,12 +20,12 @@
 # is affordable precisely because the older ones are never built.
 set -euo pipefail
 
-TAG="${OPENSIPS_TAG:-4.0.1}"
+TAG="${OPENSIPS_TAG:-4.0.2}"
 # The releases the versioned catalogue covers: the newest of each live
 # line, oldest first. Only $TAG is ever BUILT — the older ones are
 # harvested from source alone, which is all the catalogue needs, so
 # adding a release costs a shallow clone rather than a compile.
-OLDER_TAGS="${OPENSIPS_OLDER_TAGS:-3.5.9 3.6.8}"
+OLDER_TAGS="${OPENSIPS_OLDER_TAGS:-3.5.9 3.6.9}"
 ROOT="${PROOF_ROOT:-${PWD}/.proof}"
 SRC="$ROOT/opensips-$TAG"
 INST="$ROOT/inst-$TAG"

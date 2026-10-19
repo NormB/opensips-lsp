@@ -1739,7 +1739,7 @@ pub struct ModuleChange {
 /// per later release.
 ///
 /// Releases differ far less than they resemble each other — between
-/// 3.6.8 and 4.0.1, 1660 parameters are identical and 30 are not — so
+/// 3.6.9 and 4.0.2, 1660 parameter names are in both and 30 in only one — so
 /// shipping each release whole would be mostly duplicated bytes, and
 /// the duplication would grow with every release added rather than
 /// shrink.

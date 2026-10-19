@@ -24,12 +24,12 @@ const CFG: &str = "modparam(\"usrloc\", \"sql_reconcile_interval\", 120)\n";
 
 #[test]
 fn a_built_in_catalogue_names_its_version() {
-    let origin = CatalogOrigin::BuiltIn("4.0.1".to_string());
+    let origin = CatalogOrigin::BuiltIn("4.0.2".to_string());
     let diags = catalog_diagnostics(&one_module(), &origin, CFG);
     assert_eq!(diags.len(), 1, "one unknown parameter, got {diags:?}");
     let msg = &diags[0].message;
     assert!(
-        msg.contains("4.0.1"),
+        msg.contains("4.0.2"),
         "the message must name the version it judged against, got {msg:?}"
     );
     assert!(
@@ -56,7 +56,7 @@ fn a_configured_tree_names_the_tree_not_a_version() {
 /// origin has bought nothing.
 #[test]
 fn the_two_origins_read_differently() {
-    let a = catalog_diagnostics(&one_module(), &CatalogOrigin::BuiltIn("4.0.1".into()), CFG);
+    let a = catalog_diagnostics(&one_module(), &CatalogOrigin::BuiltIn("4.0.2".into()), CFG);
     let b = catalog_diagnostics(&one_module(), &CatalogOrigin::ConfiguredTree, CFG);
     assert_ne!(a[0].message, b[0].message);
 }
@@ -68,7 +68,7 @@ fn the_two_origins_read_differently() {
 fn a_known_parameter_is_silent() {
     let cfg = "modparam(\"usrloc\", \"user_column\", \"username\")\n";
     for origin in [
-        CatalogOrigin::BuiltIn("4.0.1".to_string()),
+        CatalogOrigin::BuiltIn("4.0.2".to_string()),
         CatalogOrigin::ConfiguredTree,
     ] {
         assert!(

@@ -111,14 +111,14 @@ every time you save.
 - If a list ever disappears, press **Ctrl+Space** to bring it back.
 
 This all works before you configure anything. The extension ships
-documentation harvested from OpenSIPS 4.0.1 — the core language
+documentation harvested from OpenSIPS 4.0.2 — the core language
 (`log_level` and the other globals, core functions, pseudo-variables)
-and all 186 documented modules with their functions and parameters —
+and all 193 documented modules with their functions and parameters —
 and hover tells you which version an entry came from.
 
 Set **Opensips Lsp: Opensips Src** (in the same Settings page) to a
 folder containing the OpenSIPS source code matching your version when
-you want documentation exact to your own build rather than to 4.0.1.
+you want documentation exact to your own build rather than to 4.0.2.
 A configured folder replaces the built-in catalogues entirely, which
 is the point: mixing two versions is worse than either.
 
@@ -220,9 +220,9 @@ bottom-right status bar (it will say **Plain Text**) and pick
 | A huge folder: includes stop being recognised | The scan behind this stops at 500 `.cfg` files and says so in **View → Output → OpenSIPS LSP**. Open a folder closer to your configuration instead of the whole tree. |
 | No red squiggles | Set **Opensips Path** (step above), save the file, and make sure you trusted the folder. |
 | Squiggles on a correct file | The checker uses *your* OpenSIPS version — a config written for another version can legitimately fail. |
-| Completion has no documentation | Core and module entries both carry built-in documentation from 4.0.1, so an entry with none is one 4.0.1 does not document: set **Opensips Src** to an OpenSIPS source folder matching your build. |
-| A module I have is not offered | The built-in list is what 4.0.1 documents, not what you compiled. Set **Opensips Src** to your own tree. |
-| Still stuck | **View → Output**, pick **OpenSIPS LSP** in the dropdown — the server explains what it is doing (e.g. "ready (186 documented modules, 66 core functions, core and module docs built in from 4.0.1)"). |
+| Completion has no documentation | Core and module entries both carry built-in documentation from 4.0.2, so an entry with none is one 4.0.2 does not document: set **Opensips Src** to an OpenSIPS source folder matching your build. |
+| A module I have is not offered | The built-in list is what 4.0.2 documents, not what you compiled. Set **Opensips Src** to your own tree. |
+| Still stuck | **View → Output**, pick **OpenSIPS LSP** in the dropdown — the server explains what it is doing (e.g. "opensips-lsp ready (193 documented modules, 68 core functions, core and module docs built in from 4.0.2)"). |
 
 ## Checking against a specific OpenSIPS release
 
@@ -232,12 +232,12 @@ names against ONE release, and tells you which — it is on the status
 bar the whole time a config is open, and every warning names it:
 
 ```
-parameter 'x' is not exported by module 'y' in OpenSIPS 4.0.1 (built in)
+parameter 'x' is not exported by module 'y' in OpenSIPS 4.0.2 (built in)
 ```
 
 ### Pick one of the built-in releases
 
-The extension ships catalogues for `3.5.9`, `3.6.8`, `4.0.1`. In VS Code or VSCodium,
+The extension ships catalogues for `3.5.9`, `3.6.9`, `4.0.2`. In VS Code or VSCodium,
 open Settings, search for `opensipsVersion`, and choose from the
 dropdown — it lists exactly the releases that are shipped, so it
 cannot be set to one the server would reject.
@@ -245,7 +245,7 @@ cannot be set to one the server would reject.
 Editing `settings.json` directly:
 
 ```json
-{ "opensipsLsp.opensipsVersion": "4.0.1" }
+{ "opensipsLsp.opensipsVersion": "4.0.2" }
 ```
 
 Leave it empty for the newest. An unrecognised release is reported in
@@ -256,7 +256,7 @@ Outside the editor, `opensips-lsp check` reads the same choice from
 `OPENSIPS_LSP_VERSION`:
 
 ```sh
-OPENSIPS_LSP_VERSION=4.0.1 opensips-lsp check /etc/opensips/opensips.cfg
+OPENSIPS_LSP_VERSION=4.0.2 opensips-lsp check /etc/opensips/opensips.cfg
 ```
 
 ### Or point at your own build

@@ -63,18 +63,18 @@
         "opensipsLsp.opensipsVersion": {
           "type": "string",
           "default": "",
-          "description": "Built-in OpenSIPS release to check modparam names against (e.g. 3.6.8). Empty means the newest the catalogue covers. Ignored when opensipsSrc is set.",
+          "description": "Built-in OpenSIPS release to check modparam names against (e.g. 3.6.9). Empty means the newest the catalogue covers. Ignored when opensipsSrc is set.",
           "enum": [
             "",
             "3.5.9",
-            "3.6.8",
-            "4.0.1"
+            "3.6.9",
+            "4.0.2"
           ],
           "enumDescriptions": [
-            "Newest release the built-in catalogue covers (4.0.1).",
+            "Newest release the built-in catalogue covers (4.0.2).",
             "Check modparam names against OpenSIPS 3.5.9.",
-            "Check modparam names against OpenSIPS 3.6.8.",
-            "Check modparam names against OpenSIPS 4.0.1."
+            "Check modparam names against OpenSIPS 3.6.9.",
+            "Check modparam names against OpenSIPS 4.0.2."
           ]
         },
         "opensipsLsp.checkTimeoutMs": {

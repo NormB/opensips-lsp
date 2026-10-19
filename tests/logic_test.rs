@@ -763,7 +763,7 @@ fn catalog_diagnostics_flag_undocumented_modparams() {
     let cat = catalog(); // tm has fr_timeout; cachedb_nats has kv_bucket
     // unknown param of a KNOWN module → warning at the param
     let text = "modparam(\"tm\", \"fr_timeot\", 5)\n";
-    let origin = opensips_lsp::catalog::CatalogOrigin::BuiltIn("4.0.1".to_string());
+    let origin = opensips_lsp::catalog::CatalogOrigin::BuiltIn("4.0.2".to_string());
     let ds = catalog_diagnostics(&cat, &origin, text);
     assert_eq!(ds.len(), 1, "{ds:?}");
     assert!(ds[0].message.contains("fr_timeot") && ds[0].message.contains("tm"));
@@ -1332,7 +1332,7 @@ fn a_module_documenting_no_parameters_at_all_stays_silent() {
         functions: Vec::new(),
     }];
     let text = "modparam(\"auth_web3\", \"authentication_rpc_url\", \"https://x\")\n";
-    let origin = opensips_lsp::catalog::CatalogOrigin::BuiltIn("4.0.1".to_string());
+    let origin = opensips_lsp::catalog::CatalogOrigin::BuiltIn("4.0.2".to_string());
     assert!(
         catalog_diagnostics(&cat, &origin, text).is_empty(),
         "an unharvested parameter list must not accuse the config"

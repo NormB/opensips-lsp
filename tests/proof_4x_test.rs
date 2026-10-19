@@ -1,7 +1,7 @@
 //! Proof suite: the server, spoken to over real LSP stdio, handles a
 //! real OpenSIPS 4.x tree — module docs, core functions, core
 //! parameters, pseudo-variables, and (with a real binary) `-C`
-//! diagnostics.  Last run against the 4.0.1 tag, tree and binary
+//! diagnostics.  Last run against the 4.0.2 tag, tree and binary
 //! both.
 //!
 //! Gated: set OPENSIPS_LSP_TEST_TREE to a 4.x source tree; set
@@ -447,7 +447,7 @@ fn the_real_parser_sees_the_same_program_whole_or_split() {
 /// This began as a rule derived from Kamailio, where a file inside an
 /// unmet `#!ifdef` is never opened and its syntax errors are never
 /// reported.  Applied here unchecked it would have been wrong twice
-/// over — OpenSIPS 4.0.1 opens the file either way, so skipping such
+/// over — OpenSIPS 4.0.2 opens the file either way, so skipping such
 /// includes would stop claiming roots that genuinely do include them.
 /// Pinned, so the difference between the two engines is a measured
 /// fact rather than a recollection.

@@ -36,7 +36,7 @@ module.exports = grammar({
     // even contains.
     //
     // Neither `!!` nor `#!` is an include prefix here, and they fail
-    // differently.  Put to the pinned 4.0.1 binary with a file that
+    // differently.  Put to the pinned 4.0.2 binary with a file that
     // does not exist, so "did it fire" is "did it try to open it":
     //
     //   include_file "x"      opens x
@@ -115,7 +115,7 @@ module.exports = grammar({
 
     _statement: $ => choice(
       // the flattener splices an include wherever it stands, so one
-      // inside a route block is legal (accepted by opensips -C 4.0.1)
+      // inside a route block is legal (accepted by opensips -C 4.0.2)
       $.include,
       $.empty_statement,
       $.if_statement,

@@ -25,7 +25,9 @@ configured tree yielding no documentation raises a visible warning;
 results are cached — see Caching) — the 4.x markdown docs (`modules/*/README.md`) are
 the most current and win; docbook (`modules/*/doc/*_admin.xml`) is
 the fallback for older trees. Supported and version-proven: OpenSIPS
-4.0.x (binary and tree at tag 4.0.1) and 3.6.x (3.6.8).
+4.0.x (binary and tree at tag 4.0.2). The built-in catalogue also
+covers 3.6.x (3.6.9) and 3.5.x (3.5.9), each held against a fresh
+harvest of that tag's source tree.
 
 ### Dependencies
 
@@ -104,7 +106,7 @@ In VS Code and VSCodium this is a dropdown listing exactly the
 releases the shipped catalogue can answer for, so the value cannot
 be mistyped. Editing settings as JSON, it accepts any release the
 built-in catalogue covers — currently
-`3.5.9`, `3.6.8` and `4.0.1`. An unrecognised value is reported and
+`3.5.9`, `3.6.9` and `4.0.2`. An unrecognised value is reported and
 the newest is used, rather than silently checking against a release
 you did not ask for.
 
@@ -115,7 +117,7 @@ build, and this is a choice among the ones shipped here.
 Environment fallback: `OPENSIPS_LSP_VERSION`.*
 
 ```json title="Set opensipsVersion parameter"
-{ "opensipsVersion": "3.6.8" }
+{ "opensipsVersion": "3.6.9" }
 ```
 
 #### checkTimeoutMs (integer)

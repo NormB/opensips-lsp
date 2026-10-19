@@ -971,7 +971,7 @@ impl IncludeGraph {
         let mut parents: std::collections::BTreeMap<std::path::PathBuf, Vec<std::path::PathBuf>> =
             std::collections::BTreeMap::new();
         for (path, text) in configs {
-            // Every include, conditional or not: OpenSIPS 4.0.1 reads
+            // Every include, conditional or not: OpenSIPS 4.0.2 reads
             // an `include_file` inside an unmet `#!ifdef` anyway —
             // pinned by `the_real_parser_reads_a_conditional_include_anyway`
             // in the proof suite.  Kamailio differs, and its sibling
@@ -1183,7 +1183,7 @@ pub struct AnalyzerDiag {
 /// comment that is counted and thrown away — and contains no
 /// preprocessor token of any kind.  So `#!ifdef USE_TCP` does not
 /// guard anything: the block it appears to open is always active, and
-/// `#!define X 5060` binds nothing.  Proven against the real 4.0.1
+/// `#!define X 5060` binds nothing.  Proven against the real 4.0.2
 /// binary: a syntax error placed inside `#!ifdef NEVER_DEFINED` is
 /// still reported, which it would not be if the block were skipped.
 ///

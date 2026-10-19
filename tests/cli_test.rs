@@ -223,8 +223,8 @@ fn check_runs_the_catalogue_check_and_names_the_catalogue() {
 /// catalogue really covers changes the answer.
 ///
 /// `proto_bin::bin_async_local_connect_timeout` exists in 3.5.9 and
-/// 3.6.8 and was dropped by 4.0: on the newest release it warns and
-/// says where it exists, and on 3.6.8 it is simply correct. A test
+/// 3.6.9 and was dropped by 4.0: on the newest release it warns and
+/// says where it exists, and on 3.6.9 it is simply correct. A test
 /// that only checked the header would pass even if the selection
 /// changed nothing.
 #[test]
@@ -260,14 +260,14 @@ fn the_checked_release_is_selectable() {
         newest_out.contains("it exists in"),
         "a parameter another release exports must say so; stdout: {newest_out}"
     );
-    assert!(newest_err.contains("4.0.1"), "stderr: {newest_err}");
+    assert!(newest_err.contains("4.0.2"), "stderr: {newest_err}");
 
     // a release that really exports it: silent
-    let (older_out, older_err) = run("3.6.8");
-    assert!(older_err.contains("3.6.8"), "stderr: {older_err}");
+    let (older_out, older_err) = run("3.6.9");
+    assert!(older_err.contains("3.6.9"), "stderr: {older_err}");
     assert!(
         !older_out.contains("bin_async_local_connect_timeout"),
-        "3.6.8 exports it, so there is nothing to warn about; stdout: {older_out}"
+        "3.6.9 exports it, so there is nothing to warn about; stdout: {older_out}"
     );
     let _ = std::fs::remove_dir_all(&dir);
 }

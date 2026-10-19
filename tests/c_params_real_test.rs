@@ -30,7 +30,8 @@ fn module_dirs(root: &Path) -> Vec<std::path::PathBuf> {
 /// every such rule would pass while proving nothing. These floors are
 /// what makes that failure loud.
 ///
-/// Measured against 4.0.1: 193 module directories, 178 of which
+/// Measured against 4.0.1 and again against 4.0.2, with the same
+/// result: 193 module directories, 178 of which
 /// declare at least one parameter. Fifteen declare none — the
 /// function-only modules such as `textops`, `xml` and `uuid`, plus six
 /// like `media_exchange` whose table holds only its `{0, 0, 0}`
@@ -290,7 +291,7 @@ fn harvesting_the_tree_directly_reconciles_against_c() {
 
 /// The completeness guard, on a fixture that can actually violate it.
 ///
-/// No module in the 4.0.1 tree parses incompletely, so nothing there
+/// No module in the 4.0.2 tree parses incompletely, so nothing there
 /// exercises this branch: a test that only reads the real tree passes
 /// whether the guard is right or wrong. `registrar` is the reason the
 /// guard exists — a table splicing a macro this parser cannot find

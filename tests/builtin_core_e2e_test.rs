@@ -276,8 +276,8 @@ fn module_names_complete_inside_loadmodule_with_nothing_configured() {
 /// A module the config never loads must not shadow the language.
 ///
 /// The colliding name is DERIVED from the two vendored catalogues, not
-/// written down here.  In 4.0.1 it happens to be `log_level`, which is
-/// both a core global and an `opentelemetry` modparam — but whether a
+/// written down here.  In 4.0.2 the first one found is `syslog_name`, which
+/// is both a core global and an `aaa_radius` modparam — but whether a
 /// given name collides is a fact about the pinned version, and either
 /// side may rename it.  A hardcoded pair would keep passing while
 /// proving nothing, or fail in a way that looks like a bug in the
