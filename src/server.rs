@@ -1346,7 +1346,7 @@ impl LanguageServer for Backend {
                     },
                 )),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec!["\"".into(), "$".into()]),
+                    trigger_characters: Some(vec!["\"".into(), "$".into(), "/".into()]),
                     ..Default::default()
                 }),
                 signature_help_provider: Some(SignatureHelpOptions {
@@ -1821,6 +1821,53 @@ impl LanguageServer for Backend {
             return Ok(Some(CompletionResponse::Array(Vec::new())));
         }
         let prefix = State::line_prefix(&text, pos);
+        // inside `include_file "..."`: the entries of the directory the
+        // path names so far, replacing only what follows its last `/`
+        if let Some(typed) = logic::include_path_context(&prefix) {
+            let Some(path) = uri.to_file_path() else {
+                return Ok(Some(CompletionResponse::Array(Vec::new())));
+            };
+            let segment = typed.rsplit('/').next().unwrap_or("");
+            let range = Range {
+                start: Position::new(
+                    pos.line,
+                    pos.character
+                        .saturating_sub(segment.encode_utf16().count() as u32),
+                ),
+                end: pos,
+            };
+            let list = |dir: &std::path::Path| -> Vec<(String, bool)> {
+                std::fs::read_dir(dir)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| {
+                        (
+                            e.file_name().to_string_lossy().into_owned(),
+                            e.path().is_dir(),
+                        )
+                    })
+                    .collect()
+            };
+            let items = logic::include_path_completions(&path, typed, &list)
+                .into_iter()
+                .map(|c| CompletionItem {
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                        range,
+                        new_text: c.label.clone(),
+                    })),
+                    kind: Some(if c.kind == logic::CompKind::Folder {
+                        CompletionItemKind::FOLDER
+                    } else {
+                        CompletionItemKind::FILE
+                    }),
+                    detail: Some(c.detail),
+                    label: c.label,
+                    ..Default::default()
+                })
+                .collect();
+            return Ok(Some(CompletionResponse::Array(items)));
+        }
         // typed `$` + tail: completions REPLACE the typed token (labels
         // carry the `$`, so plain insertion would double it)
         let pvar_edit_range = logic::pvar_tail(&prefix).map(|n| {
@@ -1878,6 +1925,8 @@ impl LanguageServer for Backend {
                             logic::CompKind::Function => CompletionItemKind::FUNCTION,
                             logic::CompKind::Route => CompletionItemKind::REFERENCE,
                             logic::CompKind::Keyword => CompletionItemKind::KEYWORD,
+                            logic::CompKind::File => CompletionItemKind::FILE,
+                            logic::CompKind::Folder => CompletionItemKind::FOLDER,
                         }),
                         ..Default::default()
                     }

@@ -347,3 +347,43 @@ fn definition_reaches_a_route_in_the_91st_include() {
     let _ = child.kill();
 }
 
+/// Completion inside `include_file "inc/` offers the files in `inc/`,
+/// and the edit replaces only the part typed after the last `/`.
+#[test]
+fn include_paths_complete_from_the_including_files_directory() {
+    let base_scratch = common::Scratch::new("oslsp-inc-paths");
+    let base = base_scratch.path().to_path_buf();
+    std::fs::create_dir_all(base.join("inc/routes")).unwrap();
+    std::fs::write(base.join("inc/globals.inc"), "log_level = 3\n").unwrap();
+    std::fs::write(base.join("inc/notes.txt"), "not a config\n").unwrap();
+    let text = "include_file \"inc/gl\"\n";
+    let main = base.join("opensips.cfg");
+    std::fs::write(&main, text).unwrap();
+    let uri = format!("file://{}", main.display());
+    let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
+    );
+    // the cursor after `inc/gl`
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{
+        "textDocument":{"uri":uri},"position":{"line":0,"character":20}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "completion");
+    let items = v["result"].as_array().unwrap_or_else(|| panic!("{v}"));
+    let labels: Vec<&str> = items.iter().filter_map(|i| i["label"].as_str()).collect();
+    assert_eq!(labels, vec!["globals.inc", "routes/"], "{v}");
+    let globals = &items[0];
+    assert_eq!(globals["kind"], 17, "CompletionItemKind.File: {globals}");
+    assert_eq!(items[1]["kind"], 19, "CompletionItemKind.Folder");
+    assert_eq!(
+        globals["textEdit"]["range"],
+        serde_json::json!({"start":{"line":0,"character":18},"end":{"line":0,"character":20}}),
+        "only `gl` is replaced: {globals}"
+    );
+    assert_eq!(globals["textEdit"]["newText"], "globals.inc");
+    let _ = child.kill();
+}

@@ -34,6 +34,7 @@ source tree (result cached per tree):
 | `modparam("tm", "` | tm's parameters, each with docs |
 | letters in a route | exported functions of **loaded** modules, core functions, core parameters, route names, keywords |
 | `route(` | route names (this file and its includes) |
+| `include_file "` or `import_file "` | the directories and the `.cfg`, `.inc` and `.m4` files in the directory the path names so far, relative to the including file; typing `/` opens the next directory. Hidden names are left out |
 | `$` | pseudo-variables with descriptions (the typed `$word` is replaced, never doubled) |
 | `socket=udp:1.2.3.4:5060 ` | the twelve modifiers a socket line takes — `use_workers n`, `reuse_port`, `anycast`, `as ip[:port]`, `tag ID` and the rest. Membership comes from the grammar's own `socket_def_param` production, so it is what your release accepts; the manual supplies the descriptions |
 | `xlog(` | the log levels, quoted — `"L_INFO"`, because the grammar wants a string there. Type `xlog("` and they come unquoted instead. The set is read from the `switch` in the tree's `route.c`, so it is the set *your* release accepts |

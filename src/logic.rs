@@ -16,6 +16,10 @@ pub enum CompKind {
     Route,
     /// A core language keyword.
     Keyword,
+    /// A configuration file an include can name.
+    File,
+    /// A directory on the way to one.
+    Folder,
 }
 
 /// One completion candidate.
@@ -86,6 +90,72 @@ static_regex!(
     r#"(?:^|[^A-Za-z0-9_])route\s*\(\s*["']?[A-Za-z0-9_.:-]*$"#
 );
 
+// an `include_file` / `import_file` argument being typed: the directive
+// must start the line (cfg_pp.c splices only a line that begins with
+// it), and the quote is still open
+static_regex!(
+    re_include_path_arg,
+    r#"^[ \t]*(?:include_file|import_file)[ \t]*(?:"([^"]*)|'([^']*))$"#
+);
+
+/// The path typed so far, when the cursor is inside the quoted argument
+/// of an `include_file` or `import_file` line.
+pub fn include_path_context(line_prefix: &str) -> Option<&str> {
+    let c = re_include_path_arg().captures(line_prefix)?;
+    c.get(1).or_else(|| c.get(2)).map(|m| m.as_str())
+}
+
+/// Completion candidates for the include path `typed`, written in the
+/// file at `current`: the directories, and the files the workspace scan
+/// reads as configurations (`.cfg`, `.inc`, `.m4`), in the directory the
+/// typed path names so far.
+///
+/// A relative path resolves against the including file's directory, the
+/// way `resolve_include` reads it. `list` returns a directory's
+/// entries as (name, is_directory), so this can be tested without a
+/// filesystem. Names starting with `.` are left out, as the scan leaves
+/// them out.
+pub fn include_path_completions(
+    current: &std::path::Path,
+    typed: &str,
+    list: &dyn Fn(&std::path::Path) -> Vec<(String, bool)>,
+) -> Vec<Comp> {
+    let dir_part = typed.rfind('/').map_or("", |i| &typed[..=i]);
+    let base = if std::path::Path::new(dir_part).is_absolute() {
+        std::path::PathBuf::from(dir_part)
+    } else {
+        current
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new(""))
+            .join(dir_part)
+    };
+    let mut out: Vec<Comp> = list(&lexically_normal(&base))
+        .into_iter()
+        .filter(|(name, _)| !name.starts_with('.'))
+        .filter_map(|(name, is_dir)| {
+            if is_dir {
+                Some(Comp {
+                    label: format!("{name}/"),
+                    detail: "directory".into(),
+                    doc: String::new(),
+                    kind: CompKind::Folder,
+                })
+            } else if is_config_candidate(std::path::Path::new(&name)) {
+                Some(Comp {
+                    label: name,
+                    detail: "configuration file".into(),
+                    doc: String::new(),
+                    kind: CompKind::File,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.label.cmp(&b.label));
+    out
+}
+
 /// Is the cursor inside the name argument of a `route(...)` call?
 fn route_call_context(line_prefix: &str) -> bool {
     re_route_call_arg().is_match(line_prefix)
@@ -112,6 +182,11 @@ fn complete_files(
     files: &[(std::path::PathBuf, String)],
     line_prefix: &str,
 ) -> Vec<Comp> {
+    // inside an include path only paths complete, and those need the
+    // file system: see [`include_path_completions`]
+    if include_path_context(line_prefix).is_some() {
+        return Vec::new();
+    }
     // "$" prefix → pseudo-variables, nothing else
     if pvar_tail(line_prefix).is_some() {
         return core
@@ -1820,7 +1895,8 @@ fn dedup_completions(items: Vec<Comp>) -> Vec<Comp> {
             CompKind::Param => 3,
             CompKind::Route => 2,
             CompKind::Module => 1,
-            CompKind::Keyword => 0,
+            // paths are never mixed with code items
+            CompKind::Keyword | CompKind::File | CompKind::Folder => 0,
         }
     }
     let mut best: std::collections::HashMap<String, usize> = std::collections::HashMap::new();

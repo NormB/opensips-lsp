@@ -288,6 +288,14 @@ fn signature_help_and_pvar_text_edits() {
             .unwrap_or(false),
         "completion must trigger on $"
     );
+    // each directory of an include path opens the next list
+    assert!(
+        comp_triggers
+            .as_array()
+            .map(|a| a.iter().any(|c| c == "/"))
+            .unwrap_or(false),
+        "completion must trigger on / inside an include path: {comp_triggers}"
+    );
     write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),

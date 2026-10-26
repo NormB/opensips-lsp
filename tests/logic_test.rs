@@ -1481,3 +1481,105 @@ fn the_closure_stays_bounded_when_every_include_has_a_new_name() {
     assert_eq!(files.len(), 500);
 }
 
+/// The cursor is inside an include path only on a line that starts
+/// with the directive, with the quote still open: `cfg_pp.c` splices
+/// an `include_file` only at the start of a line, and a closed quote
+/// has finished the path.
+#[test]
+fn an_include_path_is_typed_only_inside_the_directives_open_quote() {
+    use opensips_lsp::logic::include_path_context;
+    assert_eq!(
+        include_path_context("include_file \"inc/ro"),
+        Some("inc/ro")
+    );
+    assert_eq!(include_path_context("  import_file 'a"), Some("a"));
+    assert_eq!(include_path_context("\tinclude_file \""), Some(""));
+    // the negative controls
+    assert_eq!(include_path_context("include_file \"a.cfg\" "), None);
+    assert_eq!(include_path_context("xlog(\"include_file \\\"x"), None);
+    assert_eq!(include_path_context("#include_file \"x"), None);
+    assert_eq!(include_path_context("include_files \"x"), None);
+}
+
+/// The candidates are the directory the typed path names so far,
+/// resolved against the including file's directory as an include is:
+/// its subdirectories, and the files the workspace scan reads as
+/// configurations. Hidden names are left out, as the scan leaves them.
+#[test]
+fn include_path_candidates_come_from_the_directory_typed_so_far() {
+    use opensips_lsp::logic::{CompKind, include_path_completions};
+    use std::path::Path;
+    let list = |dir: &Path| -> Vec<(String, bool)> {
+        match dir.to_str().unwrap() {
+            "/etc/opensips" => vec![
+                ("include".into(), true),
+                ("opensips.cfg".into(), false),
+                (".git".into(), true),
+                ("README".into(), false),
+            ],
+            "/etc/opensips/include" => vec![
+                ("routes".into(), true),
+                ("globals.inc".into(), false),
+                ("menu.m4".into(), false),
+                ("notes.txt".into(), false),
+                (".swp.inc".into(), false),
+            ],
+            "/srv/shared" => vec![("common.cfg".into(), false)],
+            _ => Vec::new(),
+        }
+    };
+    let got = |typed: &str| -> Vec<(String, CompKind)> {
+        include_path_completions(Path::new("/etc/opensips/opensips.cfg"), typed, &list)
+            .into_iter()
+            .map(|c| (c.label, c.kind))
+            .collect()
+    };
+    assert_eq!(
+        got(""),
+        vec![
+            ("include/".to_string(), CompKind::Folder),
+            ("opensips.cfg".to_string(), CompKind::File),
+        ]
+    );
+    assert_eq!(
+        got("include/gl"),
+        vec![
+            ("globals.inc".to_string(), CompKind::File),
+            ("menu.m4".to_string(), CompKind::File),
+            ("routes/".to_string(), CompKind::Folder),
+        ]
+    );
+    // `..` folds, and an absolute path is taken as written
+    assert_eq!(
+        got("include/../include/routes/"),
+        Vec::<(String, CompKind)>::new()
+    );
+    assert_eq!(
+        got("/srv/shared/"),
+        vec![("common.cfg".to_string(), CompKind::File)]
+    );
+}
+
+/// Inside an include path the engine offers no functions, routes or
+/// keywords: they were offered there, and accepting one wrote a
+/// function name into a file path.
+#[test]
+fn nothing_but_paths_completes_inside_an_include_path() {
+    let got = completions_with_core(
+        &catalog(),
+        &opensips_lsp::catalog::builtin_core().core,
+        "loadmodule \"tm.so\"\nroute[r] { exit; }\n",
+        "include_file \"",
+    );
+    let labels: Vec<&str> = got.iter().map(|c| c.label.as_str()).collect();
+    assert!(labels.is_empty(), "{labels:?}");
+    // the negative control: on an ordinary line the same document
+    // still completes routes and functions
+    let got = completions_with_core(
+        &catalog(),
+        &opensips_lsp::catalog::builtin_core().core,
+        "loadmodule \"tm.so\"\nroute[r] { exit; }\n",
+        "    ",
+    );
+    assert!(got.iter().any(|c| c.label == "r"), "routes still complete");
+}

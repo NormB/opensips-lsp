@@ -19,6 +19,8 @@ extension and it just works.
   - inside a route → exported functions of the modules you loaded,
     plus core functions, parameters, route names, and keywords
   - `$` → pseudo-variables (`$ru`, `$si`, …) with descriptions
+  - `include_file "` → the configuration files and directories beside
+    the file you are editing
   - functions insert as snippets — the cursor lands between the
     parentheses
 - **Hover documentation** for functions, parameters, modules, and
