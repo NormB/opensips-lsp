@@ -1,0 +1,58 @@
+name: CodeQL
+
+# Code scanning for the three languages in this repository: the Rust
+# server, the TypeScript client and the workflows themselves. Findings
+# go to the Security tab. Weekly as well as on push, because a new
+# CodeQL query can find a defect in code that has not changed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Tuesdays 02:34 UTC, off the hour, when GitHub is least likely to
+    # drop a scheduled run.
+    - cron: '34 2 * * 2'
+
+# Each job below declares the permissions it needs; this is the floor
+# for any job that does not.
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    permissions:
+      # upload the results to code scanning
+      security-events: write
+      contents: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+          - language: rust
+            build-mode: none
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+      - name: Analyze
+        uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          category: "/language:${{ matrix.language }}"
+          # nothing reads an uploaded database, and zipping it costs
+          # minutes of the job's bound
+          upload-database: false
