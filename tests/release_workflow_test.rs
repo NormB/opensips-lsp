@@ -242,3 +242,52 @@ fn code_scanning_covers_rust_typescript_and_actions() {
     assert!(scorecard.contains("github/codeql-action/upload-sarif@"));
     assert!(scorecard.contains("publish_results: true"));
 }
+
+/// The `publish` job creates the GitHub release and uploads its
+/// assets, so it alone asks for `contents: write`; the jobs that build
+/// and publish to Open VSX keep the read-only token. A write grant on
+/// a build job hands it to every action that job runs.
+#[test]
+fn the_release_job_alone_may_write_contents() {
+    let y = workflow("release.yml").expect("release.yml must exist");
+    let (before, publish) = y
+        .split_once("\n  publish:")
+        .expect("release.yml has a `publish` job");
+    assert!(
+        publish.contains("permissions:") && publish.contains("contents: write"),
+        "`gh release create` needs contents: write on the publish job"
+    );
+    let jobs = before
+        .split_once("\njobs:")
+        .map(|(_, j)| j)
+        .expect("release.yml has jobs");
+    assert!(
+        !jobs.contains("contents: write"),
+        "a job other than `publish` asks for contents: write"
+    );
+}
+
+/// Dependabot raises the three ecosystems this repository pins:
+/// the crate, the VS Code client and the workflow actions, which are
+/// pinned by commit and so are never raised by anything else. The
+/// `@types/vscode` ignore stays: that range is the API floor
+/// `engines.vscode` promises, and `vsce package` refuses a higher one.
+#[test]
+fn dependabot_watches_cargo_npm_and_actions() {
+    let path = format!("{}/.github/dependabot.yml", env!("CARGO_MANIFEST_DIR"));
+    let y = std::fs::read_to_string(&path).expect(".github/dependabot.yml");
+    for (eco, dir) in [("cargo", "/"), ("npm", "/client"), ("github-actions", "/")] {
+        let entry = y
+            .split("- package-ecosystem:")
+            .find(|s| s.trim_start().starts_with(&format!("\"{eco}\"")))
+            .unwrap_or_else(|| panic!("dependabot.yml has no {eco} entry"));
+        assert!(
+            entry.contains(&format!("directory: \"{dir}\"")),
+            "the {eco} entry must watch {dir}"
+        );
+    }
+    assert!(
+        y.contains("dependency-name: \"@types/vscode\""),
+        "the @types/vscode ignore is gone"
+    );
+}
