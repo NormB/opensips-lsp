@@ -325,7 +325,10 @@ fn assignments(
     for line in text.split_inclusive('\n') {
         let at = line_start;
         line_start += line.len();
-        let lead = line.len() - line.trim_start().len();
+        // blanks only: `trim_start` would also strip a blank line's
+        // newline and land on the NEXT line, listing that line's
+        // assignment a second time with a range ending above its start
+        let lead = line.len() - line.trim_start_matches([' ', '\t', '\r']).len();
         let s = at + lead;
         if classes.get(s) != Some(&Class::Code) || !b[s].is_ascii_alphabetic() {
             continue;

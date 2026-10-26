@@ -9,6 +9,8 @@
 //! need not sit next to its `loadmodule`, so neither is nested under
 //! another: an outline parent must contain its children.
 
+mod common;
+
 use opensips_lsp::outline::{FoldKind, Sym, SymKind, folds, outline, selection_chain};
 
 const CFG: &str = r#"loadmodule "tm.so"
@@ -218,5 +220,133 @@ fn a_script_variable_with_braces_and_hashes_is_not_a_block() {
             "route (main) Route 0:0-2:1 sel 0:0-0:5",
             "route[next] Route 3:0-5:1 sel 3:6-3:10",
         ]
+    );
+}
+
+/// A blank line before a top-level assignment.
+///
+/// `str::trim_start` strips the newline too, so a blank line's
+/// "indentation" ran into the line after it, and every assignment
+/// after a blank line was listed twice: once correctly, and once with
+/// a range that ends on the line ABOVE where it starts. The LSP
+/// requires a symbol's `selectionRange` to lie inside its `range`;
+/// the stock `etc/opensips.cfg` produced the bad entry for
+/// `log_level`, `udp_workers` and `socket`.
+#[test]
+fn an_assignment_after_a_blank_line_is_listed_once() {
+    let mut got = Vec::new();
+    flat(&outline("#c\n\nlog_level=3\nx=1\n"), 0, &mut got);
+    assert_eq!(
+        got,
+        vec![
+            "log_level Variable 2:0-2:11 sel 2:0-2:9",
+            "x Variable 3:0-3:3 sel 3:0-3:1",
+        ]
+    );
+}
+
+/// The same with CRLF endings and with a line holding only blanks.
+/// An indented assignment after a blank line is still listed, at its
+/// own column: the fix must not drop the case it borders on.
+#[test]
+fn blank_crlf_and_whitespace_lines_before_an_assignment() {
+    for (text, want) in [
+        (
+            "a=1\r\n\r\nb=2\r\n",
+            vec![
+                "a Variable 0:0-0:3 sel 0:0-0:1",
+                "b Variable 2:0-2:3 sel 2:0-2:1",
+            ],
+        ),
+        (
+            "a=1\n   \nb=2\n",
+            vec![
+                "a Variable 0:0-0:3 sel 0:0-0:1",
+                "b Variable 2:0-2:3 sel 2:0-2:1",
+            ],
+        ),
+        (
+            "a=1\n\t\n\tb = 2\n",
+            vec![
+                "a Variable 0:0-0:3 sel 0:0-0:1",
+                "b Variable 2:1-2:6 sel 2:1-2:2",
+            ],
+        ),
+    ] {
+        let mut got = Vec::new();
+        flat(&outline(text), 0, &mut got);
+        assert_eq!(got, want, "{text:?}");
+    }
+}
+
+/// Every outline entry of every shipped configuration is a valid LSP
+/// `DocumentSymbol`: its range is ordered, its selection lies inside
+/// it, each child lies inside its parent, and no construct is listed
+/// twice.
+///
+/// The hand-written fixtures above had no blank line before an
+/// assignment, so the duplicate entries went unseen; the stock
+/// `etc/opensips.cfg` has several.
+#[test]
+fn every_outline_entry_of_every_shipped_config_is_well_formed() {
+    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let mut files = Vec::new();
+    common::cfgs_under(&tree, &mut files);
+    common::cfgs_under(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"),
+        &mut files,
+    );
+    files.sort();
+    assert!(files.len() > 30, "too few configs found: {}", files.len());
+
+    fn ordered(s: &opensips_lsp::outline::Span) -> bool {
+        (s.start_line, s.start_col) <= (s.end_line, s.end_col)
+    }
+    fn inside(a: &opensips_lsp::outline::Span, b: &opensips_lsp::outline::Span) -> bool {
+        (a.start_line, a.start_col) >= (b.start_line, b.start_col)
+            && (a.end_line, a.end_col) <= (b.end_line, b.end_col)
+    }
+    fn walk(
+        f: &std::path::Path,
+        syms: &[Sym],
+        parent: Option<&Sym>,
+        seen: &mut std::collections::HashSet<String>,
+        bad: &mut Vec<String>,
+    ) {
+        for s in syms {
+            let at = format!("{}: {} {:?} {:?}", f.display(), s.name, s.span, s.sel);
+            if !ordered(&s.span) || !ordered(&s.sel) {
+                bad.push(format!("unordered range: {at}"));
+            }
+            if !inside(&s.sel, &s.span) {
+                bad.push(format!("selection outside range: {at}"));
+            }
+            if let Some(p) = parent
+                && !inside(&s.span, &p.span)
+            {
+                bad.push(format!("child outside {}: {at}", p.name));
+            }
+            if !seen.insert(format!("{:?} {:?}", s.kind, s.sel)) {
+                bad.push(format!("listed twice: {at}"));
+            }
+            walk(f, &s.children, Some(s), seen, bad);
+        }
+    }
+    let mut bad = Vec::new();
+    for f in &files {
+        let text = std::fs::read_to_string(f).unwrap_or_default();
+        walk(
+            f,
+            &outline(&text),
+            None,
+            &mut std::collections::HashSet::new(),
+            &mut bad,
+        );
+    }
+    assert!(
+        bad.is_empty(),
+        "{} bad entries:\n{}",
+        bad.len(),
+        bad.join("\n")
     );
 }
