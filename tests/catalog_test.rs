@@ -239,3 +239,105 @@ fn readme_parser_survives_adversarial_input() {
         "ToC lines are not items: {names:?}"
     );
 }
+
+/// The docbook form of the same defect, as the 3.5.9 docs write it.
+///
+/// A `<title>` holding two `<function>` elements documents both, and
+/// a section directly under "Exported Functions" is a function
+/// whatever its `id` says: `rtpproxy_stream2xxx`, `ldap-search-fn`
+/// and the id-less `lua` and `h350` sections were dropped because
+/// only ids starting `func_` were read, which left 24 documented
+/// functions out of the 3.5.9 catalogue.
+#[test]
+fn every_function_an_exported_functions_section_documents_is_harvested() {
+    let xml = r#"<chapter>
+  <section id="exported_functions">
+    <title>Exported Functions</title>
+    <section id="func_uac_replace_from" xreflabel="uac_replace_from()">
+      <title>
+        <function moreinfo="none">uac_replace_from([display],uri)</function>
+        <function moreinfo="none">uac_replace_to([display],uri)</function>
+      </title>
+      <para>Replace the display name or the URI.</para>
+    </section>
+    <section id="rtpproxy_stream2xxx">
+      <title>
+        <function>rtpproxy_stream2uac(prompt_name, count)</function>,
+        <function>rtpproxy_stream2uas(prompt_name, count)</function>
+      </title>
+      <para>Stream a prompt.</para>
+    </section>
+    <section>
+      <title>lua_exec(func, [param])</title>
+      <para>Run a Lua function.</para>
+    </section>
+    <section id="exported_pseudo_variables">
+      <title>Exported Pseudo-Variables</title>
+      <para>Not a function.</para>
+    </section>
+  </section>
+  <section id="exported_mi_functions">
+    <title>Exported MI Functions</title>
+    <section id="mi_reload">
+      <title><function>ds_reload</function></title>
+      <para>An MI command, not a script function.</para>
+    </section>
+  </section>
+</chapter>
+"#;
+    let m = parse_admin_xml("m", xml).unwrap();
+    let got: Vec<(&str, &str, &str)> = m
+        .functions
+        .iter()
+        .map(|f| (f.name.as_str(), f.detail.as_str(), f.doc.as_str()))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (
+                "uac_replace_from",
+                "uac_replace_from([display],uri)",
+                "Replace the display name or the URI."
+            ),
+            (
+                "uac_replace_to",
+                "uac_replace_to([display],uri)",
+                "Replace the display name or the URI."
+            ),
+            (
+                "rtpproxy_stream2uac",
+                "rtpproxy_stream2uac(prompt_name, count)",
+                "Stream a prompt."
+            ),
+            (
+                "rtpproxy_stream2uas",
+                "rtpproxy_stream2uas(prompt_name, count)",
+                "Stream a prompt."
+            ),
+            ("lua_exec", "lua_exec(func, [param])", "Run a Lua function."),
+        ]
+    );
+}
+
+/// A section's `id` is not the function's name when the title says
+/// otherwise. The 3.5.9 dialog docs file `get_dialogs_by_val` under
+/// `func_get_dialog_by_val`; read from the id, the catalogue offered
+/// `get_dialog_by_val`, which no OpenSIPS release exports. The id is
+/// still the name when the title names no function.
+#[test]
+fn the_title_names_the_function_and_the_id_is_a_fallback() {
+    let xml = r#"<chapter>
+  <section id="func_get_dialog_by_val">
+    <title><function moreinfo="none">get_dialogs_by_val(name,value,out_avp,out_dlg_no)</function></title>
+    <para>Look dialogs up by value.</para>
+  </section>
+  <section id="func_t_relay">
+    <title>Relaying</title>
+    <para>No signature in the title.</para>
+  </section>
+</chapter>
+"#;
+    let m = parse_admin_xml("m", xml).unwrap();
+    let names: Vec<&str> = m.functions.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, vec!["get_dialogs_by_val", "t_relay"]);
+}

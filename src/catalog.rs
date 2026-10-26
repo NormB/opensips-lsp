@@ -146,20 +146,91 @@ pub fn parse_admin_xml(module: &str, xml: &str) -> Result<ModuleDoc, String> {
                 detail,
                 doc: first_para(section),
             });
-        } else if let Some(fname) = id.strip_prefix("func_") {
-            let signature = section
-                .descendants()
-                .find(|c| c.has_tag_name("function"))
-                .map(collapsed_text)
-                .unwrap_or_default();
-            out.functions.push(Item {
-                name: fname.to_string(),
-                detail: signature,
-                doc: first_para(section),
-            });
+        }
+    }
+    for section in tree.descendants().filter(|n| is_function_section(*n)) {
+        let doc = first_para(section);
+        for (name, detail) in documented_functions(section) {
+            if !out.functions.iter().any(|f| f.name == name) {
+                out.functions.push(Item {
+                    name,
+                    detail,
+                    doc: doc.clone(),
+                });
+            }
         }
     }
     Ok(out)
+}
+
+/// A section's `<title>`, if it has one.
+fn title_of<'a, 'i>(section: roxmltree::Node<'a, 'i>) -> Option<roxmltree::Node<'a, 'i>> {
+    section.children().find(|c| c.has_tag_name("title"))
+}
+
+/// Whether a docbook section documents script functions: its id says
+/// so (`func_...`), or it sits directly under the "Exported Functions"
+/// section. The 3.5.9 docs name some `rtpproxy_stream2xxx` or
+/// `ldap-search-fn`, and some (`lua`, `h350`) carry no id at all.
+fn is_function_section(n: roxmltree::Node) -> bool {
+    if !n.has_tag_name("section") {
+        return false;
+    }
+    if n.attribute("id").is_some_and(|id| id.starts_with("func_")) {
+        return true;
+    }
+    n.parent_element()
+        .filter(|p| p.has_tag_name("section"))
+        .and_then(title_of)
+        .map(collapsed_text)
+        .is_some_and(|t| t == "Exported Functions")
+}
+
+/// The functions one docbook section documents, each with its
+/// signature.
+///
+/// The names come from the title, which is what a configuration
+/// writes: one `<function>` element per function, or the title text
+/// itself where there is none. The section's `id` is a fallback only.
+/// `func_get_dialog_by_val` documents `get_dialogs_by_val`, and taken
+/// from the id the catalogue offered a function no configuration can
+/// call; a title holding two `<function>` elements (`uac_replace_from`,
+/// `uac_replace_to`) documents both.
+fn documented_functions(section: roxmltree::Node) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let Some(title) = title_of(section) else {
+        return out;
+    };
+    let elements: Vec<String> = title
+        .children()
+        .filter(|c| c.has_tag_name("function"))
+        .map(collapsed_text)
+        .collect();
+    let signatures = if elements.is_empty() {
+        vec![collapsed_text(title)]
+    } else {
+        elements
+    };
+    for sig in signatures {
+        for (name, detail) in function_signatures(&sig) {
+            if !out.iter().any(|(n, _)| *n == name) {
+                out.push((name, detail));
+            }
+        }
+    }
+    if out.is_empty()
+        && let Some(name) = section
+            .attribute("id")
+            .and_then(|id| id.strip_prefix("func_"))
+    {
+        let signature = section
+            .descendants()
+            .find(|c| c.has_tag_name("function"))
+            .map(collapsed_text)
+            .unwrap_or_default();
+        out.push((name.to_string(), signature));
+    }
+    out
 }
 
 /// Skip ASCII whitespace in place.
@@ -578,6 +649,76 @@ fn param_names(heading: &str) -> Vec<String> {
     }
 }
 
+/// The functions one heading documents, each with its own signature.
+///
+/// `uac` writes `uac_replace_from([display],uri) uac_replace_to([display],uri)`
+/// under one heading, and `rtpproxy` separates its pair with a comma.
+/// A function is an identifier followed by `(` OUTSIDE any
+/// parentheses, so `json_link($json(dest_id), $json(source_id))` is
+/// one function, and a name written twice — `record_route() and
+/// record_route(string)` — is one entry. A heading naming one function
+/// keeps the whole heading as its signature, as it always has.
+fn function_signatures(heading: &str) -> Vec<(String, String)> {
+    let b = heading.as_bytes();
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut depth = 0usize;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            c if depth == 0 && (c.is_ascii_alphabetic() || c == b'_') => {
+                let s = i;
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                    i += 1;
+                }
+                // `fr_timeout (integer)` style: blanks may sit between
+                // the name and its parenthesis
+                let mut k = i;
+                while k < b.len() && (b[k] == b' ' || b[k] == b'\t') {
+                    k += 1;
+                }
+                if b.get(k) == Some(&b'(') && (s == 0 || b[s - 1] != b'$') {
+                    // the signature runs to the matching `)`
+                    let mut d = 0usize;
+                    let mut e = k;
+                    while e < b.len() {
+                        match b[e] {
+                            b'(' => d += 1,
+                            b')' => {
+                                d -= 1;
+                                if d == 0 {
+                                    e += 1;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                        e += 1;
+                    }
+                    let name = heading[s..i].to_string();
+                    if !out.iter().any(|(n, _)| *n == name) {
+                        out.push((name, heading[s..e].to_string()));
+                    }
+                }
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if out.len() == 1 {
+        out[0].1 = heading.to_string();
+    }
+    out
+}
+
+/// Whether `s` is a name a configuration can call.
+fn is_identifier(s: &str) -> bool {
+    s.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// Parse a 4.x-style `modules/<name>/README.md` (markdown docs).
 ///
 /// Recognizes `### Exported Parameters` / `### Exported Functions`
@@ -615,8 +756,8 @@ pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, String> {
     /// everything but the name.
     struct Pending {
         is_param: bool,
-        names: Vec<String>,
-        detail: String,
+        /// each name with its own signature or type
+        items: Vec<(String, String)>,
         lines: Vec<String>,
         /// the first paragraph is the summary; the rest is skipped
         finished: bool,
@@ -632,10 +773,10 @@ pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, String> {
                     .collect::<Vec<_>>()
                     .join(" "),
             );
-            for name in p.names {
+            for (name, detail) in p.items {
                 let item = Item {
                     name,
-                    detail: p.detail.clone(),
+                    detail,
                     doc: doc.clone(),
                 };
                 if p.is_param {
@@ -692,23 +833,25 @@ pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, String> {
                     };
                     cur = Some(Pending {
                         is_param: true,
-                        names: param_names(name),
-                        detail,
+                        items: param_names(name)
+                            .into_iter()
+                            .map(|n| (n, detail.clone()))
+                            .collect(),
                         lines: Vec::new(),
                         finished: false,
                     });
                 }
                 Section::Functions => {
-                    let name = heading
-                        .split('(')
-                        .next()
-                        .unwrap_or(heading)
-                        .trim()
-                        .to_string();
-                    cur = Some(Pending {
+                    let mut items = function_signatures(heading);
+                    // a function written without its parentheses is
+                    // still a function; `Exported Events` under the
+                    // functions chapter (janus, rr) is not
+                    if items.is_empty() && is_identifier(heading) {
+                        items.push((heading.to_string(), heading.to_string()));
+                    }
+                    cur = (!items.is_empty()).then(|| Pending {
                         is_param: false,
-                        names: vec![name],
-                        detail: heading.to_string(),
+                        items,
                         lines: Vec::new(),
                         finished: false,
                     });

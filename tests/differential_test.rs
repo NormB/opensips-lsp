@@ -265,3 +265,276 @@ fn the_catalogue_contains_every_parameter_the_readmes_set() {
         not_exported.join("\n")
     );
 }
+
+/// Every function name that appears at the top level of a heading,
+/// such as `uac_replace_from([display],uri) uac_replace_to([display],uri)`:
+/// an identifier followed by `(` outside any parentheses.
+fn signature_names(heading: &str) -> Vec<String> {
+    let b = heading.as_bytes();
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'(' => depth += 1,
+            b')' => depth = depth.saturating_sub(1),
+            c if depth == 0 && (c.is_ascii_alphabetic() || c == b'_') => {
+                let s = i;
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                    i += 1;
+                }
+                if b.get(i) == Some(&b'(') && (s == 0 || b[s - 1] != b'$') {
+                    let name = heading[s..i].to_string();
+                    if !out.contains(&name) {
+                        out.push(name);
+                    }
+                }
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The functions a module's "Exported Functions" chapter names, read
+/// from the source `harvest_tree` reads: `README.md` when it has the
+/// chapter, the docbook admin guide otherwise.
+fn documented_functions(dir: &std::path::Path, module: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Ok(md) = std::fs::read_to_string(dir.join("README.md")) {
+        let (mut inside, mut fence) = (false, false);
+        for line in md.lines() {
+            let t = line.trim_start();
+            if t.starts_with("```") || t.starts_with("~~~") {
+                fence = !fence;
+                continue;
+            }
+            if fence || !line.starts_with('#') {
+                continue;
+            }
+            let level = line.bytes().take_while(|&c| c == b'#').count();
+            let title = line[level..].trim();
+            if title == "Exported Functions" {
+                inside = true;
+            } else if level <= 3 {
+                inside = false;
+            } else if inside && level == 4 {
+                out.extend(signature_names(title));
+            }
+        }
+        if !out.is_empty() {
+            return out;
+        }
+    }
+    let Ok(xml) = std::fs::read_to_string(dir.join("doc").join(format!("{module}_admin.xml")))
+    else {
+        return out;
+    };
+    // entities are external to the file; their text is irrelevant here
+    let xml = regex::Regex::new(r"&[A-Za-z0-9_.-]+;")
+        .unwrap()
+        .replace_all(&xml, "X");
+    let xml = regex::Regex::new(r"(?s)<!DOCTYPE.*?\]>|<!DOCTYPE[^>]*>")
+        .unwrap()
+        .replace_all(&xml, "");
+    let Ok(doc) = roxmltree::Document::parse(&xml) else {
+        return out;
+    };
+    fn text(n: roxmltree::Node) -> String {
+        n.descendants()
+            .filter(|d| d.is_text())
+            .filter_map(|d| d.text())
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+    fn title_of<'a, 'i>(n: roxmltree::Node<'a, 'i>) -> Option<roxmltree::Node<'a, 'i>> {
+        n.children().find(|c| c.has_tag_name("title"))
+    }
+    for chapter in doc.descendants().filter(|n| n.has_tag_name("section")) {
+        if title_of(chapter).map(text).as_deref() != Some("Exported Functions") {
+            continue;
+        }
+        for s in chapter.children().filter(|c| c.has_tag_name("section")) {
+            if let Some(t) = title_of(s) {
+                out.extend(signature_names(&text(t)));
+            }
+        }
+    }
+    out
+}
+
+/// Every function a module's own "Exported Functions" chapter
+/// documents is in the catalogue, for every pinned release.
+///
+/// The oracle reads the chapter independently of the harvester and
+/// keeps only names the module's C sources contain as a string
+/// literal, which is how a `cmd_export_t` entry names a function: a
+/// name the documentation invents is not held against the catalogue.
+/// It found 29 documented functions missing across the three
+/// releases — two signatures under one heading, and docbook sections
+/// whose id does not start with `func_`.
+#[test]
+fn the_catalogue_contains_every_function_the_docs_document() {
+    let raw = common::required_env("OPENSIPS_LSP_TEST_TREES");
+    let mut missing: Vec<String> = Vec::new();
+    let mut checked = 0usize;
+    for pair in raw.split(',') {
+        let (version, tree) = pair.split_once('=').expect("<version>=<tree>");
+        let root = std::path::Path::new(tree);
+        let catalogue = opensips_lsp::catalog::builtin_modules_at(version)
+            .unwrap_or_else(|| panic!("{version} is a pinned release"));
+        let harvested = opensips_lsp::catalog::harvest_tree(root);
+        let mut dirs: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("modules"))
+            .expect("an OpenSIPS source tree has modules/")
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        dirs.sort();
+        for dir in dirs {
+            let module = dir.file_name().unwrap().to_string_lossy().into_owned();
+            let mut c_text = String::new();
+            for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.extension().is_some_and(|x| x == "c" || x == "h") {
+                    c_text.push_str(&std::fs::read_to_string(&p).unwrap_or_default());
+                }
+            }
+            for f in documented_functions(&dir, &module) {
+                if !c_text.contains(&format!("\"{f}\"")) {
+                    continue;
+                }
+                checked += 1;
+                for (what, mods) in [
+                    ("vendored catalogue", &catalogue.modules),
+                    ("harvest of the tree", &harvested),
+                ] {
+                    let found = mods
+                        .iter()
+                        .find(|m| m.name == module)
+                        .is_some_and(|m| m.functions.iter().any(|x| x.name == f));
+                    if !found {
+                        missing.push(format!("{version} {what}: {module}::{f}"));
+                    }
+                }
+            }
+        }
+    }
+    // POSITIVE CONTROL: an oracle that stopped reading the docs would
+    // pass having checked nothing
+    assert!(checked > 1400, "suspiciously few functions read: {checked}");
+    assert!(
+        missing.is_empty(),
+        "{} documented, exported function(s) absent:\n{}",
+        missing.len(),
+        missing.join("\n")
+    );
+}
+
+/// The other direction: every function in the catalogue is one its
+/// module's C sources name, for every pinned release.
+///
+/// A docbook section's `id` is not always the function's name:
+/// `func_get_dialog_by_val` documents `get_dialogs_by_val`, and
+/// `func_call_blind_transfer` documents `call_transfer`. Harvested from
+/// the id, the catalogue offered completions no configuration can
+/// call. The name a caller writes is the one in the `<function>`
+/// element of the section's title.
+/// Upstream documentation errors: a function the docs name and the C
+/// sources do not. Each is listed with its evidence, and each must
+/// still fire: an entry that stopped firing would hide the next one.
+const UPSTREAM_DOC_ERRORS: &[(&str, &str, &str, &str)] = &[
+    (
+        "3.6.9",
+        "janus",
+        "janus_send_requeest",
+        "heading typo; janus_mod.c exports janus_send_request, as the README's own example writes it",
+    ),
+    (
+        "4.0.2",
+        "janus",
+        "janus_send_requeest",
+        "heading typo; janus_mod.c exports janus_send_request, as the README's own example writes it",
+    ),
+    (
+        "3.6.9",
+        "event_sqs",
+        "sqs_publish_message",
+        "documented name; event_sqs.c exports the function as sqs_send_message",
+    ),
+    (
+        "4.0.2",
+        "event_sqs",
+        "sqs_publish_message",
+        "documented name; event_sqs.c exports the function as sqs_send_message",
+    ),
+    (
+        "4.0.2",
+        "presence_callinfo",
+        "sca_set_calling_line",
+        "still documented; presence_callinfo.c exports only sca_set_called_line",
+    ),
+];
+
+#[test]
+fn no_catalogue_function_is_absent_from_its_modules_c_sources() {
+    let raw = common::required_env("OPENSIPS_LSP_TEST_TREES");
+    let mut phantom: Vec<String> = Vec::new();
+    let mut checked = 0usize;
+    for pair in raw.split(',') {
+        let (version, tree) = pair.split_once('=').expect("<version>=<tree>");
+        let root = std::path::Path::new(tree);
+        let catalogue = opensips_lsp::catalog::builtin_modules_at(version)
+            .unwrap_or_else(|| panic!("{version} is a pinned release"));
+        // the vendored catalogue, and what a configured tree yields at
+        // runtime: the same harvester, read at two different times
+        let harvested = opensips_lsp::catalog::harvest_tree(root);
+        let mut found: Vec<String> = Vec::new();
+        for (what, mods) in [("", &catalogue.modules), (" (harvest)", &harvested)] {
+            for m in mods {
+                let dir = root.join("modules").join(&m.name);
+                let mut c_text = String::new();
+                for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                    let p = e.path();
+                    if p.extension().is_some_and(|x| x == "c" || x == "h") {
+                        c_text.push_str(&std::fs::read_to_string(&p).unwrap_or_default());
+                    }
+                }
+                if c_text.is_empty() {
+                    continue;
+                }
+                for f in &m.functions {
+                    checked += 1;
+                    if !c_text.contains(&format!("\"{}\"", f.name)) {
+                        found.push(format!("{version}{what} {}::{}", m.name, f.name));
+                    }
+                }
+            }
+        }
+        for (v, module, f, why) in UPSTREAM_DOC_ERRORS {
+            if *v != version {
+                continue;
+            }
+            for what in ["", " (harvest)"] {
+                let entry = format!("{version}{what} {module}::{f}");
+                assert!(
+                    found.contains(&entry),
+                    "the documented exception {entry} ({why}) no longer fires: \
+                     remove it from UPSTREAM_DOC_ERRORS"
+                );
+                found.retain(|p| *p != entry);
+            }
+        }
+        phantom.extend(found);
+    }
+    assert!(checked > 2800, "suspiciously few functions read: {checked}");
+    assert!(
+        phantom.is_empty(),
+        "{} catalogue function(s) the module's C sources never name:\n{}",
+        phantom.len(),
+        phantom.join("\n")
+    );
+}

@@ -258,3 +258,74 @@ fn items_under_a_deeper_section_heading_are_that_sections() {
     assert_eq!(params, vec!["cachedb_url"], "{params:?}");
     assert_eq!(funcs, vec!["cache_query"], "{funcs:?}");
 }
+
+/// One heading that documents two functions.
+///
+/// `uac` writes `#### uac_replace_from([display],uri)
+/// uac_replace_to([display],uri)` and `rtpproxy` separates its pair
+/// with a comma. Only the first name was harvested, so
+/// `uac_replace_to`, `uac_restore_to`, `rtpproxy_stream2uas`,
+/// `rtpproxy_stop_stream2uas` and `t_write_unix` had no completion,
+/// hover or signature help, although the C sources export each one.
+#[test]
+fn a_heading_naming_two_functions_documents_both() {
+    let md = "# m\n\n### Exported Functions\n\n\
+              #### uac_replace_from([display],uri) uac_replace_to([display],uri)\n\n\
+              Replace the display name or the URI.\n\n\
+              #### rtpproxy_stream2uac(prompt_name, count[, [set_id][, sock_var]]), rtpproxy_stream2uas(prompt_name, count[, [set_id][, sock_var]])\n\n\
+              Stream a prompt.\n";
+    let m = parse_readme_md("m", md).unwrap();
+    let got: Vec<(&str, &str, &str)> = m
+        .functions
+        .iter()
+        .map(|f| (f.name.as_str(), f.detail.as_str(), f.doc.as_str()))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            (
+                "uac_replace_from",
+                "uac_replace_from([display],uri)",
+                "Replace the display name or the URI."
+            ),
+            (
+                "uac_replace_to",
+                "uac_replace_to([display],uri)",
+                "Replace the display name or the URI."
+            ),
+            (
+                "rtpproxy_stream2uac",
+                "rtpproxy_stream2uac(prompt_name, count[, [set_id][, sock_var]])",
+                "Stream a prompt."
+            ),
+            (
+                "rtpproxy_stream2uas",
+                "rtpproxy_stream2uas(prompt_name, count[, [set_id][, sock_var]])",
+                "Stream a prompt."
+            ),
+        ]
+    );
+}
+
+/// The negative controls: a pseudo-variable in the argument list is
+/// not a second function, and two signatures of ONE function are one
+/// entry, its heading unchanged.
+#[test]
+fn argument_parentheses_and_overloads_are_one_function() {
+    let md = "# m\n\n### Exported Functions\n\n\
+              #### json_link($json(dest_id), $json(source_id))\n\nLink.\n\n\
+              #### record_route() and record_route(string)\n\nAdd a Record-Route.\n";
+    let m = parse_readme_md("m", md).unwrap();
+    let got: Vec<(&str, &str)> = m
+        .functions
+        .iter()
+        .map(|f| (f.name.as_str(), f.detail.as_str()))
+        .collect();
+    assert_eq!(
+        got,
+        vec![
+            ("json_link", "json_link($json(dest_id), $json(source_id))"),
+            ("record_route", "record_route() and record_route(string)"),
+        ]
+    );
+}
