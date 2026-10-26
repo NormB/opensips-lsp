@@ -2,6 +2,51 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.27.0] — 2026-10-26
+
+**Routes defined in a configuration's 65th and later include files are
+found, every function a heading or docbook title documents is in the
+catalog, the outline lists each top-level parameter once, and include
+paths complete.**
+
+- **The include closure follows as many files and levels as a real
+  configuration uses.** It stopped at 64 files and 8 levels, so in a
+  configuration with one include per carrier, every `route()` call to a
+  route defined in a later file was reported as "not defined here or in
+  included files", and go to definition returned nothing. It now
+  follows includes 19 levels below the root, the depth OpenSIPS 4.0.2
+  reads (one level deeper fails with "max nested cfg files reached"),
+  and reads up to 500 files, the same bound as the workspace scan.
+  `opensips-lsp check` uses the same closure.
+- **A heading or docbook title that documents two functions adds both
+  to the catalog.** `uac_replace_to`, `uac_restore_to`,
+  `rtpproxy_stream2uas`, `rtpproxy_stop_stream2uas` and `t_write_unix`
+  now complete, hover and show signature help in 3.6.9 and 4.0.2.
+- **The 3.5.9 catalog gains 27 functions and loses 7 names no release
+  exports.** Function sections were read only when their id started
+  with `func_`, which dropped the `h350`, `ldap`, `lua`, `rate_cacher`
+  and `rtpproxy` stream functions, `change_reply_status` and
+  `stir_shaken_disengagement`. Names taken from a section id instead of
+  its title, such as `get_dialog_by_val` for `get_dialogs_by_val` and
+  `call_blind_transfer` for `call_transfer`, are replaced by the names
+  a configuration writes.
+- **`Exported Events` and `Exported Pseudo-Variables` are no longer
+  listed as functions** of the `janus` and `rr` modules.
+- **A top-level parameter after a blank line appears once in the
+  outline.** It was listed twice, the second time with a range that
+  ended on the line above its start, which the LSP specification does
+  not allow.
+- **Inside `include_file "` or `import_file "`, completion lists the
+  directories and the `.cfg`, `.inc` and `.m4` files** in the directory
+  the typed path names so far, relative to the including file. Typing
+  `/` opens the next directory. Keywords and function names were
+  offered there before.
+- **The repository runs CodeQL (Rust, TypeScript and the workflows) and
+  the OpenSSF Scorecard**, pins every GitHub Action to a commit, and
+  gives each workflow a read-only token unless a job needs more.
+- **vscode-languageclient moves from 10.1.2 to 11.0.0**, and tokio to
+  1.54.1 with the other semver-compatible crate updates.
+
 ## [0.26.3] — 2026-10-22
 
 **A release with no behavior change: the language server is rebuilt
