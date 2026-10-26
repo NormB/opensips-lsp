@@ -350,3 +350,60 @@ fn check_reads_a_config_that_is_not_utf8() {
     );
     assert_eq!(out.status.code(), Some(0));
 }
+
+/// `check` on a 98-file configuration: one root, one include per
+/// carrier. The routes defined in the 65th and later files were
+/// reported as undefined, because the include closure stopped at 64
+/// files.
+#[test]
+fn check_sees_every_include_of_a_wide_configuration() {
+    let dir = setup("wide");
+    std::fs::create_dir_all(dir.join("inc")).unwrap();
+    const N: usize = 97;
+    let mut root = String::new();
+    for i in 0..N {
+        root.push_str(&format!("include_file \"inc/c{i}.cfg\"\n"));
+        std::fs::write(
+            dir.join(format!("inc/c{i}.cfg")),
+            format!("route[C{i}] {{\n    exit;\n}}\n"),
+        )
+        .unwrap();
+    }
+    root.push_str("route {\n");
+    for i in 0..N {
+        root.push_str(&format!("    route(C{i});\n"));
+    }
+    root.push_str("}\n");
+    let cfg = dir.join("opensips.cfg");
+    std::fs::write(&cfg, &root).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .args(["check", "--strict", "--bin", ""])
+        .arg(&cfg)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(
+        !stdout.contains("is not defined"),
+        "every route is defined in an included file:\n{stdout}"
+    );
+    assert_eq!(out.status.code(), Some(0), "{stdout}");
+
+    // the negative control: a route defined nowhere is still reported
+    root.push_str("route[extra] {\n    route(NOWHERE);\n}\n");
+    std::fs::write(&cfg, &root).unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+        .args(["check", "--bin", ""])
+        .arg(&cfg)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(
+        stdout.contains("route 'NOWHERE' is not defined"),
+        "{stdout}"
+    );
+    assert_eq!(
+        stdout.matches("is not defined").count(),
+        1,
+        "only NOWHERE:\n{stdout}"
+    );
+}

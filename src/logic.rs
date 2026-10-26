@@ -772,9 +772,28 @@ pub fn valid_route_name(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || *c == b'_')
 }
 
-/// Transitive include limits: a hostile config must stay cheap.
-const INCLUDE_MAX_DEPTH: usize = 8;
-const INCLUDE_MAX_FILES: usize = 64;
+/// The most configuration files one analysis reads: the workspace
+/// sweep that builds the include graph, and the include closure of a
+/// single file.
+///
+/// OpenSIPS itself has no file-count limit, so this bound exists for
+/// the editor alone: a hostile tree must stay cheap, and a symlinked
+/// directory that points back at itself gives every include a new name
+/// on each level. It was 64 for the closure, and a 98-file production
+/// configuration, one include per carrier, lost the routes of its last
+/// 34 files: each `route()` call to them was reported as undefined.
+/// One bound for both readers, because a closure larger than the sweep
+/// would see what the include graph cannot.
+pub const MAX_CONFIG_FILES: usize = 500;
+
+/// OpenSIPS's `CFG_MAX_INCLUDE_DEPTH` (`cfg_pp.h`): the include stack,
+/// root included. Measured against the 4.0.2 binary: a file nested 19
+/// includes below the root is read, and one more fails with "max nested
+/// cfg files reached". The closure followed only 8.
+const CFG_MAX_INCLUDE_DEPTH: usize = 20;
+
+/// The deepest nesting below the root the closure follows.
+const INCLUDE_MAX_DEPTH: usize = CFG_MAX_INCLUDE_DEPTH - 1;
 
 /// Fold `.` and `..` components textually.
 ///
@@ -1111,7 +1130,7 @@ pub fn include_closure(
     while let Some((path, text, depth)) = queue.pop() {
         if depth < INCLUDE_MAX_DEPTH {
             for inc in analyze::includes(&text) {
-                if out.len() + queue.len() + 1 >= INCLUDE_MAX_FILES {
+                if out.len() + queue.len() + 1 >= MAX_CONFIG_FILES {
                     break;
                 }
                 let target = resolve_include(&path, &inc.name);

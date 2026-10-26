@@ -303,3 +303,47 @@ fn include_file_errors_surface_on_the_root_document() {
     assert_eq!(ds[0]["range"]["start"]["line"], 0);
     child.kill().ok();
 }
+
+/// Go-to-definition on a route defined in the 91st of 97 includes.
+///
+/// The include closure stopped at 64 files, so the editor answered
+/// `null` here and listed the call as undefined.
+#[test]
+fn definition_reaches_a_route_in_the_91st_include() {
+    let base_scratch = common::Scratch::new("oslsp-inc-wide");
+    let base = base_scratch.path().to_path_buf();
+    std::fs::create_dir_all(base.join("inc")).unwrap();
+    const N: usize = 97;
+    let mut text = String::new();
+    for i in 0..N {
+        text.push_str(&format!("include_file \"inc/c{i}.cfg\"\n"));
+        std::fs::write(
+            base.join(format!("inc/c{i}.cfg")),
+            format!("route[C{i}] {{\n    exit;\n}}\n"),
+        )
+        .unwrap();
+    }
+    // line N + 1 is the call
+    text.push_str("route {\n    route(C90);\n}\n");
+    let main = base.join("opensips.cfg");
+    std::fs::write(&main, &text).unwrap();
+    let uri = format!("file://{}", main.display());
+    let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{
+        "textDocument":{"uri":uri},"position":{"line":N + 1,"character":11}}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "definition");
+    let target = v["result"]["uri"]
+        .as_str()
+        .unwrap_or_else(|| panic!("a cross-file location: {v}"));
+    assert!(target.ends_with("inc/c90.cfg"), "{v}");
+    let _ = child.kill();
+}
+

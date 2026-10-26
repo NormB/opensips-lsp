@@ -453,29 +453,34 @@ fn call_hierarchy_from_a_fragment_sees_the_whole_closure() {
 
 /// A fragment the ROOT's closure cannot reach.
 ///
-/// The closure is capped for safety — depth 8, 64 files — and a
-/// deployment with one include per carrier passes 64 without trying.
-/// Past the cap the fragment is not IN the closure built from the
-/// root, and answering from that closure alone drops the fragment's
-/// OWN includes: routes that were in scope before the root was ever
-/// consulted start reading as undefined.  Analysing in the root's
+/// The closure follows includes as deep as OpenSIPS does — 19 levels
+/// below the root — and no further, while the include graph that finds
+/// a fragment's root climbs any number of levels. A fragment past that
+/// depth is therefore not IN the closure built from its root, and
+/// answering from that closure alone drops the fragment's OWN
+/// includes: routes that were in scope before the root was ever
+/// consulted start reading as undefined. Analysing in the root's
 /// context must only ever ADD to what the file could already see.
+///
+/// Depth reaches this branch deterministically; a closure wider than
+/// its file bound would too, but the workspace sweep stops at the same
+/// bound, and which files it reads first is directory order.
 #[test]
 fn a_fragment_outside_the_roots_closure_keeps_its_own_includes() {
-    let base_scratch = common::Scratch::new("frag-wide");
+    let base_scratch = common::Scratch::new("frag-deep");
     let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(&base).unwrap();
-    const N: usize = 90;
-    let mut root = String::from("");
-    for i in 0..N {
-        root.push_str(&format!("include_file \"c{i}.cfg\"\n"));
-    }
-    root.push_str("route[TOP] {\n    exit;\n}\n");
-    std::fs::write(base.join("opensips.cfg"), &root).unwrap();
-    for i in 0..N - 1 {
+    // opensips.cfg -> d1.cfg -> ... -> d20.cfg: d20 is 20 levels down
+    const DEPTH: usize = 20;
+    std::fs::write(
+        base.join("opensips.cfg"),
+        "include_file \"d1.cfg\"\nroute[TOP] {\n    exit;\n}\n",
+    )
+    .unwrap();
+    for i in 1..DEPTH {
         std::fs::write(
-            base.join(format!("c{i}.cfg")),
-            format!("route[C{i}] {{ exit; }}\n"),
+            base.join(format!("d{i}.cfg")),
+            format!("include_file \"d{}.cfg\"\nroute[D{i}] {{ exit; }}\n", i + 1),
         )
         .unwrap();
     }
@@ -484,12 +489,12 @@ fn a_fragment_outside_the_roots_closure_keeps_its_own_includes() {
         "route[OWN_HELPER] {\n    exit;\n}\n",
     )
     .unwrap();
-    // the last sibling is past the cap, and includes a helper of its own
+    // the deepest file is past the closure's depth, and includes a
+    // helper of its own
     let leaf_text = format!(
-        "include_file \"helpers.cfg\"\nroute[C{}] {{\n    route(OWN_HELPER);\n    route(NOWHERE);\n}}\n",
-        N - 1
+        "include_file \"helpers.cfg\"\nroute[D{DEPTH}] {{\n    route(OWN_HELPER);\n    route(NOWHERE);\n}}\n"
     );
-    let leaf = base.join(format!("c{}.cfg", N - 1));
+    let leaf = base.join(format!("d{DEPTH}.cfg"));
     std::fs::write(&leaf, &leaf_text).unwrap();
     let leaf_uri = format!("file://{}", leaf.display());
 
@@ -498,7 +503,7 @@ fn a_fragment_outside_the_roots_closure_keeps_its_own_includes() {
     let v = wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == leaf_uri,
-        "diagnostics on a fragment past the cap",
+        "diagnostics on a fragment past the closure's depth",
     );
     let msgs: Vec<&str> = v["params"]["diagnostics"]
         .as_array()
@@ -509,7 +514,7 @@ fn a_fragment_outside_the_roots_closure_keeps_its_own_includes() {
     assert!(
         !msgs.iter().any(|m| m.contains("OWN_HELPER")),
         "the fragment includes the file defining OWN_HELPER itself; the \
-         root's closure being full must not take that away: {msgs:?}"
+         root's closure stopping short of it must not take that away: {msgs:?}"
     );
     assert!(
         msgs.iter().any(|m| m.contains("NOWHERE")),

@@ -319,8 +319,10 @@ showing, and leaving them up until it is next touched makes the fix
 look like it did not work. A deeper change than one level corrects
 itself on save, through the watched-files path.
 
-The closure itself is bounded too — depth 8, 64 files — and a
-configuration with one include per carrier passes 64 without trying.
+The closure itself is bounded too: it follows includes 19 levels below
+the root, as deep as OpenSIPS reads them (`CFG_MAX_INCLUDE_DEPTH` in
+`cfg_pp.h` is 20 and counts the root), and reads at most 500 files, the
+same bound as the workspace sweep. OpenSIPS has no file-count limit.
 A fragment past the bound is not in the closure built from its root,
 so its OWN closure leads and the root's follows: analysing a file in
 its parent's context must only ever ADD to what that file could
@@ -621,9 +623,9 @@ clients that can't pass options.
   `diagnostics.enable`) still restart the server automatically.
 - Snippet completions and static snippets compose: static snippets
   scaffold blocks, completion snippets fill in calls.
-- Include handling is capped for safety: depth 8, 64 files, 1 MiB
-  per file (OpenSIPS itself caps includes at depth 20 —
-  `CFG_MAX_INCLUDE_DEPTH` in `cfg_pp.h`). The LSP resolves
+- Include handling is bounded: 19 levels below the root (the depth
+  OpenSIPS itself reads; `CFG_MAX_INCLUDE_DEPTH` in `cfg_pp.h` is 20
+  and counts the root), 500 files, 1 MiB per file. The LSP resolves
   relative include paths against the including file's directory;
   note that at runtime OpenSIPS tries the process working directory
   FIRST and only then the including file's directory — a same-named

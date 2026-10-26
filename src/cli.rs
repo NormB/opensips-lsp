@@ -30,7 +30,7 @@ fn graph_for(files: &[String]) -> logic::IncludeGraph {
             roots.push(dir);
         }
     }
-    let (mut configs, _) = logic::scan_configs(&roots, 500);
+    let (mut configs, _) = logic::scan_configs(&roots, logic::MAX_CONFIG_FILES);
     // and the directories above, without recursing into them: the
     // root that includes `inc/routes.cfg` is almost always the config
     // sitting one level up, and a hook is often handed the fragment

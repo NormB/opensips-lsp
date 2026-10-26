@@ -1375,3 +1375,109 @@ fn a_module_documenting_no_parameters_at_all_stays_silent() {
         "a module with functions but no parameters was read, and exports none"
     );
 }
+
+/// One root, one include per carrier: a real configuration of 98
+/// files, and the route calls in the root reach routes defined in
+/// every one of them.
+///
+/// The closure stopped at 64 files, so the routes defined in the
+/// remaining ones read as undefined: three false "is not defined"
+/// warnings on a working 98-file production tree. OpenSIPS has no
+/// file-count limit; the closure's bound is the same 500 configs the
+/// workspace sweep reads.
+#[test]
+fn a_closure_wider_than_64_files_keeps_every_route() {
+    use std::path::Path;
+    const N: usize = 97;
+    let mut root = String::new();
+    for i in 0..N {
+        root.push_str(&format!("include_file \"inc/c{i}.cfg\"\n"));
+    }
+    root.push_str("route {\n");
+    for i in 0..N {
+        root.push_str(&format!("    route(C{i});\n"));
+    }
+    root.push_str("    route(NOWHERE);\n}\n");
+    let loader = |p: &Path| -> Option<String> {
+        let name = p.to_str()?.strip_prefix("/w/inc/c")?.strip_suffix(".cfg")?;
+        Some(format!("route[C{name}] {{ exit; }}\n"))
+    };
+    let files = include_closure(Path::new("/w/opensips.cfg"), &root, &loader);
+    assert_eq!(files.len(), N + 1, "the root and every include");
+    let ds = analyzer_diagnostics(Path::new("/w/opensips.cfg"), &root, &loader);
+    let msgs: Vec<&str> = ds.iter().map(|d| d.message.as_str()).collect();
+    assert_eq!(
+        msgs,
+        vec!["route 'NOWHERE' is not defined here or in included files"],
+        "only the route that exists nowhere is reported"
+    );
+}
+
+/// A chain of nested includes, built so that each file includes the
+/// next and the last one defines the route the root calls.
+fn include_chain(below_root: usize) -> (String, impl Fn(&std::path::Path) -> Option<String>) {
+    let root = "include_file \"i1.cfg\"\nroute {\n    route(deep);\n}\n".to_string();
+    let loader = move |p: &std::path::Path| -> Option<String> {
+        let n: usize = p
+            .to_str()?
+            .strip_prefix("/w/i")?
+            .strip_suffix(".cfg")?
+            .parse()
+            .ok()?;
+        if n == 0 || n > below_root {
+            return None;
+        }
+        Some(if n == below_root {
+            "route[deep] { exit; }\n".to_string()
+        } else {
+            format!("include_file \"i{}.cfg\"\n", n + 1)
+        })
+    };
+    (root, loader)
+}
+
+/// OpenSIPS 4.0.2 reads a file nested 19 includes below the root;
+/// measured with the real binary, the 20th fails with "max nested cfg
+/// files reached" (`CFG_MAX_INCLUDE_DEPTH` is 20 and counts the root).
+/// The closure followed 8.
+#[test]
+fn includes_nest_as_deep_as_opensips_reads_them() {
+    use std::path::Path;
+    let (root, loader) = include_chain(19);
+    let files = include_closure(Path::new("/w/opensips.cfg"), &root, &loader);
+    assert_eq!(files.len(), 20, "the root and 19 nested files");
+    let ds = analyzer_diagnostics(Path::new("/w/opensips.cfg"), &root, &loader);
+    assert!(ds.is_empty(), "route[deep] is 19 levels down: {ds:?}");
+}
+
+/// The negative control: one level deeper than OpenSIPS reads is not
+/// followed, and the route defined there is reported, as the binary
+/// itself refuses that configuration.
+#[test]
+fn an_include_deeper_than_opensips_reads_is_not_followed() {
+    use std::path::Path;
+    let (root, loader) = include_chain(20);
+    let files = include_closure(Path::new("/w/opensips.cfg"), &root, &loader);
+    assert_eq!(files.len(), 20, "the root and the 19 levels OpenSIPS reads");
+    assert!(
+        !files.iter().any(|(p, _)| p == Path::new("/w/i20.cfg")),
+        "the 20th nested file is past the limit"
+    );
+    let ds = analyzer_diagnostics(Path::new("/w/opensips.cfg"), &root, &loader);
+    assert_eq!(ds.len(), 1, "{ds:?}");
+    assert!(ds[0].message.contains("'deep'"), "{ds:?}");
+}
+
+/// Every file names three more under new spellings, as a directory
+/// symlink that points back at itself allows: 3^19 distinct names.
+/// The closure must stay bounded, at the same 500 files the workspace
+/// sweep reads.
+#[test]
+fn the_closure_stays_bounded_when_every_include_has_a_new_name() {
+    use std::path::Path;
+    let text = "include_file \"d/a.cfg\"\ninclude_file \"e/a.cfg\"\ninclude_file \"f/a.cfg\"\n";
+    let loader = |_: &Path| -> Option<String> { Some(text.to_string()) };
+    let files = include_closure(Path::new("/w/a.cfg"), text, &loader);
+    assert_eq!(files.len(), 500);
+}
+
