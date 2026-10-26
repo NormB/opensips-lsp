@@ -176,7 +176,7 @@
     "test": "node test/association.test.js && node test/lifecycle.test.js && node test/settings.test.js"
   },
   "dependencies": {
-    "vscode-languageclient": "^10.1.2"
+    "vscode-languageclient": "^11.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
