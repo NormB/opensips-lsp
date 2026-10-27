@@ -52,3 +52,20 @@ When a new upstream OpenSIPS release lands, re-run the full audit:
 docs claims vs the new binary, grammar assumptions vs the new
 cfg.y/cfg.lex, and the differential gates against the new tree —
 the ground truth moves.
+
+## Reporting bugs
+
+Report a bug or ask for a feature with the issue forms at
+<https://github.com/NormB/opensips-lsp/issues/new/choose>. The "Bug report"
+form asks what happened, a minimal `opensips.cfg` or the steps that show it,
+your editor and LSP client, and the opensips-lsp and OpenSIPS versions; remove real
+addresses, domains and credentials from the configuration first. The
+"Feature request" form asks what problem the change would solve. Write
+issues in English. Every report is public and searchable at
+<https://github.com/NormB/opensips-lsp/issues>.
+
+Do not report a vulnerability in a public issue. Use GitHub's private
+vulnerability reporting at
+<https://github.com/NormB/opensips-lsp/security/advisories/new>;
+[SECURITY.md](SECURITY.md) says what is in scope and how soon a report
+is answered.
