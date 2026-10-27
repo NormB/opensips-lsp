@@ -1197,21 +1197,38 @@ pub fn include_closure(
     root_text: &str,
     loader: &dyn Fn(&std::path::Path) -> Option<String>,
 ) -> Vec<(std::path::PathBuf, String)> {
+    include_closure_bounded(root_path, root_text, loader).0
+}
+
+/// [`include_closure`], and whether [`MAX_CONFIG_FILES`] left out a
+/// file it would otherwise have read.
+pub fn include_closure_bounded(
+    root_path: &std::path::Path,
+    root_text: &str,
+    loader: &dyn Fn(&std::path::Path) -> Option<String>,
+) -> (Vec<(std::path::PathBuf, String)>, bool) {
     let mut out: Vec<(std::path::PathBuf, String)> = Vec::new();
     let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
     let mut queue: Vec<(std::path::PathBuf, String, usize)> =
         vec![(root_path.to_path_buf(), root_text.to_string(), 0)];
     seen.insert(root_path.to_path_buf());
+    let mut truncated = false;
     while let Some((path, text, depth)) = queue.pop() {
         if depth < INCLUDE_MAX_DEPTH {
             for inc in analyze::includes(&text) {
-                if out.len() + queue.len() + 1 >= MAX_CONFIG_FILES {
-                    break;
-                }
                 let target = resolve_include(&path, &inc.name);
-                if !seen.insert(target.clone()) {
+                if seen.contains(&target) {
                     continue;
                 }
+                if out.len() + queue.len() + 1 >= MAX_CONFIG_FILES {
+                    // full: an unread file this names is left out, which
+                    // is only known once it is known to exist
+                    if !truncated && loader(&target).is_some() {
+                        truncated = true;
+                    }
+                    continue;
+                }
+                seen.insert(target.clone());
                 if let Some(t) = loader(&target) {
                     queue.push((target, t, depth + 1));
                 }
@@ -1225,7 +1242,23 @@ pub fn include_closure(
             .cmp(&(b.0 != *root_path))
             .then(a.0.cmp(&b.0))
     });
-    out
+    (out, truncated)
+}
+
+/// The warning a document carries when its include closure stopped at
+/// [`MAX_CONFIG_FILES`]: what was not read cannot be checked, and a
+/// route defined only there reads as undefined.
+pub fn closure_bound_diagnostic() -> AnalyzerDiag {
+    AnalyzerDiag {
+        line: 0,
+        col_start: 0,
+        col_end: 0,
+        message: format!(
+            "the include closure stopped at {MAX_CONFIG_FILES} files: files it includes \
+             past that bound are not read, and a route defined only in them is \
+             reported as undefined"
+        ),
+    }
 }
 
 /// Module names loaded anywhere in the closure, deduplicated.

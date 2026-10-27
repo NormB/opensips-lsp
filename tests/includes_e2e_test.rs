@@ -387,3 +387,48 @@ fn include_paths_complete_from_the_including_files_directory() {
     assert_eq!(globals["textEdit"]["newText"], "globals.inc");
     let _ = child.kill();
 }
+
+/// The editor shows the same warning: a root whose include closure
+/// stopped at the 500-file bound carries it on its first line.
+#[test]
+fn a_root_whose_closure_stops_at_the_bound_is_told_so() {
+    let base_scratch = common::Scratch::new("oslsp-inc-bound");
+    let base = base_scratch.path().to_path_buf();
+    std::fs::create_dir_all(base.join("inc")).unwrap();
+    let mut text = String::new();
+    for i in 0..500 {
+        text.push_str(&format!("include_file \"inc/c{i}.cfg\"\n"));
+        std::fs::write(
+            base.join(format!("inc/c{i}.cfg")),
+            "route[x] {\n    exit;\n}\n",
+        )
+        .unwrap();
+    }
+    let main = base.join("opensips.cfg");
+    std::fs::write(&main, &text).unwrap();
+    let uri = format!("file://{}", main.display());
+    let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
+        "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
+    );
+    let v = wait_for(
+        &rx,
+        |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == uri,
+        "diagnostics on the root",
+    );
+    let hit = v["params"]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| {
+            d["message"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("the include closure stopped at 500 files"))
+        })
+        .cloned();
+    let d = hit.unwrap_or_else(|| panic!("no bound warning: {v}"));
+    assert_eq!(d["range"]["start"]["line"], 0, "{d}");
+    let _ = child.kill();
+}

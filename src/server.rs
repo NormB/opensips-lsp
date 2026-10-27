@@ -235,18 +235,30 @@ impl State {
         text: &str,
         loader: &dyn Fn(&std::path::Path) -> Option<String>,
     ) -> Vec<(std::path::PathBuf, String)> {
-        let mut files = match root.and_then(|r| loader(r).map(|t| (r.to_path_buf(), t))) {
-            Some((r, rt)) => logic::include_closure(&r, &rt, loader),
-            // no root, or a root that has gone: the document's own
-            // closure is the best context there is
-            None => logic::include_closure(path, text, loader),
-        };
+        Self::closure_rooted_at_bounded(root, path, text, loader).0
+    }
+
+    /// [`Self::closure_rooted_at`], and whether the file bound left a
+    /// file out of it.
+    fn closure_rooted_at_bounded(
+        root: Option<&std::path::Path>,
+        path: &std::path::Path,
+        text: &str,
+        loader: &dyn Fn(&std::path::Path) -> Option<String>,
+    ) -> (Vec<(std::path::PathBuf, String)>, bool) {
+        let (mut files, mut truncated) =
+            match root.and_then(|r| loader(r).map(|t| (r.to_path_buf(), t))) {
+                Some((r, rt)) => logic::include_closure_bounded(&r, &rt, loader),
+                // no root, or a root that has gone: the document's own
+                // closure is the best context there is
+                None => logic::include_closure_bounded(path, text, loader),
+            };
         match files.iter().position(|(p, _)| p == path) {
             Some(i) => {
                 files[i].1 = text.to_string();
                 let own = files.remove(i);
                 files.insert(0, own);
-                files
+                (files, truncated)
             }
             // The document is not IN the closure built from its root:
             // the closure stops at the depth OpenSIPS reads (19 levels
@@ -258,13 +270,15 @@ impl State {
             // context must only ADD to what the file could already
             // see, so its own closure leads and the root's follows.
             None => {
-                let mut merged = logic::include_closure(path, text, loader);
+                let (mut merged, own_truncated) =
+                    logic::include_closure_bounded(path, text, loader);
+                truncated |= own_truncated;
                 for (p, t) in files {
                     if !merged.iter().any(|(q, _)| *q == p) {
                         merged.push((p, t));
                     }
                 }
-                merged
+                (merged, truncated)
             }
         }
     }
@@ -272,12 +286,16 @@ impl State {
     /// Analyzer diagnostics for `text`, mapped to LSP (UTF-16) ranges.
     fn analyzer_lsp_diags(
         files: &[(std::path::PathBuf, String)],
+        truncated: bool,
         path: &std::path::Path,
         text: &str,
         cat: &[catalog::ModuleDoc],
         origin: &catalog::CatalogOrigin,
     ) -> Vec<Diagnostic> {
         let mut all = logic::analyzer_diagnostics_in_closure(files, path, text);
+        if truncated {
+            all.insert(0, logic::closure_bound_diagnostic());
+        }
         all.extend(logic::catalog_diagnostics(cat, origin, text));
         let lines = Self::lines_of(text);
         all.into_iter()
@@ -347,9 +365,11 @@ impl State {
         {
             let loader = Self::make_loader(open);
             let cat = self.catalog.read().unwrap().clone();
-            let files = Self::closure_rooted_at(root, &path, text, &loader);
+            let (files, truncated) = Self::closure_rooted_at_bounded(root, &path, text, &loader);
             let origin = self.catalog_origin.read().unwrap().clone();
-            merged.extend(Self::analyzer_lsp_diags(&files, &path, text, &cat, &origin));
+            merged.extend(Self::analyzer_lsp_diags(
+                &files, truncated, &path, text, &cat, &origin,
+            ));
         }
         merged.truncate(cap.max(1));
         merged

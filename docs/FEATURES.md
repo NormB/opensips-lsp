@@ -324,6 +324,10 @@ The closure itself is bounded too: it follows includes 19 levels below
 the root, as deep as OpenSIPS reads them (`CFG_MAX_INCLUDE_DEPTH` in
 `cfg_pp.h` is 20 and counts the root), and reads at most 500 files, the
 same bound as the workspace sweep. OpenSIPS has no file-count limit.
+When the bound leaves out a file the configuration includes, the file
+being analyzed carries a warning on its first line, "the include
+closure stopped at 500 files", because a route defined only in a file
+that was not read is reported as undefined.
 A fragment past the bound is not in the closure built from its root,
 so its OWN closure leads and the root's follows: analysing a file in
 its parent's context must only ever ADD to what that file could

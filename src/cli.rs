@@ -160,31 +160,37 @@ pub fn run_check(args: &[String]) -> i32 {
         // parent defines as undefined, and under `--strict` that
         // fails the build for a configuration that is correct.
         let root = graph.analysis_root(path);
-        let closure = match root.as_ref().and_then(|r| disk_loader(r).map(|t| (r, t))) {
+        let (closure, truncated) = match root.as_ref().and_then(|r| disk_loader(r).map(|t| (r, t)))
+        {
             Some((r, rt)) => {
-                let mut files = logic::include_closure(r, &rt, &disk_loader);
+                let (mut files, cut) = logic::include_closure_bounded(r, &rt, &disk_loader);
                 match files.iter().position(|(p, _)| p == path) {
                     Some(i) => {
                         files[i].1 = text.clone();
                         let own = files.remove(i);
                         files.insert(0, own);
-                        files
+                        (files, cut)
                     }
                     // past the closure's bounds: its own context still
                     // counts, the root's is added to it
                     None => {
-                        let mut merged = logic::include_closure(path, &text, &disk_loader);
+                        let (mut merged, own_cut) =
+                            logic::include_closure_bounded(path, &text, &disk_loader);
                         for (p, t) in files {
                             if !merged.iter().any(|(q, _)| *q == p) {
                                 merged.push((p, t));
                             }
                         }
-                        merged
+                        (merged, cut || own_cut)
                     }
                 }
             }
-            None => logic::include_closure(path, &text, &disk_loader),
+            None => logic::include_closure_bounded(path, &text, &disk_loader),
         };
+        if truncated {
+            let d = logic::closure_bound_diagnostic();
+            findings.push((d.line, d.col_start, false, d.message));
+        }
         // fast analyzer pass (warnings)
         for d in logic::analyzer_diagnostics_in_closure(&closure, path, &text) {
             findings.push((d.line, d.col_start, false, d.message));

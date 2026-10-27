@@ -1583,3 +1583,67 @@ fn nothing_but_paths_completes_inside_an_include_path() {
     );
     assert!(got.iter().any(|c| c.label == "r"), "routes still complete");
 }
+
+/// A closure the 500-file bound cut short says so: a hostile or very
+/// large tree is still bounded, and the analysis that follows knows it
+/// is incomplete.
+#[test]
+fn a_closure_cut_short_by_the_file_bound_says_so() {
+    use opensips_lsp::logic::include_closure_bounded;
+    use std::path::Path;
+    let text = "include_file \"d/a.cfg\"\ninclude_file \"e/a.cfg\"\ninclude_file \"f/a.cfg\"\n";
+    let loader = |_: &Path| -> Option<String> { Some(text.to_string()) };
+    let (files, truncated) = include_closure_bounded(Path::new("/w/a.cfg"), text, &loader);
+    assert_eq!(files.len(), 500);
+    assert!(truncated, "files were left out and the closure must say so");
+}
+
+/// The negative control, on both sides of the bound: 500 files in all
+/// is complete, and one more is not.
+#[test]
+fn a_closure_of_exactly_500_files_is_complete_and_501_is_not() {
+    use opensips_lsp::logic::include_closure_bounded;
+    use std::path::Path;
+    let loader = |p: &Path| -> Option<String> {
+        p.to_str()?.strip_prefix("/w/inc/c")?;
+        Some("route[x] { exit; }\n".into())
+    };
+    for (includes, want_len, want_cut) in [(499usize, 500usize, false), (500, 500, true)] {
+        let mut root = String::new();
+        for i in 0..includes {
+            root.push_str(&format!("include_file \"inc/c{i}.cfg\"\n"));
+        }
+        let (files, truncated) =
+            include_closure_bounded(Path::new("/w/opensips.cfg"), &root, &loader);
+        assert_eq!(files.len(), want_len, "{includes} includes");
+        assert_eq!(truncated, want_cut, "{includes} includes");
+    }
+}
+
+/// An include past the bound that names a file which does not exist
+/// leaves nothing out: OpenSIPS itself refuses it, and the closure is
+/// complete without it.
+#[test]
+fn a_missing_file_past_the_bound_is_not_a_file_left_out() {
+    use opensips_lsp::logic::include_closure_bounded;
+    use std::path::Path;
+    let loader = |p: &Path| -> Option<String> {
+        let n: usize = p
+            .to_str()?
+            .strip_prefix("/w/inc/c")?
+            .strip_suffix(".cfg")?
+            .parse()
+            .ok()?;
+        (n < 499).then(|| "route[x] { exit; }\n".to_string())
+    };
+    let mut root = String::new();
+    for i in 0..500 {
+        root.push_str(&format!("include_file \"inc/c{i}.cfg\"\n"));
+    }
+    let (files, truncated) = include_closure_bounded(Path::new("/w/opensips.cfg"), &root, &loader);
+    assert_eq!(files.len(), 500);
+    assert!(
+        !truncated,
+        "c499.cfg does not exist, so nothing was left out"
+    );
+}

@@ -407,3 +407,34 @@ fn check_sees_every_include_of_a_wide_configuration() {
         "only NOWHERE:\n{stdout}"
     );
 }
+
+/// `check` warns when a configuration's include closure stops at the
+/// 500-file bound, on the checked file's first line; at 500 files in
+/// all, nothing is left out and nothing is said.
+#[test]
+fn check_says_when_the_include_closure_stops_at_its_bound() {
+    for (includes, warned) in [(500usize, true), (499, false)] {
+        let dir = setup(&format!("bound-{includes}"));
+        std::fs::create_dir_all(dir.join("inc")).unwrap();
+        let mut root = String::new();
+        for i in 0..includes {
+            root.push_str(&format!("include_file \"inc/c{i}.cfg\"\n"));
+            std::fs::write(
+                dir.join(format!("inc/c{i}.cfg")),
+                "route[x] {\n    exit;\n}\n",
+            )
+            .unwrap();
+        }
+        let cfg = dir.join("opensips.cfg");
+        std::fs::write(&cfg, &root).unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .args(["check", "--bin", ""])
+            .arg(&cfg)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let said =
+            stdout.contains("opensips.cfg:1:1: warning: the include closure stopped at 500 files");
+        assert_eq!(said, warned, "{includes} includes:\n{stdout}");
+    }
+}
