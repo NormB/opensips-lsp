@@ -121,12 +121,12 @@
   "static_analysis_fixed_justification": "CodeQL has raised no alert: https://github.com/NormB/opensips-lsp/security/code-scanning?query=tool%3ACodeQL",
   "static_analysis_often_status": "Met",
   "static_analysis_often_justification": "CodeQL runs on every push and pull request and weekly; clippy runs in every CI run: https://github.com/NormB/opensips-lsp/blob/main/.github/workflows/codeql.yml",
-  "dynamic_analysis_status": "Unmet",
-  "dynamic_analysis_justification": "No fuzzer or other dynamic analysis tool runs on opensips-lsp yet; its tests are unit, end-to-end and differential tests against a real OpenSIPS binary.",
-  "dynamic_analysis_unsafe_status": "Unmet",
-  "dynamic_analysis_unsafe_justification": "The Rust server has no unsafe code, but the tree-sitter grammar is C, the hand-written scanner.c and the generated parser.c (https://github.com/NormB/opensips-lsp/tree/main/tree-sitter-opensips/src), and no test runs it under a memory-safety detector such as AddressSanitizer.",
+  "dynamic_analysis_status": "Met",
+  "dynamic_analysis_justification": "AddressSanitizer and UndefinedBehaviorSanitizer run over the tree-sitter grammar's C on every push and pull request, before any release: the grammar-sanitizers CI job (https://github.com/NormB/opensips-lsp/blob/main/scripts/grammar-sanitize.sh) runs the corpus tests and parses every .cfg in the OpenSIPS trees and the fixtures through a sanitized build (https://github.com/NormB/opensips-lsp/actions/runs/40480375554/job/122108875971). The Rust server is not under a dynamic analysis tool.",
+  "dynamic_analysis_unsafe_status": "Met",
+  "dynamic_analysis_unsafe_justification": "The grammar's C, the hand-written scanner.c and the generated parser.c, is built with -fsanitize=address,undefined -fno-omit-frame-pointer and runs the corpus tests and a parse of 125 shipped and fixture .cfg files on every push, failing on any report; the job first proves it fails by planting a one-byte out-of-bounds read and a signed overflow in a copy of scanner.c: https://github.com/NormB/opensips-lsp/actions/runs/40480375554/job/122108875971 . The Rust server has no unsafe code.",
   "dynamic_analysis_enable_assertions_status": "Met",
   "dynamic_analysis_enable_assertions_justification": "cargo test builds the dev profile, with debug assertions and integer-overflow checks on; Cargo.toml sets no profile that turns them off.",
-  "dynamic_analysis_fixed_status": "N/A",
-  "dynamic_analysis_fixed_justification": "No dynamic analysis tool runs on the project yet (see dynamic_analysis), so none has found a vulnerability."
+  "dynamic_analysis_fixed_status": "Met",
+  "dynamic_analysis_fixed_justification": "The AddressSanitizer and UndefinedBehaviorSanitizer job has reported nothing in the grammar, so no finding is left to fix."
 }
