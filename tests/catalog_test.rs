@@ -341,3 +341,56 @@ fn the_title_names_the_function_and_the_id_is_a_fallback() {
     let names: Vec<&str> = m.functions.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, vec!["get_dialogs_by_val", "t_relay"]);
 }
+
+/// A `cmd_export_t` entry whose handler is a documented function's
+/// handler, under a name the docs never use, is that function under a
+/// second name. sipmsgops exports `has_body` and `has_body_part` both
+/// with `has_body_f`, and documents only `has_body_part`.
+#[test]
+fn an_undocumented_export_sharing_a_documented_handler_is_an_alias() {
+    use opensips_lsp::catalog::{Item, function_aliases_from_c};
+    let c = r#"
+static const cmd_export_t cmds[]={
+	{"has_body",         (cmd_function)has_body_f, {
+		{CMD_PARAM_STR|CMD_PARAM_OPT, fixup_mime_type, 0},
+		{0, 0, 0}},
+		REQUEST_ROUTE|ONREPLY_ROUTE},
+	{"has_body_part",    (cmd_function)has_body_f, {
+		{CMD_PARAM_STR|CMD_PARAM_OPT, fixup_mime_type, 0},
+		{0, 0, 0}},
+		REQUEST_ROUTE|ONREPLY_ROUTE},
+	{"is_privacy",       (cmd_function)is_privacy_f, {{0, 0, 0}}, REQUEST_ROUTE},
+	/* {"old_name",      (cmd_function)is_privacy_f, {{0, 0, 0}}, 0}, */
+	{"undocumented",     (cmd_function)other_f, {{0, 0, 0}}, REQUEST_ROUTE},
+	{0,0,{{0,0,0}},0}
+};
+"#;
+    let documented = vec![
+        Item {
+            name: "has_body_part".into(),
+            detail: "has_body_part([mime])".into(),
+            doc: "Check the body part.".into(),
+        },
+        Item {
+            name: "is_privacy".into(),
+            detail: "is_privacy(privacy_type)".into(),
+            doc: "Check Privacy.".into(),
+        },
+    ];
+    let got: Vec<(String, String, String)> = function_aliases_from_c(c, &documented)
+        .into_iter()
+        .map(|i| (i.name, i.detail, i.doc))
+        .collect();
+    // the negative controls: a commented-out entry is not exported, and
+    // an export with a handler of its own is not anybody's alias
+    assert_eq!(
+        got,
+        vec![(
+            "has_body".to_string(),
+            "has_body([mime])".to_string(),
+            "Alias of `has_body_part`: the C sources export both names with the same \
+             handler. Check the body part."
+                .to_string()
+        )]
+    );
+}

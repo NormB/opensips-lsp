@@ -538,3 +538,35 @@ fn no_catalogue_function_is_absent_from_its_modules_c_sources() {
         phantom.join("\n")
     );
 }
+
+/// The aliases the C sources define, read from every pinned tree: in
+/// 3.5.9, 3.6.9 and 4.0.2 the only undocumented export sharing a
+/// documented function's handler is sipmsgops `has_body`
+/// (`has_body_f`, as `has_body_part`). Pinned as a set, so a new alias
+/// upstream, or a reading that finds none, fails here.
+#[test]
+fn the_catalogue_carries_exactly_the_aliases_the_c_sources_define() {
+    let raw = common::required_env("OPENSIPS_LSP_TEST_TREES");
+    for pair in raw.split(',') {
+        let (version, tree) = pair.split_once('=').expect("<version>=<tree>");
+        let vendored = opensips_lsp::catalog::builtin_modules_at(version)
+            .unwrap_or_else(|| panic!("{version} is a pinned release"));
+        let harvested = opensips_lsp::catalog::harvest_tree(std::path::Path::new(tree));
+        for (what, mods) in [("vendored", &vendored.modules), ("harvest", &harvested)] {
+            let aliases: Vec<String> = mods
+                .iter()
+                .flat_map(|m| {
+                    m.functions
+                        .iter()
+                        .filter(|f| f.doc.starts_with("Alias of `"))
+                        .map(move |f| format!("{}::{} {}", m.name, f.name, f.detail))
+                })
+                .collect();
+            assert_eq!(
+                aliases,
+                vec!["sipmsgops::has_body has_body([mime])".to_string()],
+                "{version} {what}"
+            );
+        }
+    }
+}

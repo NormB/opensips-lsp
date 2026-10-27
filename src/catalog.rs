@@ -612,11 +612,67 @@ pub fn harvest_tree(tree_root: &Path) -> Vec<ModuleDoc> {
         };
         if let Some(mut m) = picked {
             reconcile_params_with_c(&mut m, &e.path(), tree_root);
+            reconcile_function_aliases(&mut m, &e.path());
             out.push(m);
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     out
+}
+
+/// Functions a module's C sources export under a second name: an
+/// entry of a `cmd_export_t` table whose handler is the handler of a
+/// documented function, under a name the documentation does not use.
+pub fn function_aliases_from_c(c_src: &str, documented: &[Item]) -> Vec<Item> {
+    static ENTRY: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let entry = ENTRY.get_or_init(|| {
+        regex::Regex::new(
+            r#"\{\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*,\s*\(\s*cmd_function\s*\)\s*&?\s*([A-Za-z_][A-Za-z0-9_]*)"#,
+        )
+        .unwrap()
+    });
+    let src = strip_c_comments(c_src);
+    let exports: Vec<(&str, &str)> = entry
+        .captures_iter(&src)
+        .map(|c| (c.get(1).unwrap().as_str(), c.get(2).unwrap().as_str()))
+        .collect();
+    let mut out: Vec<Item> = Vec::new();
+    for (name, handler) in &exports {
+        if documented.iter().any(|d| d.name == *name) || out.iter().any(|a| a.name == *name) {
+            continue;
+        }
+        let Some(of) = exports
+            .iter()
+            .filter(|(n, h)| h == handler && n != name)
+            .find_map(|(n, _)| documented.iter().find(|d| d.name == *n))
+        else {
+            continue;
+        };
+        let detail = match of.detail.strip_prefix(of.name.as_str()) {
+            Some(rest) => format!("{name}{rest}"),
+            None => name.to_string(),
+        };
+        out.push(Item {
+            name: name.to_string(),
+            detail,
+            doc: format!(
+                "Alias of `{}`: the C sources export both names with the same handler. {}",
+                of.name, of.doc
+            ),
+        });
+    }
+    out
+}
+
+/// Add the aliases a module's C sources define to its functions.
+fn reconcile_function_aliases(doc: &mut ModuleDoc, module_dir: &Path) {
+    let src: String = c_sources(module_dir, false)
+        .iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let aliases = function_aliases_from_c(&src, &doc.functions);
+    doc.functions.extend(aliases);
 }
 
 /// The parameter names one heading documents.
