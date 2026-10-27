@@ -291,3 +291,39 @@ fn dependabot_watches_cargo_npm_and_actions() {
         "the @types/vscode ignore is gone"
     );
 }
+
+/// The registry serves each platform build separately, and they arrive
+/// at different times: after kamailio-lsp 0.19.7 and after opensips-lsp
+/// 0.26.3 every target logged "Published", yet some returned 404 for
+/// the version for up to about an hour. The job waited for the universal build alone, for 30
+/// minutes, so a green job did not show that every target was served,
+/// and a slow index failed a complete publish. It now waits for all
+/// seven, for up to 90 minutes.
+#[test]
+fn openvsx_readiness_waits_for_every_platform_build() {
+    let y = workflow("release.yml").expect("release.yml must exist");
+    let (_, section) = y
+        .split_once("waiting for the registry to serve")
+        .expect("the readiness wait is missing");
+    for target in [
+        "linux-x64",
+        "linux-arm64",
+        "darwin-x64",
+        "darwin-arm64",
+        "win32-x64",
+        "win32-arm64",
+    ] {
+        assert!(
+            section.contains(target),
+            "the readiness wait does not check {target}"
+        );
+    }
+    assert!(
+        section.contains("open-vsx.org/api/$NS/$NAME/$target/$VERSION"),
+        "each platform build is asked for at its own endpoint"
+    );
+    assert!(
+        section.contains("seq 1 270") && section.contains("sleep 20"),
+        "the wait covers 90 minutes (270 polls, 20 s apart)"
+    );
+}

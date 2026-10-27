@@ -205,20 +205,32 @@ jobs:
           done
 
           # Uploaded is not installable.  The registry indexes
-          # asynchronously — minutes, sometimes twenty — and until it
-          # has, `install.sh` and every editor still offer the previous
-          # version.  Wait for the thing users actually see.
+          # asynchronously, and each platform build separately: after
+          # every target logged "Published", some returned 404 for the
+          # version for up to about an hour.  Until a target is served,
+          # `install.sh` and every editor on that platform still offer
+          # the previous version.  Wait for all of them.
           echo "waiting for the registry to serve $NS.$NAME $VERSION"
-          for _ in $(seq 1 90); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' \
-              "https://open-vsx.org/api/$NS/$NAME/$VERSION")
-            if [ "$code" = "200" ]; then
-              echo "visible after $SECONDS seconds"
+          pending="universal linux-x64 linux-arm64 darwin-x64 darwin-arm64 win32-x64 win32-arm64"
+          for _ in $(seq 1 270); do
+            left=""
+            for target in $pending; do
+              if [ "$target" = universal ]; then
+                url="https://open-vsx.org/api/$NS/$NAME/$VERSION"
+              else
+                url="https://open-vsx.org/api/$NS/$NAME/$target/$VERSION"
+              fi
+              code=$(curl -s -o /dev/null -w '%{http_code}' "$url")
+              [ "$code" = "200" ] || left="$left $target"
+            done
+            pending="${left# }"
+            if [ -z "$pending" ]; then
+              echo "every target visible after $SECONDS seconds"
               exit 0
             fi
             sleep 20
           done
-          echo "::error::$VERSION was accepted but is still not served after 30 minutes"
+          echo "::error::$VERSION was accepted but is still not served after 90 minutes for: $pending"
           echo "The GitHub release is complete and the upload was accepted;"
           echo "this is the registry not indexing it.  Check"
           echo "https://open-vsx.org/extension/$NS/$NAME before re-running."
