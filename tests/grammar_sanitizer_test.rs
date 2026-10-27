@@ -49,16 +49,30 @@ fn ci_plants_a_fault_then_checks_the_grammar_under_the_sanitizers() {
         "the planted fault must be caught before the check is trusted"
     );
     let check_line = job[check..].lines().next().unwrap_or("");
-    for input in [
-        "tests/grammar",
-        "tree-sitter-opensips/test",
-        "OPENSIPS_LSP_TEST_TREES",
-    ] {
+    for input in ["tests/grammar", "tree-sitter-opensips/test"] {
         assert!(
             check_line.contains(input),
             "the check does not parse the .cfg files under {input}"
         );
     }
+    // The pinned trees reach the check as one argument each: read from
+    // OPENSIPS_LSP_TEST_TREES into an array in the same step, and passed
+    // quoted. An unquoted `$(...)` there is what actionlint's shellcheck
+    // reports (SC2046), so the form is pinned as well as the input.
+    let step_start = job[..check].rfind("- name:").unwrap_or(0);
+    let step = &job[step_start..];
+    let step = step[1..]
+        .find("\n      - ")
+        .map_or(step, |e| &step[..e + 1]);
+    assert!(
+        step.lines()
+            .any(|l| l.contains("mapfile -t trees") && l.contains("OPENSIPS_LSP_TEST_TREES")),
+        "the check does not parse the .cfg files under OPENSIPS_LSP_TEST_TREES"
+    );
+    assert!(
+        check_line.contains("\"${trees[@]}\""),
+        "the pinned trees are not passed to the check, one argument each"
+    );
     assert!(
         job.contains("run: scripts/proof-env.sh"),
         "the job does not provision the OpenSIPS trees whose .cfg files it parses"

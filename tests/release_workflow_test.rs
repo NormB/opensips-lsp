@@ -383,3 +383,44 @@ fn openvsx_readiness_waits_for_every_platform_build() {
         "the wait covers 90 minutes (270 polls, 20 s apart)"
     );
 }
+
+/// actionlint checks every workflow, shell scripts included through
+/// shellcheck, on every push. It found 13 places in release.yml where
+/// an unquoted expansion would be split or globbed; a gate that reads
+/// the workflows as text cannot see those. The binary is pinned by
+/// version and sha256 so the check is the same on every run, and
+/// shellcheck must be present, because without it actionlint skips the
+/// script checks and passes.
+#[test]
+fn ci_runs_a_pinned_actionlint_over_every_workflow() {
+    let y = workflow("ci.yml").expect("ci.yml must exist");
+    let (_, job) = y
+        .split_once("\n  actionlint:")
+        .expect("ci.yml has an `actionlint` job");
+    let job = job.split("\n  ci-success:").next().unwrap_or(job);
+    assert!(
+        job.contains("actionlint_1.7.12_linux_amd64.tar.gz"),
+        "actionlint is pinned to a release artefact"
+    );
+    let sha = regex::Regex::new(r"[0-9a-f]{64}  actionlint_1\.7\.12_linux_amd64\.tar\.gz").unwrap();
+    assert!(
+        sha.is_match(job) && job.contains("sha256sum -c"),
+        "the artefact's sha256 is pinned and checked"
+    );
+    assert!(
+        job.contains("command -v shellcheck"),
+        "the job fails when shellcheck is missing"
+    );
+    assert!(
+        job.contains("./actionlint -color") || job.contains("./actionlint\n"),
+        "actionlint runs with no file list, so it reads every workflow"
+    );
+    let needs = y
+        .split_once("\n  ci-success:")
+        .and_then(|(_, rest)| rest.lines().find(|l| l.trim_start().starts_with("needs:")))
+        .expect("ci-success has needs");
+    assert!(
+        needs.contains("actionlint"),
+        "CI success waits for actionlint: {needs}"
+    );
+}

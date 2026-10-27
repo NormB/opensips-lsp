@@ -93,11 +93,11 @@ jobs:
           if [ "${{ matrix.os }}" = "windows" ]; then
             # zip: what Windows users (and Explorer) expect
             7z a -tzip \
-              opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-windows.zip \
+              "opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-windows.zip" \
               "./$BINDIR/opensips-lsp.exe" >/dev/null
           else
             tar -C "$BINDIR" -czf \
-              opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-${{ matrix.os }}.tar.gz \
+              "opensips-lsp-${GITHUB_REF_NAME}-${{ matrix.arch }}-${{ matrix.os }}.tar.gz" \
               opensips-lsp
           fi
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -132,23 +132,22 @@ jobs:
           for triple in "linux-x64 x86_64 linux-gnu" "linux-arm64 aarch64 linux-gnu" \
                         "darwin-arm64 aarch64 darwin" "darwin-x64 x86_64 darwin" \
                         "win32-x64 x86_64 windows" "win32-arm64 aarch64 windows"; do
-            set -- $triple
-            target=$1; arch=$2; os=$3
+            read -r target arch os <<<"$triple"
             rm -rf server && mkdir server
             if [ "$os" = "windows" ]; then
               unzip -q -d server \
-                ../dist/opensips-lsp-${GITHUB_REF_NAME}-${arch}-windows.zip
+                "../dist/opensips-lsp-${GITHUB_REF_NAME}-${arch}-windows.zip"
             else
               tar -C server -xzf \
-                ../dist/opensips-lsp-${GITHUB_REF_NAME}-${arch}-${os}.tar.gz
+                "../dist/opensips-lsp-${GITHUB_REF_NAME}-${arch}-${os}.tar.gz"
             fi
             npx --yes @vscode/vsce package --target "$target" --out \
-              opensips-lsp-ext-${GITHUB_REF_NAME}-${target}.vsix
+              "opensips-lsp-ext-${GITHUB_REF_NAME}-${target}.vsix"
           done
           # universal build: no binary, PATH/setting fallback
           rm -rf server
           npx --yes @vscode/vsce package --out \
-            opensips-lsp-ext-${GITHUB_REF_NAME}.vsix
+            "opensips-lsp-ext-${GITHUB_REF_NAME}.vsix"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: vsix
@@ -255,11 +254,11 @@ jobs:
             # rerun: refresh the assets on the existing release
             gh release upload "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" --clobber \
-              opensips-lsp-*.tar.gz opensips-lsp-*.zip *.vsix
+              ./opensips-lsp-*.tar.gz ./opensips-lsp-*.zip ./*.vsix
           else
             gh release create "${GITHUB_REF_NAME}" \
               --repo "${GITHUB_REPOSITORY}" \
               --title "${GITHUB_REF_NAME}" \
               --generate-notes \
-              opensips-lsp-*.tar.gz opensips-lsp-*.zip *.vsix
+              ./opensips-lsp-*.tar.gz ./opensips-lsp-*.zip ./*.vsix
           fi

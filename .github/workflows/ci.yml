@@ -114,7 +114,10 @@ jobs:
       - name: the sanitizers catch a fault planted in a copy of scanner.c
         run: scripts/grammar-sanitize.sh plant tree-sitter-opensips tests/grammar
       - name: corpus tests and every shipped and fixture .cfg under ASan and UBSan
-        run: scripts/grammar-sanitize.sh check tree-sitter-opensips tests/grammar tree-sitter-opensips/test $(echo "$OPENSIPS_LSP_TEST_TREES" | tr ',' '\n' | cut -d= -f2)
+        run: |
+          # one argument per pinned tree: OPENSIPS_LSP_TEST_TREES is <version>=<path>,...
+          mapfile -t trees < <(echo "$OPENSIPS_LSP_TEST_TREES" | tr ',' '\n' | cut -d= -f2)
+          scripts/grammar-sanitize.sh check tree-sitter-opensips tests/grammar tree-sitter-opensips/test "${trees[@]}"
 
   audit:
     name: Advisories (cargo audit)
@@ -152,10 +155,30 @@ jobs:
       # what makes that a fact rather than a hope
       - run: cargo check --all-targets
 
+  actionlint:
+    name: Workflows (actionlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # actionlint checks the `run:` scripts through shellcheck, and
+      # skips those checks, and passes, when shellcheck is missing
+      - name: shellcheck is present
+        run: command -v shellcheck && shellcheck --version
+      - name: install actionlint 1.7.12, pinned by sha256
+        run: |
+          curl -fsSLO https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint_1.7.12_linux_amd64.tar.gz" | sha256sum -c
+          tar xzf actionlint_1.7.12_linux_amd64.tar.gz actionlint
+      # no file list: every workflow under .github/workflows
+      - name: actionlint
+        run: ./actionlint -color
+
   # Aggregate gate for branch protection: one required context.
   ci-success:
     name: CI success
-    needs: [rust, client, grammar, grammar-sanitizers, audit, msrv]
+    needs: [rust, client, grammar, grammar-sanitizers, audit, msrv, actionlint]
     runs-on: ubuntu-latest
     steps:
       - run: echo "all CI jobs green"
