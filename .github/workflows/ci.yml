@@ -90,6 +90,32 @@ jobs:
       - run: npx --yes tree-sitter-cli@0.26 generate
       - run: npx --yes tree-sitter-cli@0.26 test
 
+  grammar-sanitizers:
+    name: tree-sitter grammar under ASan and UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 20
+      - name: build deps for the proof environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bison flex libssl-dev pkg-config
+      - name: provision the OpenSIPS trees whose .cfg files are parsed
+        run: scripts/proof-env.sh
+      # scanner.c and parser.c are C that editors compile and load.  A
+      # check that cannot fail proves nothing, so the job first plants a
+      # one-byte out-of-bounds read and a signed overflow in a copy of
+      # scanner.c and requires each stage to report both.
+      - name: the sanitizers catch a fault planted in a copy of scanner.c
+        run: scripts/grammar-sanitize.sh plant tree-sitter-opensips tests/grammar
+      - name: corpus tests and every shipped and fixture .cfg under ASan and UBSan
+        run: scripts/grammar-sanitize.sh check tree-sitter-opensips tests/grammar tree-sitter-opensips/test $(echo "$OPENSIPS_LSP_TEST_TREES" | tr ',' '\n' | cut -d= -f2)
+
   audit:
     name: Advisories (cargo audit)
     runs-on: ubuntu-latest
@@ -129,7 +155,7 @@ jobs:
   # Aggregate gate for branch protection: one required context.
   ci-success:
     name: CI success
-    needs: [rust, client, grammar, audit, msrv]
+    needs: [rust, client, grammar, grammar-sanitizers, audit, msrv]
     runs-on: ubuntu-latest
     steps:
       - run: echo "all CI jobs green"
