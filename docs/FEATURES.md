@@ -236,6 +236,18 @@ modules stay silent.
 opens the included file (relative paths resolve against the including
 file's directory; links are produced even for not-yet-created files).
 
+#### Renaming an included file
+
+Renaming or moving a file in the editor's explorer rewrites every
+`include_file`/`import_file` path that names it, in every
+configuration of the workspace, before the rename happens
+(`workspace/willRenameFiles`). A relative path stays relative to the
+directory of the file that holds it, and an absolute path stays
+absolute. When the moved file includes other files by relative path,
+those paths are rewritten too, so they still name the same files from
+its new directory. A file that no configuration includes is renamed
+with no edits.
+
 #### An included file opened on its own
 
 A config another config includes is a **fragment**, not a program.

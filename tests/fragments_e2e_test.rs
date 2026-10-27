@@ -2207,3 +2207,80 @@ fn every_setting_behaves_the_same_for_a_fragment() {
     );
     let _ = child.kill();
 }
+
+/// `workspace/willRenameFiles` over stdio: the server advertises it,
+/// answers a rename of an included fragment with the edit to the
+/// including file, and answers an unrelated rename with no edit.
+#[test]
+fn renaming_a_fragment_rewrites_the_include_that_names_it() {
+    let base_scratch = common::Scratch::new("frag-rename");
+    let base = base_scratch.path().to_path_buf();
+    std::fs::create_dir_all(base.join("inc")).unwrap();
+    std::fs::write(
+        base.join("opensips.cfg"),
+        "include_file \"inc/a.cfg\"\nroute { exit; }\n",
+    )
+    .unwrap();
+    std::fs::write(base.join("inc/a.cfg"), "route[A] { exit; }\n").unwrap();
+    std::fs::write(base.join("other.cfg"), "route { exit; }\n").unwrap();
+    let mut child = Server::new(
+        Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
+            .env("OPENSIPS_LSP_BIN", "")
+            .env(
+                "OPENSIPS_LSP_CACHE_DIR",
+                base.join("cache").display().to_string(),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+        &base,
+    );
+    let rx = spawn_reader(&mut child);
+    let mut stdin = child.stdin.take().unwrap();
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+            "capabilities":{"workspace":{"fileOperations":{"willRename":true}}},
+            "initializationOptions":{"opensipsPath": ""},
+            "workspaceFolders": [{"uri": format!("file://{}", base.display()), "name":"w"}]}}),
+    );
+    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    let filters =
+        &init["result"]["capabilities"]["workspace"]["fileOperations"]["willRename"]["filters"];
+    assert!(
+        filters.as_array().is_some_and(|f| !f.is_empty()),
+        "willRename is advertised: {init}"
+    );
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
+    );
+    let root_uri = format!("file://{}", base.join("opensips.cfg").display());
+    let old = format!("file://{}", base.join("inc/a.cfg").display());
+    let new = format!("file://{}", base.join("lib/a.cfg").display());
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"workspace/willRenameFiles","params":{
+            "files":[{"oldUri": old, "newUri": new}]}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 2, "willRenameFiles");
+    let edits = &v["result"]["changes"][root_uri.as_str()];
+    assert_eq!(
+        edits,
+        &serde_json::json!([{"range":{"start":{"line":0,"character":14},"end":{"line":0,"character":23}},"newText":"lib/a.cfg"}]),
+        "{v}"
+    );
+    // the negative control: a file nothing includes
+    let other = format!("file://{}", base.join("other.cfg").display());
+    let renamed = format!("file://{}", base.join("renamed.cfg").display());
+    write_msg(
+        &mut stdin,
+        &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"workspace/willRenameFiles","params":{
+            "files":[{"oldUri": other, "newUri": renamed}]}}),
+    );
+    let v = wait_for(&rx, |v| v["id"] == 3, "willRenameFiles unrelated");
+    assert!(v["result"].is_null(), "no edit for an unrelated file: {v}");
+    let _ = child.kill();
+}

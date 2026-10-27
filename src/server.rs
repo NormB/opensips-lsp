@@ -1355,7 +1355,22 @@ impl LanguageServer for Backend {
                         supported: Some(true),
                         change_notifications: Some(OneOf::Left(true)),
                     }),
-                    file_operations: None,
+                    // renaming a fragment rewrites the includes that
+                    // name it; the include graph decides which files
+                    // those are, so every file rename is asked about
+                    file_operations: Some(WorkspaceFileOperationsServerCapabilities {
+                        will_rename: Some(FileOperationRegistrationOptions {
+                            filters: vec![FileOperationFilter {
+                                scheme: Some("file".to_string()),
+                                pattern: FileOperationPattern {
+                                    glob: "**/*".to_string(),
+                                    matches: Some(FileOperationPatternKind::File),
+                                    options: None,
+                                },
+                            }],
+                        }),
+                        ..Default::default()
+                    }),
                 }),
                 text_document_sync: Some(TextDocumentSyncCapability::Options(
                     TextDocumentSyncOptions {
@@ -2196,6 +2211,61 @@ impl LanguageServer for Backend {
             if !edits.is_empty() {
                 changes.insert(furi, edits);
             }
+        }
+        Ok(Some(WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        }))
+    }
+
+    async fn will_rename_files(&self, p: RenameFilesParams) -> Result<Option<WorkspaceEdit>> {
+        // every configuration the include graph is built from, read the
+        // way the closures read them (open buffers first), plus open
+        // documents outside the workspace
+        let open = self.open_docs_snapshot();
+        let loader = State::make_loader(open.clone());
+        let (paths, _) = self.workspace_configs(logic::MAX_CONFIG_FILES);
+        let mut configs: Vec<(std::path::PathBuf, String)> = paths
+            .into_iter()
+            .filter_map(|p| loader(&p).map(|t| (p, t)))
+            .collect();
+        for (p, t) in open {
+            if !configs.iter().any(|(q, _)| *q == p) {
+                configs.push((p, t));
+            }
+        }
+        let mut changes: std::collections::HashMap<Uri, Vec<TextEdit>> =
+            std::collections::HashMap::new();
+        for f in &p.files {
+            let (Ok(old), Ok(new)) = (f.old_uri.parse::<Uri>(), f.new_uri.parse::<Uri>()) else {
+                continue;
+            };
+            let (Some(old), Some(new)) = (old.to_file_path(), new.to_file_path()) else {
+                continue;
+            };
+            for e in logic::include_rename_edits(&configs, &old, &new) {
+                let Some(text) = configs.iter().find(|(q, _)| *q == e.file).map(|(_, t)| t) else {
+                    continue;
+                };
+                let Some(uri) = Uri::from_file_path(&e.file) else {
+                    continue;
+                };
+                let lines = State::lines_of(text);
+                let lt = State::line_in(&lines, e.line);
+                changes.entry(uri).or_default().push(TextEdit {
+                    range: Range {
+                        start: Position::new(
+                            e.line,
+                            analyze::byte_to_utf16(lt, e.col_start as usize),
+                        ),
+                        end: Position::new(e.line, analyze::byte_to_utf16(lt, e.col_end as usize)),
+                    },
+                    new_text: e.new_text,
+                });
+            }
+        }
+        if changes.is_empty() {
+            return Ok(None);
         }
         Ok(Some(WorkspaceEdit {
             changes: Some(changes),

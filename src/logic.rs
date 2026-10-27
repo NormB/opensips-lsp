@@ -1261,6 +1261,102 @@ pub fn closure_bound_diagnostic() -> AnalyzerDiag {
     }
 }
 
+/// One edit a file rename makes to an include path: in `file`, on
+/// `line`, the path text between byte columns `col_start` and
+/// `col_end` (the quotes excluded) becomes `new_text`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncludeEdit {
+    /// The configuration that holds the directive.
+    pub file: std::path::PathBuf,
+    /// 0-based line of the directive.
+    pub line: u32,
+    /// 0-based byte column where the path starts.
+    pub col_start: u32,
+    /// 0-based byte column just past the path.
+    pub col_end: u32,
+    /// The path to write instead.
+    pub new_text: String,
+}
+
+/// The include-path edits renaming `old` to `new` needs, over `configs`.
+///
+/// An include resolves against the including file's directory, as the
+/// include graph reads it, and is rewritten in the form it was written:
+/// a relative path stays relative to that directory, an absolute one
+/// stays absolute. The renamed file's own relative includes are
+/// rewritten too, so that from its new directory they still name the
+/// files they named before.
+pub fn include_rename_edits(
+    configs: &[(std::path::PathBuf, String)],
+    old: &std::path::Path,
+    new: &std::path::Path,
+) -> Vec<IncludeEdit> {
+    let old = lexically_normal(old);
+    let new = lexically_normal(new);
+    let root = std::path::Path::new("/");
+    let new_dir = new.parent().unwrap_or(root);
+    let mut out = Vec::new();
+    for (path, text) in configs {
+        let here = lexically_normal(path);
+        let moved = here == old;
+        let lines: Vec<&str> = text.split('\n').collect();
+        for inc in analyze::includes(text) {
+            let target = resolve_include(&here, &inc.name);
+            let absolute = std::path::Path::new(&inc.name).is_absolute();
+            let new_text = if target == old {
+                if absolute {
+                    new.display().to_string()
+                } else if moved {
+                    relative_path(new_dir, &new)
+                } else {
+                    relative_path(here.parent().unwrap_or(root), &new)
+                }
+            } else if moved && !absolute {
+                relative_path(new_dir, &target)
+            } else {
+                continue;
+            };
+            if new_text == inc.name {
+                continue;
+            }
+            let Some(line) = lines.get(inc.line as usize) else {
+                continue;
+            };
+            let Some(start) = line
+                .get(inc.col as usize..)
+                .and_then(|s| s.find(inc.name.as_str()))
+                .map(|i| inc.col as usize + i)
+            else {
+                continue;
+            };
+            out.push(IncludeEdit {
+                file: path.clone(),
+                line: inc.line,
+                col_start: start as u32,
+                col_end: (start + inc.name.len()) as u32,
+                new_text,
+            });
+        }
+    }
+    out
+}
+
+/// `to` written relative to the directory `from`, both folded already:
+/// `..` for each component of `from` past the part they share.
+fn relative_path(from: &std::path::Path, to: &std::path::Path) -> String {
+    let a: Vec<_> = from.components().collect();
+    let b: Vec<_> = to.components().collect();
+    let shared = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
+    let mut parts: Vec<String> = Vec::new();
+    for _ in shared..a.len() {
+        parts.push("..".to_string());
+    }
+    for c in &b[shared..] {
+        parts.push(c.as_os_str().to_string_lossy().into_owned());
+    }
+    parts.join("/")
+}
+
 /// Module names loaded anywhere in the closure, deduplicated.
 pub fn loaded_modules_multi(files: &[(std::path::PathBuf, String)]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
