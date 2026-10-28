@@ -329,3 +329,17 @@ fn argument_parentheses_and_overloads_are_one_function() {
         ]
     );
 }
+
+/// A parameter heading that names nothing gives no parameter: an empty
+/// name would be offered as a completion and checked against every
+/// `modparam`. Found by the `readme` fuzz target.
+#[test]
+fn a_parameter_heading_with_no_name_gives_no_parameter() {
+    for heading in ["#### ", "####  ", "#### (integer)", "#### (str)"] {
+        let md =
+            format!("### Exported Parameters\n\n{heading}\n\nText.\n\n#### real (int)\n\nMore.\n");
+        let m = parse_readme_md("x", &md).expect("parses");
+        let names: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["real"], "{heading:?}");
+    }
+}

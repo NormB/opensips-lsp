@@ -394,3 +394,25 @@ static const cmd_export_t cmds[]={
         )]
     );
 }
+
+/// A section whose id names nothing, `param_` or `func_`, gives no item:
+/// an empty name would be offered as a completion. The same cause the
+/// `readme` fuzz target found in the README harvester.
+#[test]
+fn a_docbook_section_whose_id_names_nothing_gives_no_item() {
+    let xml = r#"<chapter>
+<section id="exported_parameters"><title>Exported Parameters</title>
+<section id="param_"><title>(integer)</title><para>Nothing.</para></section>
+<section id="param_real"><title><varname>real</varname> (integer)</title><para>Real.</para></section>
+</section>
+<section id="exported_functions"><title>Exported Functions</title>
+<section id="func_"><title></title><para>Nothing.</para></section>
+<section id="func_go"><title><function>go()</function></title><para>Go.</para></section>
+</section>
+</chapter>"#;
+    let m = parse_admin_xml("x", xml).expect("parses");
+    let params: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
+    let functions: Vec<&str> = m.functions.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(params, ["real"]);
+    assert_eq!(functions, ["go"]);
+}

@@ -128,7 +128,8 @@ pub fn parse_admin_xml(module: &str, xml: &str) -> Result<ModuleDoc, String> {
         let Some(id) = section.attribute("id") else {
             continue;
         };
-        if let Some(pname) = id.strip_prefix("param_") {
+        // an id that names nothing, `param_`, documents no parameter
+        if let Some(pname) = id.strip_prefix("param_").filter(|n| !n.is_empty()) {
             // detail = the "(type)" tail of the title, if present
             let title = section
                 .children()
@@ -222,6 +223,7 @@ fn documented_functions(section: roxmltree::Node) -> Vec<(String, String)> {
         && let Some(name) = section
             .attribute("id")
             .and_then(|id| id.strip_prefix("func_"))
+            .filter(|n| !n.is_empty())
     {
         let signature = section
             .descendants()
@@ -685,6 +687,11 @@ fn reconcile_function_aliases(doc: &mut ModuleDoc, module_dir: &Path) {
 /// and `app[index]_call_state_column` is a template rather than a
 /// list, so it is left whole.
 fn param_names(heading: &str) -> Vec<String> {
+    // a heading that names nothing, `#### ` or `#### (integer)`,
+    // documents no parameter
+    if heading.trim().is_empty() {
+        return Vec::new();
+    }
     if !heading.contains(',') {
         return vec![heading.to_string()];
     }
