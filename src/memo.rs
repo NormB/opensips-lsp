@@ -11,6 +11,7 @@ use crate::analyze::{Block, Located};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// The memoized scanner output for one document version.
+#[derive(Debug, Clone, PartialEq)]
 pub struct DocAnalysis {
     /// [`analyze::route_blocks`] of the text.
     pub blocks: Vec<Block>,
@@ -21,7 +22,7 @@ pub struct DocAnalysis {
 /// Version-keyed cache: get-or-compute semantics, safe under
 /// concurrent requests (a racing pair may compute twice; last insert
 /// wins and both results are identical).
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct AnalysisCache {
     map: DashMap<String, (i32, Arc<DocAnalysis>)>,
 }

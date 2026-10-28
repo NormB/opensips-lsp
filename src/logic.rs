@@ -2068,6 +2068,7 @@ fn on_a_socket_line(doc: &str, line: u32) -> bool {
 /// Both signature help and the enumerated-argument offers need this
 /// walk, and they must agree about what argument the cursor is in —
 /// two walks would be two answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallSite {
     /// The identifier before the open parenthesis.
     pub name: String,

@@ -297,6 +297,7 @@ fn strip_c_comments(src: &str) -> String {
 }
 
 /// The outcome of reading one module's C parameter tables.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ModuleCParams {
     /// Every `modparam` name found, in declaration order.
     pub names: Vec<String>,

@@ -111,6 +111,7 @@ pub struct CatalogueStatus {
 
 /// `opensipsLsp/catalogue`: sent once the catalogue is settled, and
 /// again whenever it changes.
+#[derive(Debug)]
 pub enum CatalogueNotification {}
 
 impl Notification for CatalogueNotification {
@@ -126,6 +127,7 @@ impl Notification for CatalogueNotification {
 /// messages at a time, and a notification that waited for a
 /// subprocess held one of those slots for the whole run: a few files
 /// opened together left every request queued behind their checks.
+#[derive(Debug)]
 pub struct Backend(Arc<State>);
 
 impl Deref for Backend {
@@ -155,6 +157,7 @@ impl Backend {
 }
 
 /// Document store, doc catalog, and the `-C` runner.
+#[derive(Debug)]
 pub struct State {
     client: Client,
     /// Open documents: (version, full text).
