@@ -1049,7 +1049,7 @@ fn include_graph_invariants_hold_over_random_graphs() {
     use opensips_lsp::logic::IncludeGraph;
     use std::path::{Path, PathBuf};
 
-    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let mut state = 0x2545_f491_4f6c_dd1du64;
     let mut rng = move || {
         state ^= state << 13;
         state ^= state >> 7;
@@ -1216,7 +1216,7 @@ fn the_graph_tracks_a_model_through_random_edits() {
     let mut inc: BTreeMap<String, BTreeSet<String>> =
         names.iter().map(|n| (n.clone(), BTreeSet::new())).collect();
 
-    let mut state = 0xDEAD_BEEF_CAFE_F00Du64;
+    let mut state = 0xdead_beef_cafe_f00du64;
     let mut rng = move || {
         state ^= state << 13;
         state ^= state >> 7;

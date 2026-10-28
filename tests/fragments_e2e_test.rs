@@ -1440,7 +1440,7 @@ fn the_server_survives_a_client_behaving_badly() {
     );
 
     // random content in the buffer, then back to something valid
-    let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
     for round in 0..40 {
         seed ^= seed << 13;
         seed ^= seed >> 7;

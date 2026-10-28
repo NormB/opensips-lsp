@@ -1,0 +1,9 @@
+# The Google Rust Style Guide's rustfmt settings, with the Rust Style Guide's
+# 2024 style edition. hex_literal_case, format_macro_matchers and
+# imports_granularity are unstable, so scripts/rustfmt.sh runs a nightly
+# rustfmt pinned by date; the build toolchain stays stable.
+style_edition = "2024"
+max_width = 100
+hex_literal_case = "Lower"
+format_macro_matchers = true
+imports_granularity = "Module"
