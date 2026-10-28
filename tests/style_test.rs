@@ -676,9 +676,7 @@ fn rust_files(root: &Path) -> Vec<PathBuf> {
 /// Findings the tree still holds, by file and rule, while the judgment
 /// changes that remove them land. The count must match exactly: a new
 /// finding fails, and so does a fix that does not lower its entry here.
-const PENDING: &[(&str, Rule, usize)] = &[
-    ("tests/scratch_test.rs", Rule::CatchUnwind, 2),
-];
+const PENDING: &[(&str, Rule, usize)] = &[];
 
 /// Whether a file must deny `unwrap()`: it is a crate root, and not a test.
 fn unwrap_rule(shown: &str) -> UnwrapRule {

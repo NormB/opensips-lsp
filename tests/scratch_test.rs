@@ -4,8 +4,8 @@
 mod common;
 
 use common::Scratch;
-use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::thread;
 
 #[test]
 fn a_scratch_directory_is_removed_when_the_test_passes() {
@@ -27,13 +27,18 @@ fn a_scratch_directory_is_removed_when_the_test_passes() {
 #[test]
 fn a_scratch_directory_is_removed_when_the_test_fails() {
     let mut seen = None;
-    let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        let scratch = Scratch::new("oslsp-scratch-fail");
-        std::fs::create_dir_all(scratch.path()).unwrap();
-        std::fs::write(scratch.path().join("f.cfg"), "route {}\n").unwrap();
-        seen = Some(scratch.path().to_path_buf());
-        panic!("a failing assertion");
-    }));
+    // A panic on a thread of its own ends that thread the way a failing
+    // test ends; joining it reports the panic as an error.
+    let outcome = thread::scope(|s| {
+        s.spawn(|| {
+            let scratch = Scratch::new("oslsp-scratch-fail");
+            std::fs::create_dir_all(scratch.path()).unwrap();
+            std::fs::write(scratch.path().join("f.cfg"), "route {}\n").unwrap();
+            seen = Some(scratch.path().to_path_buf());
+            panic!("a failing assertion");
+        })
+        .join()
+    });
     assert!(outcome.is_err(), "the closure was meant to panic");
     let path = seen.expect("the scratch path was recorded");
     assert!(!path.exists(), "{} survived a failing test", path.display());
@@ -61,7 +66,7 @@ fn a_path_held_by_a_live_guard_cannot_be_taken_again() {
     let first = Scratch::new("oslsp-scratch-twice");
     std::fs::create_dir_all(first.path()).unwrap();
     std::fs::write(first.path().join("fixture.cfg"), "route {}\n").unwrap();
-    let second = std::panic::catch_unwind(|| Scratch::new("oslsp-scratch-twice"));
+    let second = thread::scope(|s| s.spawn(|| Scratch::new("oslsp-scratch-twice")).join());
     assert!(
         second.is_err(),
         "a second live guard on the same path was allowed"
