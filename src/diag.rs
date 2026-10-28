@@ -35,6 +35,10 @@ pub struct Diag {
 /// (1-based; the end column is EXCLUSIVE — cfg.lex's `count()`
 /// reports start..start+len); everything else is noise except as a
 /// fallback when the check failed without any positioned error.
+///
+/// # Panics
+///
+/// Never: the regular expressions it uses are literals that compile.
 pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
     let positioned = Regex::new(
         r"(CRITICAL|ERROR|WARNING):core:yyerror: parse error in (.+?):(\d+):(\d+)-(\d+): ?(.*)",

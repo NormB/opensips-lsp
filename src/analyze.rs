@@ -455,6 +455,11 @@ pub struct Block {
 /// [`route_defs`] with block extents: braces are matched through the
 /// comment/string classifier, so a `}` in a string or comment does not
 /// close a block; an unterminated block extends to end of text.
+///
+/// # Panics
+///
+/// Never: the regular expression it uses is a literal that compiles, and
+/// each capture group it reads is set by every match.
 pub fn route_blocks(text: &str) -> Vec<Block> {
     let classes = classify(text);
     let lines = Lines::new(text);
@@ -597,6 +602,11 @@ static_regex!(
 /// accepts the name double- or single-quoted and rejects it bare; a
 /// string carrying a pseudo-variable is not a fixed name and is not
 /// matched.
+///
+/// # Panics
+///
+/// Never: the regular expression it uses is a literal that compiles, and
+/// each capture group it reads is set by every match.
 pub fn armed_route_refs(text: &str) -> Vec<(Located, &'static str)> {
     let classes = classify(text);
     let lines = Lines::new(text);
@@ -664,6 +674,11 @@ static_regex!(
 
 /// Every `include_file "x"` / `import_file "x"` in code position;
 /// `name` is the quoted path verbatim.
+///
+/// # Panics
+///
+/// Never: the regular expression it uses is a literal that compiles, and
+/// each capture group it reads is set by every match.
 pub fn includes(text: &str) -> Vec<Located> {
     let lines = Lines::new(text);
     let mut out = Vec::new();

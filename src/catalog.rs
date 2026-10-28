@@ -670,6 +670,11 @@ pub fn harvest_tree(tree_root: &Path) -> Vec<ModuleDoc> {
 /// Functions a module's C sources export under a second name: an
 /// entry of a `cmd_export_t` table whose handler is the handler of a
 /// documented function, under a name the documentation does not use.
+///
+/// # Panics
+///
+/// Never: the regular expressions it uses are literals that compile, and
+/// each capture group it reads is set by every match.
 pub fn function_aliases_from_c(c_src: &str, documented: &[Item]) -> Vec<Item> {
     static ENTRY: OnceLock<Regex> = OnceLock::new();
     let entry = ENTRY.get_or_init(|| {
@@ -1425,6 +1430,11 @@ fn is_spelling(w: &str) -> bool {
 /// PARTS of one spelling — `("allow"|"ALLOW")[-_]("proxy"|"PROXY")`
 /// is `allow_proxy`, and reading it as aliases invents two settings
 /// nobody can write.
+///
+/// # Panics
+///
+/// Never: the regular expressions it uses are literals that compile, and
+/// each capture group it reads is set by every match.
 pub fn lexer_spellings(pattern: &str) -> Vec<String> {
     static GROUP: OnceLock<Regex> = OnceLock::new();
     let group =
@@ -1759,6 +1769,11 @@ pub fn harvest_socket_modifiers(tree_root: &Path) -> Vec<Item> {
 /// Anchored on the `unknown log level` message in the default arm: it
 /// is what distinguishes this switch from every other `case 'X':` in
 /// a source tree.
+///
+/// # Panics
+///
+/// Never: the regular expressions it uses are literals that compile, and
+/// each capture group it reads is set by every match.
 pub fn parse_log_levels_c(src: &str) -> Vec<String> {
     static CASE: OnceLock<Regex> = OnceLock::new();
     let case = CASE.get_or_init(|| {
@@ -1952,6 +1967,11 @@ pub struct BuiltinCore {
 /// completes makes the extension useless out of the box.  A tree the
 /// user configures still wins, because only that is exact for their
 /// build — so every built-in entry says which version it came from.
+///
+/// # Panics
+///
+/// Panics when the vendored core catalogue does not parse, which its own
+/// tests rule out.
 pub fn builtin_core() -> &'static BuiltinCore {
     static B: OnceLock<BuiltinCore> = OnceLock::new();
     B.get_or_init(|| {
@@ -2221,6 +2241,11 @@ pub struct BuiltinModules {
 /// REPLACES this wholesale rather than merging with it: two versions
 /// blended together would be wrong in a way neither is on its own.
 /// Every built-in entry says which version it came from.
+///
+/// # Panics
+///
+/// Panics when the vendored module catalogue does not parse or names no
+/// newest release, which its own tests rule out.
 pub fn builtin_modules() -> &'static BuiltinModules {
     static B: OnceLock<BuiltinModules> = OnceLock::new();
     B.get_or_init(|| {
@@ -2230,6 +2255,11 @@ pub fn builtin_modules() -> &'static BuiltinModules {
 }
 
 /// The vendored catalogue in full: the base release and every delta.
+///
+/// # Panics
+///
+/// Panics when the vendored module catalogue does not parse, which its own
+/// tests rule out.
 pub fn builtin_versioned() -> &'static VersionedModules {
     static V: OnceLock<VersionedModules> = OnceLock::new();
     V.get_or_init(|| {

@@ -144,6 +144,11 @@ impl Backend {
     }
 
     /// `opensips/analysisRoot`; see [`State::analysis_root`].
+    ///
+    /// # Errors
+    ///
+    /// Never: the method returns a `Result` because a tower-lsp custom
+    /// method must.
     pub async fn analysis_root(&self, p: AnalysisRootParams) -> Result<Option<String>> {
         self.0.analysis_root(p).await
     }
@@ -971,6 +976,11 @@ impl State {
     /// fragment is rarely named so a filename pattern could catch it
     /// — but the configuration that includes it says exactly what it
     /// is.
+    ///
+    /// # Errors
+    ///
+    /// Never: the method returns a `Result` because a tower-lsp custom
+    /// method must.
     pub async fn analysis_root(&self, p: AnalysisRootParams) -> Result<Option<String>> {
         Ok(self
             .analysis_root_of(&p.uri)
