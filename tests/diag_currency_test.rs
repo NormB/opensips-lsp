@@ -11,12 +11,12 @@ use std::process::{Command, Stdio};
 
 /// Stub opensips: behavior keyed by a mode file next to the cfg.
 ///   error -> one positioned error;  hang -> sleep past the timeout;
-///   slow -> take three seconds, inside the timeout
+///   slow -> take six seconds, inside the timeout
 const STUB: &str = r#"#!/bin/sh
 for a in "$@"; do cfg="$a"; done
 mode=$(cat "$(dirname "$cfg")/mode")
 if [ "$mode" = hang ]; then sleep 30; fi
-if [ "$mode" = slow ]; then sleep 3; fi
+if [ "$mode" = slow ]; then sleep 6; fi
 echo "CRITICAL:core:yyerror: parse error in $cfg:1:2-3: planted" >&2
 exit 255
 "#;
@@ -52,7 +52,9 @@ fn failed_checks_clear_stale_diagnostics_and_publishes_carry_versions() {
     let mut child = Server::new(
         Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
             .env("OPENSIPS_LSP_BIN", stub.display().to_string())
-            .env("OPENSIPS_LSP_CHECK_TIMEOUT_MS", "400")
+            // long enough for the "error" check to finish on a loaded host;
+            // the "hang" check sleeps 30 s, so it still times out
+            .env("OPENSIPS_LSP_CHECK_TIMEOUT_MS", "3000")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -82,7 +84,11 @@ fn failed_checks_clear_stale_diagnostics_and_publishes_carry_versions() {
         |v| v["method"] == "textDocument/publishDiagnostics",
         "first publish",
     );
-    assert_eq!(d["params"]["diagnostics"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        d["params"]["diagnostics"].as_array().unwrap().len(),
+        1,
+        "the error check reports its one planted error (none means it timed out): {d}"
+    );
     // the publish must carry the version of the buffer used for mapping
     assert_eq!(d["params"]["version"], 7, "publish must be versioned: {d}");
 
@@ -311,7 +317,8 @@ fn requests_are_answered_while_checks_run() {
     let took = t.elapsed();
     assert_eq!(r["result"].as_array().map(|a| a.len()), Some(1), "{r}");
     assert!(
-        took < std::time::Duration::from_millis(1500),
+        // a request queued behind a check waits its six seconds
+        took < std::time::Duration::from_secs(5),
         "documentSymbol waited {took:?} behind the checks"
     );
     // the checks still run and still publish

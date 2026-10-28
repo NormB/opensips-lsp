@@ -104,7 +104,7 @@ fn diagnostics_for(tag: &str, version: Option<&str>) -> Vec<String> {
     let mut msgs: Vec<String> = Vec::new();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
     while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
-        let Ok(v) = rx.recv_timeout(left.min(std::time::Duration::from_millis(1500))) else {
+        let Ok(v) = rx.recv_timeout(left) else {
             break;
         };
         if v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == uri {
