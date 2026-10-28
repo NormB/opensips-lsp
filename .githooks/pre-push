@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Refuses a push unless every outgoing commit has a good signature from an
+# allowed signer (git verify-commit), its author and committer both match
+# the configured user.name and user.email, and its message credits no AI
+# tool; and unless the tree being pushed passes scripts/gate.sh push.
+#
+# The gate checks the working tree, so each ref pushed must be the
+# checked-out commit, with nothing changed or untracked beside it.
+# Turn the hooks on once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+remote="$1"
+zero="0000000000000000000000000000000000000000"
+name="$(git config user.name)"
+email="$(git config user.email)"
+head="$(git rev-parse HEAD)"
+bad=0
+gate=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue # deleting a ref: nothing outgoing
+  if [ "$remote_sha" = "$zero" ]; then
+    range=("$local_sha" --not "--remotes=$remote") # new ref: commits the remote lacks
+  else
+    range=("$remote_sha..$local_sha")
+  fi
+  # Captured first, so a failing rev-list stops the push instead of
+  # yielding no commits to check.
+  if ! commits="$(git rev-list "${range[@]}" 2>/dev/null)"; then
+    echo "pre-push: refused: cannot list the commits going to $remote_ref; fetch first" >&2
+    exit 1
+  fi
+  [ -n "$commits" ] || continue
+  if [ "$local_sha" != "$head" ]; then
+    echo "pre-push: refused: $local_ref is not the checked-out commit, so the gate cannot check it; check it out and push again" >&2
+    bad=1
+    continue
+  fi
+  gate=1
+  while read -r sha; do
+    if ! git verify-commit "$sha" >/dev/null 2>&1; then
+      echo "pre-push: refused: $sha has no good signature from an allowed signer" >&2
+      bad=1
+    fi
+    IFS=$'\t' read -r an ae cn ce < <(git log -1 --format=$'%an\t%ae\t%cn\t%ce' "$sha")
+    if [ "$an" != "$name" ] || [ "$ae" != "$email" ]; then
+      echo "pre-push: refused: $sha author is not the configured identity" >&2
+      bad=1
+    fi
+    if [ "$cn" != "$name" ] || [ "$ce" != "$email" ]; then
+      echo "pre-push: refused: $sha committer is not the configured identity" >&2
+      bad=1
+    fi
+    if ! git log -1 --format=%B "$sha" | sed "s/^/<message of $sha>\t/" | python3 -I scripts/attribution-scan.py; then
+      echo "pre-push: refused: the message of $sha credits an AI tool" >&2
+      bad=1
+    fi
+  done <<<"$commits"
+done
+[ "$bad" -eq 0 ] || exit 1
+[ "$gate" -eq 1 ] || exit 0
+
+if ! git diff --quiet HEAD || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+  echo "pre-push: refused: the working tree differs from the commit being pushed" >&2
+  exit 1
+fi
+if ! scripts/gate.sh push; then
+  echo "pre-push: refused (see above)" >&2
+  exit 1
+fi

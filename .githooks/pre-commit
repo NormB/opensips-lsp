@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Refuses a commit whose staged lines credit an AI tool, or whose tree fails
+# scripts/gate.sh commit: rustfmt with the pinned nightly, clippy on both
+# packages with warnings as errors, and every test.
+#
+# The gate builds the working tree, so the working tree must be exactly what
+# is staged: no unstaged change to a tracked file and no untracked file.
+# Otherwise it would check one tree and commit another.
+# Turn the hooks on once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+# Staged paths and added lines, as "<path>\t<text>".
+scan_input() {
+  git diff --cached --name-only -z --diff-filter=ACMR | while IFS= read -r -d '' p; do
+    printf '%s\t%s\n' "$p" "$p"
+  done
+  git diff --cached --no-color --no-ext-diff -U0 --diff-filter=ACMR | awk '
+    /^\+\+\+ b\// { path = substr($0, 7); next }
+    /^\+\+\+ / { path = ""; next }
+    /^\+/ && path != "" { printf "%s\t%s\n", path, substr($0, 2) }'
+}
+if ! scan_input | python3 -I scripts/attribution-scan.py; then
+  echo "pre-commit: refused (see above)" >&2
+  exit 1
+fi
+
+if ! git diff --quiet; then
+  echo "pre-commit: refused: tracked files have unstaged changes; stage or stash them" >&2
+  git diff --name-only | sed 's/^/    /' >&2
+  exit 1
+fi
+untracked="$(git ls-files --others --exclude-standard)"
+if [ -n "$untracked" ]; then
+  echo "pre-commit: refused: untracked files would be built but not committed; add, ignore or move them" >&2
+  printf '%s\n' "$untracked" | sed 's/^/    /' >&2
+  exit 1
+fi
+
+if ! scripts/gate.sh commit; then
+  echo "pre-commit: refused (see above)" >&2
+  exit 1
+fi

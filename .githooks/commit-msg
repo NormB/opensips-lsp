@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Refuses a commit message that credits an AI tool (scripts/attribution-scan.py).
+# Every line is read: git commit -m keeps a line that starts with #.
+# Turn the hooks on once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+if ! sed 's/^/<commit message>\t/' "$1" | python3 -I "$root/scripts/attribution-scan.py"; then
+  echo "commit-msg: refused (see above)" >&2
+  exit 1
+fi

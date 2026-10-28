@@ -248,10 +248,31 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  hooks:
+    name: git hooks (scripts/test-hooks.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          components: clippy
+      # the hooks run scripts/gate.sh, which needs the rustfmt nightly, the
+      # MSRV toolchain and cargo-audit; the hooks' tests run them on a
+      # stand-in crate
+      - name: install what the gate runs
+        run: |
+          rustup toolchain install "$(scripts/fmt.sh toolchain)" --profile minimal --component rustfmt
+          rustup toolchain install "$(grep -m1 '^rust-version' Cargo.toml | cut -d'"' -f2)" --profile minimal
+          cargo install cargo-audit --locked
+      - run: scripts/test-hooks.sh
+
   # Aggregate gate for branch protection: one required context.
   ci-success:
     name: CI success
-    needs: [rust, client, grammar, grammar-sanitizers, audit, msrv, actionlint, fuzz]
+    needs: [rust, client, grammar, grammar-sanitizers, audit, msrv, actionlint, fuzz, hooks]
     runs-on: ubuntu-latest
     steps:
       - run: echo "all CI jobs green"

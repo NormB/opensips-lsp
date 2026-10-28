@@ -10,15 +10,61 @@ empty, NUL bytes, backslashes, truncated constructs.
 
 ## Local workflow
 
+Turn on the git hooks once per clone:
+
 ```sh
-cargo test                     # full suite, includes the stdio LSP e2e
-cargo clippy --all-targets     # CI enforces -D warnings
-cargo fmt
-RUSTDOCFLAGS="-D warnings" cargo doc --no-deps   # missing_docs is deny
+git config core.hooksPath .githooks
+```
+
+They run `scripts/gate.sh`, the checks CI runs, before a commit and
+before a push. The commit hook refuses a message or a staged line that
+credits an AI tool, and then runs rustfmt, clippy on both packages
+with warnings as errors, and every test. It runs them on the working
+tree, so it also refuses a commit while anything is unstaged or
+untracked. The push hook refuses a commit without a good signature,
+or one whose author or committer is not you. It then runs rustdoc with
+warnings as errors, the MSRV build, the client's compile and tests, and
+`cargo audit`. `scripts/test-hooks.sh` tests the hooks themselves.
+
+The tests need the proof environment. Write it once where the gate
+reads it:
+
+```sh
+scripts/proof-env.sh > "$(git rev-parse --git-common-dir)/env.sh"
+```
+
+```sh
+scripts/gate.sh commit         # rustfmt check, clippy, the full suite
+scripts/gate.sh push           # rustdoc, MSRV, client, cargo audit
+scripts/fmt.sh fix             # format with the pinned nightly
 ```
 
 The real-tree harvest test is opt-in:
 `OPENSIPS_LSP_TEST_TREE=/path/to/opensips cargo test`.
+
+## Rust style
+
+The Rust code follows the [Google Rust Style
+Guide](https://google.github.io/styleguide/rustguide.html), which
+builds on the [Rust Style Guide](https://doc.rust-lang.org/nightly/style-guide/)
+and the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/).
+Three checks hold it:
+
+- `rustfmt.toml` sets the guide's rustfmt options. Three of them are
+  unstable, so `scripts/fmt.sh` runs rustfmt from a nightly pinned by
+  date; install it with `rustup toolchain install "$(scripts/fmt.sh
+  toolchain)" --profile minimal --component rustfmt`. The crate builds on
+  stable and uses no unstable feature.
+- The `[lints]` tables in `Cargo.toml` and `fuzz/Cargo.toml` deny the
+  lints the guide names.
+- `tests/style_test.rs` reads every Rust file's syntax tree for what no
+  lint sees: a glob import outside the three forms the guide allows, an
+  `unsafe` with no `// SAFETY:` comment above it, an `assert!` or
+  `debug_assert!` with no message, a `use` that imports one of this
+  repository's functions instead of its module, and a crate root outside
+  the tests (the library, the binary, an example, a fuzz target) that does
+  not deny `clippy::unwrap_used`. Tests may unwrap; elsewhere a panic that
+  is truly needed says why with `expect`.
 
 ## Fuzzing
 
