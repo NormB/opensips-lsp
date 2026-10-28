@@ -4,8 +4,10 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::{fmt, io};
 
 /// Where a module catalogue came from.
 ///
@@ -114,16 +116,59 @@ fn first_para(section: roxmltree::Node) -> String {
         .unwrap_or_default()
 }
 
+/// Why a documentation file was refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[must_use]
+pub enum ParseError {
+    /// The text holds a NUL byte, which no documentation file does.
+    Nul,
+    /// The text is empty or only whitespace.
+    Empty,
+    /// The DocBook text is not well-formed XML.
+    Xml(roxmltree::Error),
+}
+
+impl fmt::Display for ParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Nul => f.write_str("input contains NUL bytes"),
+            Self::Empty => f.write_str("empty input"),
+            Self::Xml(e) => write!(f, "not well-formed XML: {e}"),
+        }
+    }
+}
+
+impl Error for ParseError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Xml(e) => Some(e),
+            Self::Nul | Self::Empty => None,
+        }
+    }
+}
+
+/// Refuses a text that holds a NUL byte or nothing but whitespace.
+fn check_text(text: &str) -> Result<(), ParseError> {
+    if text.contains('\0') {
+        return Err(ParseError::Nul);
+    }
+    if text.trim().is_empty() {
+        return Err(ParseError::Empty);
+    }
+    Ok(())
+}
+
 /// Parse one `<module>_admin.xml` docbook file.
-pub fn parse_admin_xml(module: &str, xml: &str) -> Result<ModuleDoc, String> {
-    if xml.contains('\0') {
-        return Err("input contains NUL bytes".into());
-    }
-    if xml.trim().is_empty() {
-        return Err("empty input".into());
-    }
+///
+/// # Errors
+///
+/// Returns [`ParseError::Nul`] when the text holds a NUL byte, [`ParseError::Empty`]
+/// when it is empty or only whitespace, and [`ParseError::Xml`] when it is
+/// not well-formed XML.
+pub fn parse_admin_xml(module: &str, xml: &str) -> Result<ModuleDoc, ParseError> {
+    check_text(xml)?;
     let cleaned = neutralize_entities(xml);
-    let tree = roxmltree::Document::parse(&cleaned).map_err(|e| e.to_string())?;
+    let tree = roxmltree::Document::parse(&cleaned).map_err(ParseError::Xml)?;
 
     let mut out = ModuleDoc {
         name: module.to_string(),
@@ -791,13 +836,13 @@ fn is_identifier(s: &str) -> bool {
 /// Recognizes `### Exported Parameters` / `### Exported Functions`
 /// sections with one `#### <entry>` heading per item; the first
 /// paragraph after the heading is the doc summary.
-pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, String> {
-    if md.contains('\0') {
-        return Err("input contains NUL bytes".into());
-    }
-    if md.trim().is_empty() {
-        return Err("empty input".into());
-    }
+///
+/// # Errors
+///
+/// Returns [`ParseError::Nul`] when the text holds a NUL byte and
+/// [`ParseError::Empty`] when it is empty or only whitespace.
+pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, ParseError> {
+    check_text(md)?;
 
     #[derive(PartialEq, Clone, Copy)]
     enum Section {
@@ -956,13 +1001,8 @@ pub fn parse_readme_md(module: &str, md: &str) -> Result<ModuleDoc, String> {
 
 /// Shared heading-walker for the 4.x manual markdown pages: collects
 /// `(heading, first paragraph)` pairs for headings at `level`.
-fn md_sections(md: &str, level: usize) -> Result<Vec<(String, String)>, String> {
-    if md.contains('\0') {
-        return Err("input contains NUL bytes".into());
-    }
-    if md.trim().is_empty() {
-        return Err("empty input".into());
-    }
+fn md_sections(md: &str, level: usize) -> Result<Vec<(String, String)>, ParseError> {
+    check_text(md)?;
     let marker = format!("{} ", "#".repeat(level));
     let mut out: Vec<(String, String)> = Vec::new();
     let mut cur: Option<(String, Vec<String>, bool)> = None;
@@ -1007,7 +1047,12 @@ fn md_sections(md: &str, level: usize) -> Result<Vec<(String, String)>, String> 
 
 /// Parse `docs/manual/Script-CoreFunctions.md` (4.x): one `##
 /// name(sig)` heading per function, first paragraph = doc.
-pub fn parse_core_functions_md(md: &str) -> Result<Vec<Item>, String> {
+///
+/// # Errors
+///
+/// Returns [`ParseError::Nul`] when the text holds a NUL byte and
+/// [`ParseError::Empty`] when it is empty or only whitespace.
+pub fn parse_core_functions_md(md: &str) -> Result<Vec<Item>, ParseError> {
     Ok(md_sections(md, 2)?
         .into_iter()
         .filter_map(|(heading, doc)| {
@@ -1043,7 +1088,12 @@ pub fn parse_core_functions_md(md: &str) -> Result<Vec<Item>, String> {
 /// language silent; inventing text for them would be worse. They
 /// carry the explaining section's text and say which section that is.
 /// Each is named here rather than guessed from proximity.
-pub fn parse_core_statements_md(md: &str) -> Result<Vec<Item>, String> {
+///
+/// # Errors
+///
+/// Returns [`ParseError::Nul`] when the text holds a NUL byte and
+/// [`ParseError::Empty`] when it is empty or only whitespace.
+pub fn parse_core_statements_md(md: &str) -> Result<Vec<Item>, ParseError> {
     /// Headings whose text is not the keyword.
     const HEADING_IS_PROSE: &[(&str, &str)] = &[("for each", "for")];
     /// Keywords explained inside another statement's section.
@@ -1136,7 +1186,12 @@ fn dedup_by_name(items: &mut Vec<Item>) {
 /// `Description` as something a configuration can write. So the
 /// headings that mean something are named here, and nothing else is
 /// taken.
-pub fn parse_core_async_md(md: &str) -> Result<Vec<Item>, String> {
+///
+/// # Errors
+///
+/// Returns [`ParseError::Nul`] when the text holds a NUL byte and
+/// [`ParseError::Empty`] when it is empty or only whitespace.
+pub fn parse_core_async_md(md: &str) -> Result<Vec<Item>, ParseError> {
     /// Heading text -> the keyword it documents.
     const STATEMENTS: &[(&str, &str)] = &[
         ("async() statement", "async"),
@@ -1164,7 +1219,12 @@ pub fn parse_core_async_md(md: &str) -> Result<Vec<Item>, String> {
 /// Unlike the core functions page, a heading here is a bare keyword
 /// with no argument list, so anything parenthesised is prose rather
 /// than a route type.
-pub fn parse_core_routes_md(md: &str) -> Result<Vec<Item>, String> {
+///
+/// # Errors
+///
+/// Returns [`ParseError::Nul`] when the text holds a NUL byte and
+/// [`ParseError::Empty`] when it is empty or only whitespace.
+pub fn parse_core_routes_md(md: &str) -> Result<Vec<Item>, ParseError> {
     let mut out: Vec<Item> = md_sections(md, 2)?
         .into_iter()
         .filter_map(|(heading, doc)| {
@@ -1188,13 +1248,8 @@ pub fn parse_core_routes_md(md: &str) -> Result<Vec<Item>, String> {
 /// fenced blocks, which is right for a route type or a control
 /// statement where the summary IS the answer. For a setting the
 /// answer is what to write, and that lives in the example.
-fn md_sections_raw(md: &str, level: usize) -> Result<Vec<(String, String)>, String> {
-    if md.contains('\0') {
-        return Err("input contains NUL bytes".into());
-    }
-    if md.trim().is_empty() {
-        return Err("empty input".into());
-    }
+fn md_sections_raw(md: &str, level: usize) -> Result<Vec<(String, String)>, ParseError> {
+    check_text(md)?;
     let marker = format!("{} ", "#".repeat(level));
     let mut out: Vec<(String, String)> = Vec::new();
     let mut cur: Option<(String, Vec<&str>)> = None;
@@ -1312,7 +1367,12 @@ fn setting_doc(body: &str) -> String {
 /// Parse `docs/manual/Script-CoreParameters.md` (4.x): `### name`
 /// headings, each carrying what the setting is, what it defaults to,
 /// and what writing it looks like.
-pub fn parse_core_params_md(md: &str) -> Result<Vec<Item>, String> {
+///
+/// # Errors
+///
+/// Returns [`ParseError::Nul`] when the text holds a NUL byte and
+/// [`ParseError::Empty`] when it is empty or only whitespace.
+pub fn parse_core_params_md(md: &str) -> Result<Vec<Item>, ParseError> {
     Ok(md_sections_raw(md, 3)?
         .into_iter()
         .filter_map(|(heading, body)| {
@@ -1817,7 +1877,12 @@ fn parse_core_var_kinds(md: &str) -> Vec<Item> {
 /// Parse `docs/manual/Script-CoreVar.md` (4.x): `### Description -
 /// $name` headings, first paragraph = doc, plus the `##` sections
 /// that document a whole variable kind.
-pub fn parse_core_vars_md(md: &str) -> Result<Vec<Item>, String> {
+///
+/// # Errors
+///
+/// Returns [`ParseError::Nul`] when the text holds a NUL byte and
+/// [`ParseError::Empty`] when it is empty or only whitespace.
+pub fn parse_core_vars_md(md: &str) -> Result<Vec<Item>, ParseError> {
     let mut out: Vec<Item> = md_sections(md, 3)?
         .into_iter()
         .filter_map(|(heading, doc)| {
@@ -2350,23 +2415,29 @@ pub fn load_cached(tree_root: &Path, cache_dir: &Path) -> Option<(Vec<ModuleDoc>
 }
 
 /// Persist a harvest under the tree's current fingerprint.
+///
+/// # Errors
+///
+/// Returns the I/O error when the cache directory cannot be created or
+/// the cache file cannot be written; a failure to encode the harvest is
+/// reported as an I/O error too.
 pub fn save_cache(
     tree_root: &Path,
     cache_dir: &Path,
     modules: &[ModuleDoc],
     core: &CoreDocs,
-) -> Result<(), String> {
-    std::fs::create_dir_all(cache_dir).map_err(|e| e.to_string())?;
+) -> io::Result<()> {
+    std::fs::create_dir_all(cache_dir)?;
     let fp = tree_fingerprint(tree_root);
     let f = cache_dir.join(format!("{fp}.json"));
     let c = CacheFile {
         modules: modules.to_vec(),
         core: core.clone(),
     };
-    let bytes = serde_json::to_vec(&c).map_err(|e| e.to_string())?;
+    let bytes = serde_json::to_vec(&c)?;
     // atomic publish: concurrent servers may write the same file, and
     // readers must never see a torn cache — write-then-rename
     let tmp = cache_dir.join(format!(".{fp}.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &f).map_err(|e| e.to_string())
+    std::fs::write(&tmp, &bytes)?;
+    std::fs::rename(&tmp, &f)
 }

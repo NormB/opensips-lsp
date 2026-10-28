@@ -2,7 +2,7 @@
 //! C-SEND-SYNC): the transport runs handlers on several tasks at once, and
 //! a check started by a notification runs on a task of its own.
 
-use opensips_lsp::catalog::{CoreDocs, Item, ModuleDoc};
+use opensips_lsp::catalog::{CoreDocs, Item, ModuleDoc, ParseError};
 use opensips_lsp::diag::Diag;
 use opensips_lsp::logic::IncludeGraph;
 use opensips_lsp::memo::{AnalysisCache, DocAnalysis};
@@ -21,4 +21,5 @@ fn the_shared_types_are_send_and_sync() {
     is_send_sync::<CoreDocs>();
     is_send_sync::<Item>();
     is_send_sync::<Diag>();
+    is_send_sync::<ParseError>();
 }
