@@ -75,6 +75,8 @@ ssh-keygen -q -t ed25519 -N '' -C test -f "$work/good"
 ssh-keygen -q -t ed25519 -N '' -C test -f "$work/stranger"
 printf 'test@example.com %s\n' "$(cut -d' ' -f1,2 "$work/good.pub")" >"$work/allowed_signers"
 git init -q --bare "$work/remote.git"
+[ "$(git -C "$work/remote.git" rev-parse --absolute-git-dir)" = "$work/remote.git" ] ||
+  { echo "FAIL: git did not make the throwaway remote; refusing to go on"; exit 1; }
 
 repo="$work/repo"
 mkdir -p "$repo/src" "$repo/scripts" "$repo/fuzz/src" "$repo/client/node_modules"
