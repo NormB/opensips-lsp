@@ -17,6 +17,8 @@
 //!    a test denies `clippy::unwrap_used`: the library, the binary, the
 //!    examples and the fuzz targets.
 //! 6. No `panic::catch_unwind`: the guide prohibits it in first-party code.
+//! 7. Never reach inside a poisoned lock: no `PoisonError::into_inner`,
+//!    and no `.unwrap_or_else(|e| e.into_inner())` on a lock result.
 //!
 //! The checks read the syntax tree, so a rule named in a comment or a
 //! string is not mistaken for code. Each rule is a pure function of a
@@ -48,6 +50,8 @@ enum Rule {
     UnwrapNotDenied,
     /// A path that names `catch_unwind`.
     CatchUnwind,
+    /// Code that takes the value out of a poisoned lock.
+    PoisonReached,
 }
 
 /// Whether a file is a crate root that must deny `clippy::unwrap_used`.
@@ -369,7 +373,25 @@ impl<'ast> Visit<'ast> for Checker<'_> {
         if let Some(last) = node.segments.last().filter(|s| s.ident == "catch_unwind") {
             self.flag(last.ident.span().start().line, Rule::CatchUnwind);
         }
+        let names: Vec<String> = node.segments.iter().map(|s| s.ident.to_string()).collect();
+        if names
+            .windows(2)
+            .any(|w| w[0] == "PoisonError" && w[1] == "into_inner")
+        {
+            self.flag(node.span().start().line, Rule::PoisonReached);
+        }
         syn::visit::visit_path(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        if node.method == "unwrap_or_else"
+            && let Some(Expr::Closure(closure)) = node.args.first()
+            && let Expr::MethodCall(inner) = &*closure.body
+            && inner.method == "into_inner"
+        {
+            self.flag(inner.method.span().start().line, Rule::PoisonReached);
+        }
+        syn::visit::visit_expr_method_call(self, node);
     }
 
     fn visit_macro(&mut self, node: &'ast Macro) {
@@ -647,6 +669,32 @@ fn f() {
             (4, Rule::CatchUnwind)
         ]
     );
+}
+
+#[test]
+fn reaching_into_a_poisoned_lock_is_found() {
+    let source = "\
+fn f(m: &std::sync::Mutex<u8>) {
+    let a = m.lock().unwrap_or_else(|e| e.into_inner());
+    let b = m.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+}
+";
+    assert_eq!(
+        findings(source, ModuleKind::Leaf),
+        [(2, Rule::PoisonReached), (3, Rule::PoisonReached)]
+    );
+}
+
+#[test]
+fn into_inner_elsewhere_is_not_a_poisoned_lock() {
+    let source = "\
+fn f(c: std::cell::Cell<u8>, m: &std::sync::Mutex<u8>) {
+    let n = c.into_inner();
+    let g = m.lock().expect(\"poisoned: a test panicked while holding it\");
+    let v = r.unwrap_or_else(|e| e.len());
+}
+";
+    assert_eq!(findings(source, ModuleKind::Leaf), []);
 }
 
 /// Every Rust file the repository tracks under the directories that hold

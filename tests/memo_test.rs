@@ -19,7 +19,9 @@ const CFG: &str = "route[a] {\n    route(b);\n}\nroute[b] {\n    exit;\n}\n";
 
 #[test]
 fn repeated_requests_for_one_version_build_the_analysis_once() {
-    let _counting = COUNTING.lock().unwrap_or_else(|e| e.into_inner());
+    let _counting = COUNTING
+        .lock()
+        .expect("poisoned: an earlier memo test panicked while holding it");
     let cache = AnalysisCache::default();
     let before = memo::analysis_builds();
     for _ in 0..10 {
@@ -35,7 +37,9 @@ fn repeated_requests_for_one_version_build_the_analysis_once() {
 
 #[test]
 fn a_new_version_builds_again_and_an_old_one_is_not_served() {
-    let _counting = COUNTING.lock().unwrap_or_else(|e| e.into_inner());
+    let _counting = COUNTING
+        .lock()
+        .expect("poisoned: an earlier memo test panicked while holding it");
     let cache = AnalysisCache::default();
     let before = memo::analysis_builds();
     let v1 = cache.get_or_compute("file:///t.cfg", 1, CFG);
@@ -53,7 +57,9 @@ fn a_new_version_builds_again_and_an_old_one_is_not_served() {
 /// other.
 #[test]
 fn documents_do_not_share_an_entry() {
-    let _counting = COUNTING.lock().unwrap_or_else(|e| e.into_inner());
+    let _counting = COUNTING
+        .lock()
+        .expect("poisoned: an earlier memo test panicked while holding it");
     let cache = AnalysisCache::default();
     cache.get_or_compute("file:///a.cfg", 1, CFG);
     cache.get_or_compute("file:///b.cfg", 1, "route[only] {\n    exit;\n}\n");

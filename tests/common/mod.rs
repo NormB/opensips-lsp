@@ -240,7 +240,7 @@ impl Scratch {
         let path = std::env::temp_dir().join(format!("{name}-{}", std::process::id()));
         let fresh = LIVE
             .lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .expect("poisoned: a thread panicked while holding the set of live scratch paths")
             .insert(path.clone());
         assert!(
             fresh,
@@ -273,7 +273,7 @@ impl Drop for Scratch {
     fn drop(&mut self) {
         remove_path(&self.0);
         LIVE.lock()
-            .unwrap_or_else(|e| e.into_inner())
+            .expect("poisoned: a thread panicked while holding the set of live scratch paths")
             .remove(&self.0);
     }
 }
