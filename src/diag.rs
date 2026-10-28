@@ -39,7 +39,7 @@ pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
     let positioned = Regex::new(
         r"(CRITICAL|ERROR|WARNING):core:yyerror: parse error in (.+?):(\d+):(\d+)-(\d+): ?(.*)",
     )
-    .unwrap();
+    .expect("a literal pattern compiles");
     let mut out = Vec::new();
 
     for line in output.lines() {
@@ -77,7 +77,8 @@ pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
     }
 
     if out.is_empty() && rc != 0 {
-        let generic = Regex::new(r"(?:ERROR|CRITICAL):[^:]*:[^:]*: (.+)").unwrap();
+        let generic = Regex::new(r"(?:ERROR|CRITICAL):[^:]*:[^:]*: (.+)")
+            .expect("a literal pattern compiles");
         let msg = output
             .lines()
             .rev()

@@ -60,9 +60,12 @@ pub struct ModuleDoc {
 fn sanitize_doc(text: &str) -> String {
     static HTML: OnceLock<Regex> = OnceLock::new();
     static LINK: OnceLock<Regex> = OnceLock::new();
-    let html = HTML.get_or_init(|| Regex::new(r"</?[A-Za-z][^>]*>").unwrap());
-    let link = LINK
-        .get_or_init(|| Regex::new(r"\[([^\]]*)\]\(([A-Za-z][A-Za-z0-9+.-]*):[^)]*\)").unwrap());
+    let html =
+        HTML.get_or_init(|| Regex::new(r"</?[A-Za-z][^>]*>").expect("a literal pattern compiles"));
+    let link = LINK.get_or_init(|| {
+        Regex::new(r"\[([^\]]*)\]\(([A-Za-z][A-Za-z0-9+.-]*):[^)]*\)")
+            .expect("a literal pattern compiles")
+    });
     let no_html = html.replace_all(text, "");
     link.replace_all(&no_html, |c: &regex::Captures| {
         let scheme = c[2].to_ascii_lowercase();
@@ -79,7 +82,7 @@ fn sanitize_doc(text: &str) -> String {
 /// whose definitions live in files we do not load; neutralize every
 /// non-predefined entity so the XML still parses standalone.
 fn neutralize_entities(xml: &str) -> String {
-    let re = Regex::new(r"&([a-zA-Z][a-zA-Z0-9._-]*);").unwrap();
+    let re = Regex::new(r"&([a-zA-Z][a-zA-Z0-9._-]*);").expect("a literal pattern compiles");
     re.replace_all(xml, |c: &regex::Captures| {
         let name = &c[1];
         match name {
@@ -627,12 +630,16 @@ pub fn function_aliases_from_c(c_src: &str, documented: &[Item]) -> Vec<Item> {
         Regex::new(
             r#"\{\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*,\s*\(\s*cmd_function\s*\)\s*&?\s*([A-Za-z_][A-Za-z0-9_]*)"#,
         )
-        .unwrap()
+        .expect("a literal pattern compiles")
     });
     let src = strip_c_comments(c_src);
     let exports: Vec<(&str, &str)> = entry
         .captures_iter(&src)
-        .map(|c| (c.get(1).unwrap().as_str(), c.get(2).unwrap().as_str()))
+        .map(|c| {
+            let name = c.get(1).expect("group 1 is not optional");
+            let handler = c.get(2).expect("group 2 is not optional");
+            (name.as_str(), handler.as_str())
+        })
         .collect();
     let mut out: Vec<Item> = Vec::new();
     for (name, handler) in &exports {
@@ -1359,7 +1366,8 @@ fn is_spelling(w: &str) -> bool {
 /// nobody can write.
 pub fn lexer_spellings(pattern: &str) -> Vec<String> {
     static GROUP: OnceLock<Regex> = OnceLock::new();
-    let group = GROUP.get_or_init(|| Regex::new(r"\(([^()]*)\)").unwrap());
+    let group =
+        GROUP.get_or_init(|| Regex::new(r"\(([^()]*)\)").expect("a literal pattern compiles"));
     let words = |t: &str| -> Vec<String> {
         t.split('"')
             .filter(|w| is_spelling(w))
@@ -1436,7 +1444,8 @@ fn reconcile_core_with_grammar(core: &mut CoreDocs, cfg_y: &str, cfg_lex: &str) 
         .map(|i| {
             let rest = &cfg_y[i + 1..];
             static NEXT: OnceLock<Regex> = OnceLock::new();
-            let next = NEXT.get_or_init(|| Regex::new(r"\n[a-z_]+:").unwrap());
+            let next =
+                NEXT.get_or_init(|| Regex::new(r"\n[a-z_]+:").expect("a literal pattern compiles"));
             match next.find(&rest["assign_stm:".len()..]) {
                 Some(m) => &rest[.."assign_stm:".len() + m.start()],
                 None => rest,
@@ -1691,8 +1700,10 @@ pub fn harvest_socket_modifiers(tree_root: &Path) -> Vec<Item> {
 /// a source tree.
 pub fn parse_log_levels_c(src: &str) -> Vec<String> {
     static CASE: OnceLock<Regex> = OnceLock::new();
-    let case = CASE
-        .get_or_init(|| Regex::new(r"case\s*'([A-Z])'\s*:[^;{}]*?(L_[A-Z][A-Z0-9_]*)").unwrap());
+    let case = CASE.get_or_init(|| {
+        Regex::new(r"case\s*'([A-Z])'\s*:[^;{}]*?(L_[A-Z][A-Z0-9_]*)")
+            .expect("a literal pattern compiles")
+    });
     let Some(end) = src.find("unknown log level") else {
         return Vec::new();
     };

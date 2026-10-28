@@ -277,16 +277,15 @@ pub fn outline(text: &str) -> Vec<Sym> {
     // blocks, outermost first: each goes under the innermost block
     // already placed that contains it
     let mut stack: Vec<(usize, Sym)> = Vec::new();
-    let finish = |stack: &mut Vec<(usize, Sym)>, top: &mut Vec<(usize, Sym)>| {
-        let (_, sym) = stack.pop().unwrap();
-        match stack.last_mut() {
-            Some((_, parent)) => parent.children.push(sym),
-            None => top.push((offset_of(&lines, sym.span), sym)),
-        }
+    let place = |stack: &mut Vec<(usize, Sym)>, top: &mut Vec<(usize, Sym)>, sym: Sym| match stack
+        .last_mut()
+    {
+        Some((_, parent)) => parent.children.push(sym),
+        None => top.push((offset_of(&lines, sym.span), sym)),
     };
     for n in &nodes {
-        while stack.last().is_some_and(|(end, _)| n.start >= *end) {
-            finish(&mut stack, &mut top);
+        while let Some((_, sym)) = stack.pop_if(|(end, _)| n.start >= *end) {
+            place(&mut stack, &mut top, sym);
         }
         stack.push((
             n.end,
@@ -304,8 +303,8 @@ pub fn outline(text: &str) -> Vec<Sym> {
             },
         ));
     }
-    while !stack.is_empty() {
-        finish(&mut stack, &mut top);
+    while let Some((_, sym)) = stack.pop() {
+        place(&mut stack, &mut top, sym);
     }
     top.sort_by_key(|(at, _)| *at);
     top.into_iter().map(|(_, s)| s).collect()

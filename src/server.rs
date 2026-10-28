@@ -58,10 +58,31 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::time::Duration;
 use tokio::io::AsyncRead;
 use tower_lsp_server::ls_types::notification::Notification;
+
+/// Reads a setting or cache that a handler may be writing.
+///
+/// # Panics
+///
+/// Panics when the lock is poisoned: a handler panicked while it wrote the
+/// value, so the value may be half-written and is never read.
+fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
+    lock.read()
+        .expect("poisoned: a handler panicked while holding it")
+}
+
+/// Writes a setting or cache that other handlers read.
+///
+/// # Panics
+///
+/// Panics when the lock is poisoned, as [`read_lock`] does.
+fn write_lock<T>(lock: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
+    lock.write()
+        .expect("poisoned: a handler panicked while holding it")
+}
 
 /// Parameters of the `opensips/analysisRoot` request.
 #[derive(Debug, Clone, Deserialize)]
@@ -386,7 +407,7 @@ impl State {
         // a client that pulls gets everything through
         // `textDocument/diagnostic`; pushing as well shows each
         // problem twice
-        if *self.diagnostics_pulled.read().unwrap() {
+        if *read_lock(&self.diagnostics_pulled) {
             return;
         }
         let merged = self.merged_diags(uri, text, self.open_docs_snapshot(), root);
@@ -408,19 +429,19 @@ impl State {
         open: HashMap<PathBuf, String>,
         root: Option<&Path>,
     ) -> Vec<Diagnostic> {
-        let cap = *self.max_diagnostics.read().unwrap();
+        let cap = *read_lock(&self.max_diagnostics);
         let mut merged = self
             .check_diags
             .get(uri)
             .map(|v| v.clone())
             .unwrap_or_default();
-        if *self.analyzer_enabled.read().unwrap()
+        if *read_lock(&self.analyzer_enabled)
             && let Some(path) = uri.to_file_path()
         {
             let loader = Self::make_loader(open);
-            let cat = self.catalog.read().unwrap().clone();
+            let cat = read_lock(&self.catalog).clone();
             let (files, truncated) = Self::closure_rooted_at_bounded(root, &path, text, &loader);
-            let origin = self.catalog_origin.read().unwrap().clone();
+            let origin = read_lock(&self.catalog_origin).clone();
             merged.extend(Self::analyzer_lsp_diags(
                 &files, truncated, &path, text, &cat, &origin,
             ));
@@ -437,29 +458,29 @@ impl State {
             .get("inlayHintParameterNames")
             .and_then(|v| v.as_bool())
         {
-            *self.inlay_parameter_names.write().unwrap() = b;
+            *write_lock(&self.inlay_parameter_names) = b;
         }
         if let Some(b) = opts.get("snippetCompletions").and_then(|v| v.as_bool()) {
-            *self.snippet_completions.write().unwrap() = b;
+            *write_lock(&self.snippet_completions) = b;
         }
         if let Some(b) = opts.get("analyzerDiagnostics").and_then(|v| v.as_bool()) {
-            *self.analyzer_enabled.write().unwrap() = b;
+            *write_lock(&self.analyzer_enabled) = b;
         }
         if let Some(b) = opts.get("codeLensReferences").and_then(|v| v.as_bool()) {
-            *self.code_lens_refs.write().unwrap() = b;
+            *write_lock(&self.code_lens_refs) = b;
         }
         // absent means unchanged: a didChangeConfiguration payload that
         // omits it must not silently turn assistance back on
         if let Some(b) = opts.get("assistance").and_then(|v| v.as_bool()) {
-            *self.assistance.write().unwrap() = b;
+            *write_lock(&self.assistance) = b;
         } else if let Ok(v) = std::env::var("OPENSIPS_LSP_ASSISTANCE") {
-            *self.assistance.write().unwrap() = !(v == "0" || v.eq_ignore_ascii_case("false"));
+            *write_lock(&self.assistance) = !(v == "0" || v.eq_ignore_ascii_case("false"));
         }
         if let Some(n) = opts.get("maxDiagnostics").and_then(|v| v.as_u64()) {
-            *self.max_diagnostics.write().unwrap() = (n as usize).max(1);
+            *write_lock(&self.max_diagnostics) = (n as usize).max(1);
         }
         if let Some(ms) = opts.get("checkTimeoutMs").and_then(|v| v.as_u64()) {
-            *self.check_timeout.write().unwrap() = logic::resolve_timeout(
+            *write_lock(&self.check_timeout) = logic::resolve_timeout(
                 Some(ms),
                 std::env::var("OPENSIPS_LSP_CHECK_TIMEOUT_MS").ok(),
             );
@@ -665,7 +686,7 @@ impl State {
     /// The bound is announced rather than silent: a truncated sweep
     /// that looks complete is worse than one that says it stopped.
     fn workspace_configs(&self, limit: usize) -> (Vec<PathBuf>, bool) {
-        logic::scan_configs(&self.workspace_roots.read().unwrap(), limit)
+        logic::scan_configs(&read_lock(&self.workspace_roots), limit)
     }
 
     /// Ask the client to watch the files whose contents this server
@@ -684,14 +705,14 @@ impl State {
     async fn register_watchers(&self) {
         // registering against a client that never declared support is
         // a request that may never be answered
-        if !*self.watched_files_dynamic.read().unwrap() {
+        if !*read_lock(&self.watched_files_dynamic) {
             return;
         }
         let mut watchers = vec![FileSystemWatcher {
             glob_pattern: GlobPattern::String(logic::config_watch_glob()),
             kind: None,
         }];
-        if let Some(src) = self.src.read().unwrap().clone()
+        if let Some(src) = read_lock(&self.src).clone()
             && let Some(base) = Uri::from_file_path(&src)
         {
             for pat in [
@@ -735,7 +756,7 @@ impl State {
     /// content-aware, so a changed file misses it by construction
     /// rather than by any special casing here.
     async fn harvest(&self, with_progress: bool) -> bool {
-        let src = self.src.read().unwrap().clone();
+        let src = read_lock(&self.src).clone();
         let mut cached = false;
         if let Some(src) = src {
             // editors showing workDoneProgress see the harvest as a
@@ -771,7 +792,7 @@ impl State {
             }
             // the harvest runs off the executor thread and outside the
             // handshake; results are cached per tree fingerprint
-            let cache_opt = self.cache_dir_opt.read().unwrap().clone();
+            let cache_opt = read_lock(&self.cache_dir_opt).clone();
             let src_tree = src.clone();
             let (harvested, core, hit) = tokio::task::spawn_blocking(move || {
                 let p = Path::new(&src_tree);
@@ -810,10 +831,10 @@ impl State {
             // a tree the user configured is exact for their build, so
             // its diagnostics name the tree rather than a version
             if !empty {
-                *self.catalog_origin.write().unwrap() = CatalogOrigin::ConfiguredTree;
+                *write_lock(&self.catalog_origin) = CatalogOrigin::ConfiguredTree;
             }
-            *self.catalog.write().unwrap() = harvested;
-            *self.core.write().unwrap() = core;
+            *write_lock(&self.catalog) = harvested;
+            *write_lock(&self.core) = core;
             cached = hit;
             if progress {
                 self.client
@@ -850,7 +871,7 @@ impl State {
     /// fragment to a parent it no longer has.  The invalidation points
     /// are [`Self::invalidate_include_graph`]'s callers.
     fn include_graph(&self) -> Arc<IncludeGraph> {
-        if let Some(g) = self.include_graph.read().unwrap().clone() {
+        if let Some(g) = read_lock(&self.include_graph).clone() {
             return g;
         }
         let (configs, truncated) = self.workspace_configs(logic::MAX_CONFIG_FILES);
@@ -920,13 +941,13 @@ impl State {
             });
         }
         let g = Arc::new(IncludeGraph::build(&scanned));
-        *self.include_graph.write().unwrap() = Some(g.clone());
+        *write_lock(&self.include_graph) = Some(g.clone());
         g
     }
 
     /// Drop the cached include graph; the next question rebuilds it.
     fn invalidate_include_graph(&self) {
-        *self.include_graph.write().unwrap() = None;
+        *write_lock(&self.include_graph) = None;
     }
 
     /// The config `uri` must be analysed as part of, or `None` when it
@@ -1031,8 +1052,7 @@ impl State {
     /// be invited, or an answer computed before the checker finished
     /// would be the last word.
     async fn refresh_diagnostics(&self) {
-        let should =
-            *self.diagnostics_pulled.read().unwrap() && *self.diagnostics_refresh.read().unwrap();
+        let should = *read_lock(&self.diagnostics_pulled) && *read_lock(&self.diagnostics_refresh);
         if should {
             let _ = self
                 .client
@@ -1067,8 +1087,8 @@ impl State {
             .get(uri)
             .map(|d| d.clone())
             .unwrap_or((0, String::new()));
-        let cap = *self.max_diagnostics.read().unwrap();
-        let Some(bin) = self.opensips_bin.read().unwrap().clone() else {
+        let cap = *read_lock(&self.max_diagnostics);
+        let Some(bin) = read_lock(&self.opensips_bin).clone() else {
             // -C disabled: analyzer-only pass
             self.check_diags.insert(uri.clone(), Vec::new());
             self.merge_and_publish(
@@ -1155,7 +1175,7 @@ impl State {
             let status = child.wait().await?;
             Ok((Some(status), o_buf, e_buf))
         };
-        let check_timeout = *self.check_timeout.read().unwrap();
+        let check_timeout = *read_lock(&self.check_timeout);
         // watch for a newer check while the subprocess runs: dropping
         // `fut` kills the child (kill_on_drop)
         let super_watch = async {
@@ -1314,7 +1334,7 @@ impl State {
 impl LanguageServer for Backend {
     async fn initialize(&self, p: InitializeParams) -> Result<InitializeResult> {
         // Resolution order: initializationOptions, then environment.
-        *self.watched_files_dynamic.write().unwrap() = p
+        *write_lock(&self.watched_files_dynamic) = p
             .capabilities
             .workspace
             .as_ref()
@@ -1323,20 +1343,20 @@ impl LanguageServer for Backend {
             .unwrap_or(false);
         // a client that pulls must not also be pushed to: it would
         // show every diagnostic twice
-        *self.diagnostics_pulled.write().unwrap() = p
+        *write_lock(&self.diagnostics_pulled) = p
             .capabilities
             .text_document
             .as_ref()
             .and_then(|t| t.diagnostic.as_ref())
             .is_some();
-        *self.diagnostics_refresh.write().unwrap() = p
+        *write_lock(&self.diagnostics_refresh) = p
             .capabilities
             .workspace
             .as_ref()
             .and_then(|w| w.diagnostics.as_ref())
             .and_then(|d| d.refresh_support)
             .unwrap_or(false);
-        *self.workspace_roots.write().unwrap() = p
+        *write_lock(&self.workspace_roots) = p
             .workspace_folders
             .iter()
             .flatten()
@@ -1347,13 +1367,13 @@ impl LanguageServer for Backend {
             opts.get("opensipsPath").and_then(|v| v.as_str()),
             std::env::var("OPENSIPS_LSP_BIN").ok(),
         );
-        *self.opensips_bin.write().unwrap() = bin;
+        *write_lock(&self.opensips_bin) = bin;
 
         self.apply_runtime_opts(&opts);
         if let Some(d) = opts.get("cacheDir").and_then(|v| v.as_str())
             && !d.is_empty()
         {
-            *self.cache_dir_opt.write().unwrap() = Some(d.to_string());
+            *write_lock(&self.cache_dir_opt) = Some(d.to_string());
         }
 
         let src = opts
@@ -1364,9 +1384,9 @@ impl LanguageServer for Backend {
             .filter(|s| !s.is_empty());
         // the harvest happens in `initialized` so a large tree never
         // delays the initialize handshake
-        *self.src.write().unwrap() = src;
+        *write_lock(&self.src) = src;
 
-        *self.version_in_hints.write().unwrap() = opts
+        *write_lock(&self.version_in_hints) = opts
             .get("versionInHints")
             .and_then(|v| v.as_bool())
             .unwrap_or_else(|| {
@@ -1375,7 +1395,7 @@ impl LanguageServer for Backend {
                     .unwrap_or(false)
             });
 
-        *self.wanted_version.write().unwrap() = opts
+        *write_lock(&self.wanted_version) = opts
             .get("opensipsVersion")
             .and_then(|v| v.as_str())
             .map(str::to_string)
@@ -1499,18 +1519,18 @@ impl LanguageServer for Backend {
         // real tree always wins, because only that is exact for the
         // user's build.
         let builtin = {
-            let core = self.core.read().unwrap();
+            let core = read_lock(&self.core);
             core.functions.is_empty() && core.params.is_empty() && core.pvars.is_empty()
         };
         if builtin {
             let mut core = catalog::builtin_core().core.clone();
-            if *self.version_in_hints.read().unwrap() {
+            if *read_lock(&self.version_in_hints) {
                 // the core catalogue is one vendored artefact: it names
                 // its OWN release, not the module release in use
                 let note = catalog::version_note("core", &catalog::builtin_core().version);
                 catalog::note_core(&mut core, &note);
             }
-            *self.core.write().unwrap() = core;
+            *write_lock(&self.core) = core;
         }
         // The same argument one level up: `is_method` is a sipmsgops
         // function, so a core-only fallback still left every module
@@ -1518,9 +1538,9 @@ impl LanguageServer for Backend {
         // a module exports moves between releases, so a harvested tree
         // REPLACES this rather than merging — blending two versions
         // would be wrong in a way neither is alone.
-        let builtin_mods = self.catalog.read().unwrap().is_empty();
+        let builtin_mods = read_lock(&self.catalog).is_empty();
         if builtin_mods {
-            let wanted = self.wanted_version.read().unwrap().clone();
+            let wanted = read_lock(&self.wanted_version).clone();
             // An unsupported release must not silently become the
             // newest: the user would then read warnings about a
             // release they did not ask for, with nothing saying so.
@@ -1545,15 +1565,15 @@ impl LanguageServer for Backend {
                 None => catalog::builtin_modules().clone(),
             };
             let mut modules = chosen.modules;
-            if *self.version_in_hints.read().unwrap() {
+            if *read_lock(&self.version_in_hints) {
                 let note = catalog::version_note("module", &chosen.version);
                 catalog::note_modules(&mut modules, &note);
             }
-            *self.catalog.write().unwrap() = modules;
-            *self.catalog_origin.write().unwrap() = CatalogOrigin::BuiltIn(chosen.version);
+            *write_lock(&self.catalog) = modules;
+            *write_lock(&self.catalog_origin) = CatalogOrigin::BuiltIn(chosen.version);
         }
-        let n = self.catalog.read().unwrap().len();
-        let c = self.core.read().unwrap().functions.len();
+        let n = read_lock(&self.catalog).len();
+        let c = read_lock(&self.core).functions.len();
         let mut tag = if cached {
             ", cached".to_string()
         } else {
@@ -1574,7 +1594,7 @@ impl LanguageServer for Backend {
         }
         // Tell the client what it is judging against, so the editor can
         // show it without waiting for something to go wrong.
-        let origin = self.catalog_origin.read().unwrap().clone();
+        let origin = read_lock(&self.catalog_origin).clone();
         self.client
             .send_notification::<CatalogueNotification>(CatalogueStatus {
                 describe: origin.describe(),
@@ -1672,7 +1692,7 @@ impl LanguageServer for Backend {
             }
         }
         // debounced analyzer pass: fast feedback between saves
-        if !*self.analyzer_enabled.read().unwrap() || uri.scheme().as_str() != "file" {
+        if !*read_lock(&self.analyzer_enabled) || uri.scheme().as_str() != "file" {
             return;
         }
         let generation = {
@@ -1800,7 +1820,7 @@ impl LanguageServer for Backend {
 
     async fn did_change_workspace_folders(&self, p: DidChangeWorkspaceFoldersParams) {
         {
-            let mut roots = self.workspace_roots.write().unwrap();
+            let mut roots = write_lock(&self.workspace_roots);
             for removed in &p.event.removed {
                 if let Some(path) = removed.uri.to_file_path() {
                     roots.retain(|r| *r != *path);
@@ -1821,7 +1841,7 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_watched_files(&self, p: DidChangeWatchedFilesParams) {
-        let src = self.src.read().unwrap().clone();
+        let src = read_lock(&self.src).clone();
         let mut doc_tree_changed = false;
         let mut changed: Vec<PathBuf> = Vec::new();
         for ev in &p.changes {
@@ -1882,7 +1902,7 @@ impl LanguageServer for Backend {
     }
 
     async fn completion(&self, p: CompletionParams) -> Result<Option<CompletionResponse>> {
-        if !*self.assistance.read().unwrap() {
+        if !*read_lock(&self.assistance) {
             return Ok(None);
         }
         let uri = p.text_document_position.text_document.uri;
@@ -1952,9 +1972,9 @@ impl LanguageServer for Backend {
             }
         });
         let files = self.closure_for(&uri, &text);
-        let cat = self.catalog.read().unwrap();
-        let core = self.core.read().unwrap();
-        let snippets = *self.snippet_completions.read().unwrap();
+        let cat = read_lock(&self.catalog);
+        let core = read_lock(&self.core);
+        let snippets = *read_lock(&self.snippet_completions);
         let items: Vec<CompletionItem> =
             logic::completions_with_core_files(&cat, &core, &files, &prefix)
                 .into_iter()
@@ -2010,7 +2030,7 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, p: HoverParams) -> Result<Option<Hover>> {
-        if !*self.assistance.read().unwrap() {
+        if !*read_lock(&self.assistance) {
             return Ok(None);
         }
         let uri = p.text_document_position_params.text_document.uri;
@@ -2025,8 +2045,8 @@ impl LanguageServer for Backend {
         let Some(word) = analyze::word_at(line, byte_col) else {
             return Ok(None);
         };
-        let cat = self.catalog.read().unwrap();
-        let core = self.core.read().unwrap();
+        let cat = read_lock(&self.catalog);
+        let core = read_lock(&self.core);
         Ok(
             logic::hover_markdown_at(&cat, &core, &text, &word, pos.line, byte_col as u32).map(
                 |md| Hover {
@@ -2115,8 +2135,8 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let prefix = State::line_prefix(&text, pos);
-        let cat = self.catalog.read().unwrap();
-        let core = self.core.read().unwrap();
+        let cat = read_lock(&self.catalog);
+        let core = read_lock(&self.core);
         Ok(
             logic::signature_at(&cat, &core, &text, &prefix).map(|(sig, doc, active)| {
                 // parameter labels: TOP-LEVEL comma-separated pieces
@@ -2495,7 +2515,7 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let cat = self.catalog.read().unwrap();
+        let cat = read_lock(&self.catalog);
         let mut out: Vec<CodeActionOrCommand> = Vec::new();
 
         // Extract is offered for a real selection of whole lines, not
@@ -2615,7 +2635,7 @@ impl LanguageServer for Backend {
     }
 
     async fn code_lens(&self, p: CodeLensParams) -> Result<Option<Vec<CodeLens>>> {
-        if !*self.code_lens_refs.read().unwrap() {
+        if !*read_lock(&self.code_lens_refs) {
             return Ok(None);
         }
         let uri = p.text_document.uri;
@@ -2659,14 +2679,14 @@ impl LanguageServer for Backend {
     }
 
     async fn inlay_hint(&self, p: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
-        if !*self.inlay_parameter_names.read().unwrap() {
+        if !*read_lock(&self.inlay_parameter_names) {
             return Ok(Some(Vec::new()));
         }
         let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let cat = self.catalog.read().unwrap();
-        let core = self.core.read().unwrap();
+        let cat = read_lock(&self.catalog);
+        let core = read_lock(&self.core);
         // the client asks for a viewport, so only pay for what is on
         // screen
         let lines = State::lines_of(&text);

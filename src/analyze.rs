@@ -90,7 +90,7 @@ fn scan(text: &str) -> (Vec<Class>, Class) {
                     open = Class::Comment;
                 }
             }
-            b'$' if script_var_open(b, i).is_some() => {
+            b'$' => match script_var_open(b, i) {
                 // `$`, the name and `(` count as code, the interior as
                 // a script variable and the closing `)` as code again,
                 // as a quoted string's quotes do.  cfg.lex counts
@@ -98,26 +98,30 @@ fn scan(text: &str) -> (Vec<Class>, Class) {
                 // one is open, a newline included; this ends the
                 // variable at the newline, so a `$(` being typed does
                 // not swallow the rest of the document.
-                i = script_var_open(b, i).unwrap();
-                let mut depth = 1usize;
-                while i < b.len() && b[i] != b'\n' {
-                    match b[i] {
-                        b'(' => depth += 1,
-                        b')' => depth -= 1,
-                        _ => {}
+                Some(after) => {
+                    i = after;
+                    let mut depth = 1usize;
+                    while i < b.len() && b[i] != b'\n' {
+                        match b[i] {
+                            b'(' => depth += 1,
+                            b')' => depth -= 1,
+                            _ => {}
+                        }
+                        if depth == 0 {
+                            break;
+                        }
+                        out[i] = Class::ScriptVar;
+                        i += 1;
                     }
-                    if depth == 0 {
-                        break;
+                    if i < b.len() && b[i] == b')' {
+                        i += 1; // the closing parenthesis
+                    } else if i == b.len() {
+                        open = Class::ScriptVar;
                     }
-                    out[i] = Class::ScriptVar;
-                    i += 1;
                 }
-                if i < b.len() && b[i] == b')' {
-                    i += 1; // the closing parenthesis
-                } else if i == b.len() {
-                    open = Class::ScriptVar;
-                }
-            }
+                // not a script variable: `$` alone is code
+                None => i += 1,
+            },
             // OpenSIPS strings come double- OR single-quoted; cfg.lex
             // gives only the double-quoted STRING1 backslash escapes,
             // the single-quoted STRING2 ends at the next `'`
@@ -214,7 +218,7 @@ macro_rules! static_regex {
     ($name:ident, $pat:expr) => {
         fn $name() -> &'static Regex {
             static RE: OnceLock<Regex> = OnceLock::new();
-            RE.get_or_init(|| Regex::new($pat).unwrap())
+            RE.get_or_init(|| Regex::new($pat).expect("a literal pattern compiles"))
         }
     };
 }
@@ -382,11 +386,14 @@ pub(crate) fn loadmodule_statements(text: &str) -> Vec<LoadStatement> {
     let lines = Lines::new(text);
     let mut out = Vec::new();
     for c in re_loadmodule().captures_iter(text) {
-        let whole = c.get(0).unwrap();
+        let whole = c.get(0).expect("group 0 is the whole match");
         if classes.get(whole.start()) != Some(&Class::Code) {
             continue; // inside a comment or a string
         }
-        let path = c.get(1).or_else(|| c.get(2)).unwrap();
+        let path = c
+            .get(1)
+            .or_else(|| c.get(2))
+            .expect("the path matched one of the two quoted forms");
         let base = path
             .as_str()
             .rsplit('/')
@@ -454,7 +461,7 @@ pub fn route_blocks(text: &str) -> Vec<Block> {
     let b = text.as_bytes();
     let mut out = Vec::new();
     for c in re_route_def().captures_iter(text) {
-        let whole = c.get(0).unwrap();
+        let whole = c.get(0).expect("group 0 is the whole match");
         let start = whole.start();
         if classes.get(start) != Some(&Class::Code) {
             continue;
@@ -497,7 +504,11 @@ pub fn route_blocks(text: &str) -> Vec<Block> {
             .unwrap_or((line, col));
         out.push(Block {
             name: c.get(2).map(|m| m.as_str().to_string()).unwrap_or_default(),
-            kind: c.get(1).unwrap().as_str().to_string(),
+            kind: c
+                .get(1)
+                .expect("group 1 is not optional")
+                .as_str()
+                .to_string(),
             line,
             col,
             end_line,
@@ -592,7 +603,7 @@ pub fn armed_route_refs(text: &str) -> Vec<(Located, &'static str)> {
     let b = text.as_bytes();
     let mut out = Vec::new();
     for c in re_armed_route().captures_iter(text) {
-        let whole = c.get(0).unwrap();
+        let whole = c.get(0).expect("group 0 is the whole match");
         let start = whole.start();
         if classes.get(start) != Some(&Class::Code) || (start > 0 && is_word(b[start - 1])) {
             continue;
@@ -602,7 +613,10 @@ pub fn armed_route_refs(text: &str) -> Vec<(Located, &'static str)> {
             "t_on_reply" => "onreply_route",
             _ => "branch_route",
         };
-        let name = c.get(2).or_else(|| c.get(3)).unwrap();
+        let name = c
+            .get(2)
+            .or_else(|| c.get(3))
+            .expect("the name matched one of the two quoted forms");
         let (line, col) = lines.line_col(name.start());
         out.push((
             Located {
@@ -623,7 +637,7 @@ fn route_call_refs(text: &str) -> Vec<Located> {
     let re = re_route_ref();
     let mut out = Vec::new();
     for c in re.captures_iter(text) {
-        let whole = c.get(0).unwrap();
+        let whole = c.get(0).expect("group 0 is the whole match");
         let start = whole.start();
         if classes.get(start) != Some(&Class::Code) {
             continue;
@@ -632,7 +646,7 @@ fn route_call_refs(text: &str) -> Vec<Located> {
         if start > 0 && is_word(text.as_bytes()[start - 1]) {
             continue;
         }
-        let name = c.get(1).unwrap();
+        let name = c.get(1).expect("group 1 is not optional");
         let (line, col) = lines.line_col(name.start());
         out.push(Located {
             name: name.as_str().to_string(),
@@ -654,7 +668,7 @@ pub fn includes(text: &str) -> Vec<Located> {
     let lines = Lines::new(text);
     let mut out = Vec::new();
     for c in re_include().captures_iter(text) {
-        let whole = c.get(0).unwrap();
+        let whole = c.get(0).expect("group 0 is the whole match");
         let start = whole.start();
         // The flattener is line-oriented and runs BEFORE anything is
         // lexed: `cfg_pp.c:mk_included_file_path` skips leading
@@ -736,7 +750,7 @@ pub(crate) fn modparam_statements(text: &str) -> Vec<ModparamStatement> {
     let b = text.as_bytes();
     let mut out = Vec::new();
     for c in re_modparam_call().captures_iter(text) {
-        let whole = c.get(0).unwrap();
+        let whole = c.get(0).expect("group 0 is the whole match");
         let start = whole.start();
         if classes.get(start) != Some(&Class::Code) {
             continue;
@@ -748,7 +762,7 @@ pub(crate) fn modparam_statements(text: &str) -> Vec<ModparamStatement> {
         if module.contains('\0') || param.contains('\0') {
             continue;
         }
-        let pm = c.get(2).unwrap();
+        let pm = c.get(2).expect("group 2 is not optional");
         let (line, col) = lines.line_col(pm.start());
         // the value argument can hold parentheses of its own
         let mut depth = 1usize;

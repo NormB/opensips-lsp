@@ -80,7 +80,7 @@ macro_rules! static_regex {
     ($name:ident, $pat:expr) => {
         fn $name() -> &'static Regex {
             static RE: OnceLock<Regex> = OnceLock::new();
-            RE.get_or_init(|| Regex::new($pat).unwrap())
+            RE.get_or_init(|| Regex::new($pat).expect("a literal pattern compiles"))
         }
     };
 }
@@ -2012,11 +2012,11 @@ fn dedup_completions(items: Vec<Comp>) -> Vec<Comp> {
         }
     }
     let mut best: HashMap<String, usize> = HashMap::new();
-    let mut out: Vec<Option<Comp>> = Vec::with_capacity(items.len());
+    let mut out: Vec<Comp> = Vec::with_capacity(items.len());
     for c in items {
         match best.get(&c.label) {
             Some(&i) => {
-                let kept = out[i].as_ref().unwrap();
+                let kept = &out[i];
                 // On equal rank the documented one wins.  `exit` is
                 // offered twice — once as a bare keyword, once from
                 // the core docs — and both are keywords, so without
@@ -2027,16 +2027,16 @@ fn dedup_completions(items: Vec<Comp>) -> Vec<Comp> {
                         && kept.doc.is_empty()
                         && !c.doc.is_empty());
                 if better {
-                    out[i] = Some(c);
+                    out[i] = c;
                 }
             }
             None => {
                 best.insert(c.label.clone(), out.len());
-                out.push(Some(c));
+                out.push(c);
             }
         }
     }
-    out.into_iter().flatten().collect()
+    out
 }
 
 /// The statements that take socket modifiers. `listen` is the older
