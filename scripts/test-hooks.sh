@@ -9,10 +9,67 @@
 # The forbidden samples are put together at run time, so this file does not
 # contain them and can be committed through the hooks it tests.
 set -euo pipefail
-src="$(git rev-parse --show-toplevel)"
-work="$(mktemp -d)"
+# The tree this script belongs to, from its own path: from inside a hook,
+# git rev-parse would name the hook's repository.
+src="$(cd "$(dirname "$0")/.." && pwd -P)"
+while IFS= read -r var; do
+  unset "$var"
+done < <(env | sed -n 's/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p')
+work="$(cd "$(mktemp -d)" && pwd -P)"
 trap 'rm -rf "$work"' EXIT
 export CARGO_TARGET_DIR="$work/target"
+
+# git exports GIT_INDEX_FILE, the author, and in a linked worktree GIT_DIR, to
+# a hook. Run from one, the git commands below would act on the repository
+# that ran the hook: its config, its index, its commits. So the script clears
+# every GIT_ variable, and checks that each repository it makes is its own.
+#
+# The first case proves it. This script's setup, up to the stand-in's first
+# commit, runs from a real pre-commit hook of a scratch repository, from one
+# of that repository's linked worktrees, and with GIT_DIR and GIT_WORK_TREE
+# set by hand. The scratch repository's config, and what its commits hold,
+# must come out as they went in. TEST_HOOKS_SETUP_ONLY=1 stops the script
+# after the stand-in's first commit.
+if [ "${TEST_HOOKS_SETUP_ONLY:-}" != 1 ]; then
+  outer="$work/outer"
+  git init -q -b main "$outer"
+  git -C "$outer" config user.name "Outer User"
+  git -C "$outer" config user.email "outer@example.com"
+  git -C "$outer" config commit.gpgsign false
+  git -C "$outer" config core.hooksPath "$work/outer-hooks"
+  mkdir -p "$work/outer-hooks"
+  printf '#!/usr/bin/env bash\nTEST_HOOKS_SETUP_ONLY=1 exec "%s/scripts/test-hooks.sh"\n' "$src" >"$work/outer-hooks/pre-commit"
+  chmod +x "$work/outer-hooks/pre-commit"
+  echo x >"$outer/f"
+  git -C "$outer" add f
+  git -C "$outer" -c core.hooksPath=/dev/null commit -q -m "Start the scratch repository"
+  git -C "$outer" worktree add -q -b side "$work/outer-side"
+  cp "$outer/.git/config" "$work/outer-config"
+  outer_run() { # outer_run <what> <command...>
+    if ! "${@:2}" >"$work/out" 2>&1; then
+      echo "FAIL: the setup failed when run $1"
+      sed 's/^/    /' "$work/out" | tail -8
+      exit 1
+    fi
+  }
+  echo y >"$outer/f" && git -C "$outer" add f
+  outer_run "from a hook" git -C "$outer" commit -q -m "Run the setup from a hook"
+  echo z >"$work/outer-side/f" && git -C "$work/outer-side" add f
+  outer_run "from a hook in a linked worktree" git -C "$work/outer-side" commit -q -m "Run it from a worktree"
+  outer_run "with GIT_DIR set" env GIT_DIR="$outer/.git" GIT_WORK_TREE="$outer" TEST_HOOKS_SETUP_ONLY=1 "$src/scripts/test-hooks.sh"
+  if ! cmp -s "$work/outer-config" "$outer/.git/config"; then
+    echo "FAIL: run from a hook, the setup changed the config of the hook's repository:"
+    diff "$work/outer-config" "$outer/.git/config" | sed 's/^/    /'
+    exit 1
+  fi
+  for b in main side; do
+    held="$(git -C "$outer" ls-tree -r --name-only "$b")"
+    if [ "$held" != f ]; then
+      echo "FAIL: run from a hook, the setup put files in the hook's repository ($b holds: ${held//$'\n'/ })"
+      exit 1
+    fi
+  done
+fi
 
 ssh-keygen -q -t ed25519 -N '' -C test -f "$work/good"
 ssh-keygen -q -t ed25519 -N '' -C test -f "$work/stranger"
@@ -23,6 +80,11 @@ repo="$work/repo"
 mkdir -p "$repo/src" "$repo/scripts" "$repo/fuzz/src" "$repo/client/node_modules"
 cd "$repo"
 git init -q -b main
+# Every git command from here on must act on this repository and no other.
+if [ "$(git rev-parse --absolute-git-dir)" != "$repo/.git" ]; then
+  echo "FAIL: git acts on $(git rev-parse --absolute-git-dir), not the throwaway repository; refusing to go on"
+  exit 1
+fi
 git config user.name "Test User"
 git config user.email "test@example.com"
 git config gpg.format ssh
@@ -99,6 +161,9 @@ if ! git commit -q -m "Start the fixture" >"$work/out" 2>&1; then
   echo "FAIL: the clean first commit was refused"
   sed 's/^/    /' "$work/out"
   exit 1
+fi
+if [ "${TEST_HOOKS_SETUP_ONLY:-}" = 1 ]; then
+  exit 0
 fi
 
 pass=0
