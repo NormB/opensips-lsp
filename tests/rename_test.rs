@@ -14,8 +14,9 @@
 //!   `ref_script_route_by_name(..., sroutes->request, ...)`); NAME is a
 //!   `route_name`: an ID, a NUMBER or a STRING.
 
-use opensips_lsp::analyze::route_refs;
-use opensips_lsp::logic::{RouteNs, ns_occurrences, rename_conflict, route_symbol_ns_at};
+use opensips_lsp::analyze::Located;
+use opensips_lsp::logic::RouteNs;
+use opensips_lsp::{analyze, logic};
 use std::path::PathBuf;
 
 const ARMED: &str = r#"route {
@@ -39,7 +40,7 @@ branch_route[br] {
 }
 "#;
 
-fn spots(occ: &[(opensips_lsp::analyze::Located, bool)]) -> Vec<(u32, u32, bool)> {
+fn spots(occ: &[(Located, bool)]) -> Vec<(u32, u32, bool)> {
     let mut v: Vec<_> = occ.iter().map(|(l, d)| (l.line, l.col, *d)).collect();
     v.sort();
     v
@@ -47,7 +48,7 @@ fn spots(occ: &[(opensips_lsp::analyze::Located, bool)]) -> Vec<(u32, u32, bool)
 
 #[test]
 fn a_failure_route_is_named_by_the_strings_that_arm_it() {
-    let occ = ns_occurrences(ARMED, "fr", &RouteNs::Kind("failure_route".into()));
+    let occ = logic::ns_occurrences(ARMED, "fr", &RouteNs::Kind("failure_route".into()));
     assert_eq!(
         spots(&occ),
         vec![
@@ -62,9 +63,9 @@ fn a_failure_route_is_named_by_the_strings_that_arm_it() {
 
 #[test]
 fn reply_and_branch_routes_are_armed_by_their_own_functions() {
-    let reply = ns_occurrences(ARMED, "fr", &RouteNs::Kind("onreply_route".into()));
+    let reply = logic::ns_occurrences(ARMED, "fr", &RouteNs::Kind("onreply_route".into()));
     assert_eq!(spots(&reply), vec![(6, 16, false), (13, 14, true)]);
-    let branch = ns_occurrences(ARMED, "br", &RouteNs::Kind("branch_route".into()));
+    let branch = logic::ns_occurrences(ARMED, "br", &RouteNs::Kind("branch_route".into()));
     assert_eq!(spots(&branch), vec![(7, 17, false), (16, 13, true)]);
 }
 
@@ -72,15 +73,15 @@ fn reply_and_branch_routes_are_armed_by_their_own_functions() {
 fn the_cursor_on_an_arming_string_names_that_routes_namespace() {
     // inside the quotes of t_on_failure("fr")
     assert_eq!(
-        route_symbol_ns_at(ARMED, 1, 19),
+        logic::route_symbol_ns_at(ARMED, 1, 19),
         Some(("fr".into(), RouteNs::Kind("failure_route".into())))
     );
     assert_eq!(
-        route_symbol_ns_at(ARMED, 6, 17),
+        logic::route_symbol_ns_at(ARMED, 6, 17),
         Some(("fr".into(), RouteNs::Kind("onreply_route".into())))
     );
     // the pvar string is not a name
-    assert_eq!(route_symbol_ns_at(ARMED, 3, 20), None);
+    assert_eq!(logic::route_symbol_ns_at(ARMED, 3, 20), None);
 }
 
 const RESUME: &str = r#"route {
@@ -97,7 +98,7 @@ route[resume] {
 
 #[test]
 fn async_and_launch_name_a_request_route_in_their_second_argument() {
-    let refs: Vec<(String, u32, u32)> = route_refs(RESUME)
+    let refs: Vec<(String, u32, u32)> = analyze::route_refs(RESUME)
         .into_iter()
         .map(|r| (r.name, r.line, r.col))
         .collect();
@@ -109,7 +110,7 @@ fn async_and_launch_name_a_request_route_in_their_second_argument() {
             ("resume".into(), 3, 21),
         ]
     );
-    let occ = ns_occurrences(RESUME, "resume", &RouteNs::Main);
+    let occ = logic::ns_occurrences(RESUME, "resume", &RouteNs::Main);
     assert_eq!(occ.len(), 4, "three call sites and the definition");
 }
 
@@ -125,17 +126,21 @@ fn a_rename_onto_an_existing_route_in_the_same_namespace_conflicts() {
             "route[other] {\n    exit;\n}\nfailure_route[free] {\n    exit;\n}\n".to_string(),
         ),
     ];
-    let hit = rename_conflict(&files, "taken", &RouteNs::Main).expect("taken is defined");
+    let hit = logic::rename_conflict(&files, "taken", &RouteNs::Main).expect("taken is defined");
     assert_eq!(hit.0, PathBuf::from("/a.cfg"));
     assert_eq!((hit.1.line, hit.1.col), (0, 6));
     // another namespace's name is not a conflict
-    assert!(rename_conflict(&files, "free", &RouteNs::Main).is_none());
-    assert!(rename_conflict(&files, "taken", &RouteNs::Kind("failure_route".into())).is_none());
-    assert!(rename_conflict(&files, "free", &RouteNs::Kind("failure_route".into())).is_some());
+    assert!(logic::rename_conflict(&files, "free", &RouteNs::Main).is_none());
+    assert!(
+        logic::rename_conflict(&files, "taken", &RouteNs::Kind("failure_route".into())).is_none()
+    );
+    assert!(
+        logic::rename_conflict(&files, "free", &RouteNs::Kind("failure_route".into())).is_some()
+    );
     // a name that is only CALLED is not defined, so it is free
     let called = vec![(
         PathBuf::from("/c.cfg"),
         "route {\n    route(ghost);\n}\n".to_string(),
     )];
-    assert!(rename_conflict(&called, "ghost", &RouteNs::Main).is_none());
+    assert!(logic::rename_conflict(&called, "ghost", &RouteNs::Main).is_none());
 }

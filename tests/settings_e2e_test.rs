@@ -5,11 +5,13 @@
 //!   - cacheDir: catalog cache location as an initialization option
 
 mod common;
-use common::*;
-use std::process::{Command, Stdio};
+use common::Server;
+use std::path::{Path, PathBuf};
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::mpsc::Receiver;
 
-fn mk_tree(root: &std::path::Path) {
-    let w = |p: std::path::PathBuf, c: &str| {
+fn mk_tree(root: &Path) {
+    let w = |p: PathBuf, c: &str| {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, c).unwrap();
     };
@@ -26,10 +28,10 @@ fn boot(
 ) -> (
     common::Scratch,
     Server,
-    std::sync::mpsc::Receiver<serde_json::Value>,
-    std::process::ChildStdin,
+    Receiver<serde_json::Value>,
+    ChildStdin,
     String,
-    std::path::PathBuf,
+    PathBuf,
 ) {
     let base_scratch = common::Scratch::new(&format!("oslsp-set-{tag}"));
     let base = base_scratch.path().to_path_buf();
@@ -76,19 +78,19 @@ fn boot(
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{}, "initializationOptions": opts}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    wait_for(
+    common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -99,7 +101,7 @@ fn boot(
         },
         "ready",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,
@@ -119,12 +121,12 @@ fn completion_item<'a>(v: &'a serde_json::Value, label: &str) -> Option<&'a serd
 #[test]
 fn function_completions_are_snippets_by_default() {
     let (_scratch, mut child, rx, mut stdin, uri, _) = boot("snip", serde_json::json!({}), 0);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{
             "textDocument":{"uri":uri},"position":{"line":1,"character":8}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "completion");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "completion");
     let item = completion_item(&v, "my_func").expect("my_func offered");
     assert_eq!(item["insertTextFormat"], 2, "snippet format: {item}");
     assert_eq!(
@@ -144,12 +146,12 @@ fn snippet_completions_can_be_disabled() {
         serde_json::json!({"snippetCompletions": false}),
         0,
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{
             "textDocument":{"uri":uri},"position":{"line":1,"character":8}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "completion");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "completion");
     let item = completion_item(&v, "my_func").expect("my_func offered");
     assert!(
         item.get("insertTextFormat").is_none() && item.get("insertText").is_none(),
@@ -162,7 +164,7 @@ fn snippet_completions_can_be_disabled() {
 fn max_diagnostics_bounds_the_publish() {
     let (_scratch, mut child, rx, _stdin, _uri, _) =
         boot("maxdiag", serde_json::json!({"maxDiagnostics": 2}), 5);
-    let d = wait_for(
+    let d = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics",
         "publish",
@@ -206,32 +208,32 @@ fn harvest_reports_progress_and_warns_on_an_empty_tree() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
         "capabilities":{"window":{"workDoneProgress":true}},
         "initializationOptions":{"opensipsSrc": tree.display().to_string()}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
     // the server asks to create a progress token; answer it
-    let create = wait_for(
+    let create = common::wait_for(
         &rx,
         |v| v["method"] == "window/workDoneProgress/create",
         "progress create",
     );
     let token = create["params"]["token"].clone();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":create["id"],"result":null}),
     );
     // begin ... end on that token
-    let begin = wait_for(
+    let begin = common::wait_for(
         &rx,
         |v| v["method"] == "$/progress" && v["params"]["value"]["kind"] == "begin",
         "progress begin",
@@ -245,14 +247,14 @@ fn harvest_reports_progress_and_warns_on_an_empty_tree() {
             .contains("harvest"),
         "{begin}"
     );
-    let end = wait_for(
+    let end = common::wait_for(
         &rx,
         |v| v["method"] == "$/progress" && v["params"]["value"]["kind"] == "end",
         "progress end",
     );
     assert_eq!(end["params"]["token"], token);
     // an explicitly configured tree with zero symbols warns the user
-    let warn = wait_for(
+    let warn = common::wait_for(
         &rx,
         |v| v["method"] == "window/showMessage" && v["params"]["type"] == 2,
         "zero-symbol warning",
@@ -284,23 +286,23 @@ fn runtime_settings_apply_without_a_server_restart() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics",
         "analyzer diags",
@@ -311,12 +313,12 @@ fn runtime_settings_apply_without_a_server_restart() {
         "two undefined routes: {v}"
     );
     // flat settings shape: analyzer off → open docs republished clean
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{
         "settings":{"analyzerDiagnostics":false}}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"
@@ -326,12 +328,12 @@ fn runtime_settings_apply_without_a_server_restart() {
     );
     assert_eq!(v["params"]["uri"].as_str().unwrap(), uri);
     // nested (VS Code) shape: analyzer back on, capped to 1
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{
         "settings":{"opensipsLsp":{"analyzerDiagnostics":true,"maxDiagnostics":1}}}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"

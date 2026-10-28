@@ -15,6 +15,9 @@
 //! one list.
 #![deny(clippy::unwrap_used)]
 
+use opensips_lsp::catalog::{BuiltinModules, ModuleDoc, VersionedModules};
+use std::path::Path;
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 2 {
@@ -24,13 +27,13 @@ fn main() {
         std::process::exit(2);
     }
 
-    let mut harvests: Vec<(String, Vec<opensips_lsp::catalog::ModuleDoc>)> = Vec::new();
+    let mut harvests: Vec<(String, Vec<ModuleDoc>)> = Vec::new();
     for arg in &args {
         let Some((version, tree)) = arg.split_once('=') else {
             eprintln!("expected <version>=<tree>, got '{arg}'");
             std::process::exit(2);
         };
-        let mut modules = opensips_lsp::catalog::harvest_tree(std::path::Path::new(tree));
+        let mut modules = opensips_lsp::catalog::harvest_tree(Path::new(tree));
         if modules.is_empty() {
             eprintln!("'{tree}' yields no module documentation");
             std::process::exit(2);
@@ -49,8 +52,8 @@ fn main() {
         .windows(2)
         .map(|pair| opensips_lsp::catalog::diff_catalogues(&pair[0].1, &pair[1].1, &pair[1].0))
         .collect();
-    let out = opensips_lsp::catalog::VersionedModules {
-        base: opensips_lsp::catalog::BuiltinModules {
+    let out = VersionedModules {
+        base: BuiltinModules {
             version: harvests[0].0.clone(),
             modules: harvests[0].1.clone(),
         },

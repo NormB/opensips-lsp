@@ -8,6 +8,9 @@
 //! so it cannot drift from the version it claims.
 #![deny(clippy::unwrap_used)]
 
+use opensips_lsp::catalog::BuiltinModules;
+use std::path::Path;
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let tree = args
@@ -16,8 +19,8 @@ fn main() {
     let version = args
         .next()
         .expect("usage: gen_module_catalog <tree> <version>");
-    let modules = opensips_lsp::catalog::harvest_tree(std::path::Path::new(&tree));
-    let out = opensips_lsp::catalog::BuiltinModules { version, modules };
+    let modules = opensips_lsp::catalog::harvest_tree(Path::new(&tree));
+    let out = BuiltinModules { version, modules };
     println!(
         "{}",
         serde_json::to_string(&out).expect("a catalog of strings serializes to JSON")

@@ -7,6 +7,9 @@
 
 mod common;
 use opensips_lsp::catalog;
+use opensips_lsp::catalog::Item;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 #[test]
 fn the_vendored_catalogue_has_the_core_language_in_it() {
@@ -79,9 +82,9 @@ fn the_provenance_note_names_its_catalogue_and_release() {
 #[test]
 fn the_vendored_catalogue_matches_a_fresh_harvest_of_the_pinned_tree() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let fresh = catalog::harvest_core(std::path::Path::new(&tree));
+    let fresh = catalog::harvest_core(Path::new(&tree));
     let b = catalog::builtin_core();
-    let names = |v: &[catalog::Item]| -> Vec<String> { v.iter().map(|i| i.name.clone()).collect() };
+    let names = |v: &[Item]| -> Vec<String> { v.iter().map(|i| i.name.clone()).collect() };
     assert_eq!(
         names(&b.core.params),
         names(&fresh.params),
@@ -109,7 +112,7 @@ fn the_vendored_catalogue_matches_a_fresh_harvest_of_the_pinned_tree() {
 #[test]
 fn the_vendored_catalogue_matches_a_fresh_harvest_in_its_text_too() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let fresh = catalog::harvest_core(std::path::Path::new(&tree));
+    let fresh = catalog::harvest_core(Path::new(&tree));
     let b = catalog::builtin_core();
 
     let mut differ: Vec<String> = Vec::new();
@@ -137,20 +140,15 @@ fn the_vendored_catalogue_matches_a_fresh_harvest_in_its_text_too() {
 /// The entries whose text differs between the shipped and the
 /// harvested list, as `what/name`, paired by name: an entry on one
 /// side only is reported once, and does not shift the others.
-fn text_differences(
-    what: &str,
-    shipped: &[catalog::Item],
-    harvested: &[catalog::Item],
-) -> Vec<String> {
-    let by_name =
-        |items: &[catalog::Item]| -> std::collections::BTreeMap<String, (String, String)> {
-            items
-                .iter()
-                .map(|i| (i.name.clone(), (i.detail.clone(), i.doc.clone())))
-                .collect()
-        };
+fn text_differences(what: &str, shipped: &[Item], harvested: &[Item]) -> Vec<String> {
+    let by_name = |items: &[Item]| -> BTreeMap<String, (String, String)> {
+        items
+            .iter()
+            .map(|i| (i.name.clone(), (i.detail.clone(), i.doc.clone())))
+            .collect()
+    };
     let (s, h) = (by_name(shipped), by_name(harvested));
-    let names: std::collections::BTreeSet<&String> = s.keys().chain(h.keys()).collect();
+    let names: BTreeSet<&String> = s.keys().chain(h.keys()).collect();
     names
         .into_iter()
         .filter(|n| s.get(*n) != h.get(*n))
@@ -165,7 +163,7 @@ fn text_differences(
 /// gate named 49 parameters, of which only that one had changed.
 #[test]
 fn an_inserted_entry_is_the_only_difference_reported() {
-    let item = |name: &str, doc: &str| catalog::Item {
+    let item = |name: &str, doc: &str| Item {
         name: name.to_string(),
         detail: "core parameter".to_string(),
         doc: doc.to_string(),
@@ -198,9 +196,9 @@ fn an_inserted_entry_is_the_only_difference_reported() {
 #[test]
 fn the_drift_gate_covers_every_field_of_the_catalogue() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let fresh = catalog::harvest_core(std::path::Path::new(&tree));
+    let fresh = catalog::harvest_core(Path::new(&tree));
     let b = catalog::builtin_core();
-    let names = |v: &[catalog::Item]| -> Vec<String> { v.iter().map(|i| i.name.clone()).collect() };
+    let names = |v: &[Item]| -> Vec<String> { v.iter().map(|i| i.name.clone()).collect() };
 
     for (what, shipped, harvested) in [
         ("routes", &b.core.routes, &fresh.routes),

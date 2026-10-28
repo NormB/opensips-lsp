@@ -9,7 +9,10 @@
 
 mod common;
 
-use opensips_lsp::format::{Options, format, format_lines};
+use opensips_lsp::format;
+
+use opensips_lsp::format::Options;
+use std::path::Path;
 
 fn tabs() -> Options {
     Options {
@@ -35,7 +38,7 @@ fn skeleton(text: &str) -> Vec<String> {
 fn indents_route_bodies_by_brace_depth() {
     let src = "route {\nxlog(\"hi\");\nif (1) {\nexit;\n}\n}\n";
     assert_eq!(
-        format(src, &tabs()),
+        format::format(src, &tabs()),
         "route {\n\txlog(\"hi\");\n\tif (1) {\n\t\texit;\n\t}\n}\n"
     );
 }
@@ -43,15 +46,15 @@ fn indents_route_bodies_by_brace_depth() {
 #[test]
 fn honours_the_clients_indent_settings() {
     let src = "route {\nexit;\n}\n";
-    assert_eq!(format(src, &spaces(2)), "route {\n  exit;\n}\n");
-    assert_eq!(format(src, &spaces(4)), "route {\n    exit;\n}\n");
-    assert_eq!(format(src, &tabs()), "route {\n\texit;\n}\n");
+    assert_eq!(format::format(src, &spaces(2)), "route {\n  exit;\n}\n");
+    assert_eq!(format::format(src, &spaces(4)), "route {\n    exit;\n}\n");
+    assert_eq!(format::format(src, &tabs()), "route {\n\texit;\n}\n");
 }
 
 #[test]
 fn a_closing_brace_dedents_itself() {
     let src = "route {\nif (1) {\nexit;\n}\n}\n";
-    let out = format(src, &spaces(2));
+    let out = format::format(src, &spaces(2));
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[3], "  }", "inner close dedents to its opener");
     assert_eq!(lines[4], "}", "outer close returns to column 0");
@@ -60,7 +63,7 @@ fn a_closing_brace_dedents_itself() {
 #[test]
 fn strips_trailing_whitespace() {
     let src = "route {   \n\texit;\t\n}  \n";
-    let out = format(src, &tabs());
+    let out = format::format(src, &tabs());
     assert!(
         out.lines().all(|l| l == l.trim_end()),
         "trailing whitespace survived: {out:?}"
@@ -71,7 +74,7 @@ fn strips_trailing_whitespace() {
 fn braces_inside_strings_and_comments_do_not_move_the_depth() {
     // a `{` that is not code must not indent everything after it
     let src = "route {\nxlog(\"a { b\");\n# a } here\nexit;\n}\n";
-    let out = format(src, &spaces(2));
+    let out = format::format(src, &spaces(2));
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[1], "  xlog(\"a { b\");");
     assert_eq!(lines[2], "  # a } here");
@@ -84,7 +87,7 @@ fn string_interiors_are_never_reindented() {
     // a literal newline inside a string: the second line belongs to
     // the string's value, so its leading whitespace is data
     let src = "route {\nxlog(\"first\n    second\");\nexit;\n}\n";
-    let out = format(src, &tabs());
+    let out = format::format(src, &tabs());
     assert!(
         out.contains("\n    second\");"),
         "string interior was reindented: {out:?}"
@@ -94,7 +97,7 @@ fn string_interiors_are_never_reindented() {
 #[test]
 fn block_comment_interiors_keep_their_own_alignment() {
     let src = "route {\n/* aligned\n   like this\n   and this */\nexit;\n}\n";
-    let out = format(src, &spaces(2));
+    let out = format::format(src, &spaces(2));
     assert!(
         out.contains("\n   like this\n   and this */"),
         "comment body was reindented: {out:?}"
@@ -105,8 +108,8 @@ fn block_comment_interiors_keep_their_own_alignment() {
 fn is_idempotent() {
     let src = "route {\n   xlog(\"x\");\n\t\tif (1) {\nexit;\n   }\n}\n";
     for opts in [tabs(), spaces(2), spaces(8)] {
-        let once = format(src, &opts);
-        let twice = format(&once, &opts);
+        let once = format::format(src, &opts);
+        let twice = format::format(&once, &opts);
         assert_eq!(once, twice, "second pass changed the document");
     }
 }
@@ -116,7 +119,7 @@ fn changes_nothing_but_leading_and_trailing_whitespace() {
     let src = "# comment\nloadmodule \"tm.so\"\nmodparam(\"tm\", \"fr_timeout\", 3)\n\
                route {\n  if ($rU == \"x\") {\n t_relay();\n}\n}\n";
     for opts in [tabs(), spaces(2)] {
-        let out = format(src, &opts);
+        let out = format::format(src, &opts);
         assert_eq!(
             skeleton(&out),
             skeleton(src),
@@ -128,7 +131,7 @@ fn changes_nothing_but_leading_and_trailing_whitespace() {
 #[test]
 fn blank_lines_survive_as_empty_lines() {
     let src = "route {\n\n\texit;\n\n}\n";
-    let out = format(src, &tabs());
+    let out = format::format(src, &tabs());
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[1], "", "a blank line stays blank, never indented");
     assert_eq!(lines[3], "");
@@ -138,7 +141,7 @@ fn blank_lines_survive_as_empty_lines() {
 #[test]
 fn unbalanced_braces_never_produce_negative_indent() {
     let src = "}\n}\nroute {\nexit;\n";
-    let out = format(src, &spaces(2));
+    let out = format::format(src, &spaces(2));
     assert_eq!(out.lines().next().unwrap(), "}");
     assert!(!out.contains("  }"), "depth went negative: {out:?}");
 }
@@ -156,8 +159,8 @@ fn adversarial_input_does_not_panic() {
         "#",
         "\t\t\t",
     ] {
-        let _ = format(s, &tabs());
-        let _ = format(s, &spaces(2));
+        let _ = format::format(s, &tabs());
+        let _ = format::format(s, &spaces(2));
     }
 }
 
@@ -167,12 +170,12 @@ fn only_changed_lines_are_edited() {
     // replace would collapse the client's folding and cursor state
     let src = "route {\n\texit;\n}\n";
     assert!(
-        format_lines(src, &tabs()).is_empty(),
+        format::format_lines(src, &tabs()).is_empty(),
         "a correctly formatted document produced edits"
     );
 
     let src = "route {\nexit;\n}\n";
-    let edits = format_lines(src, &tabs());
+    let edits = format::format_lines(src, &tabs());
     assert_eq!(edits.len(), 1, "only the misindented line needs an edit");
     assert_eq!(edits[0].line, 1);
     assert_eq!(edits[0].text, "\texit;");
@@ -215,7 +218,7 @@ fn reformatting_preserves_everything_the_analyzer_sees() {
         analyze::modparam_calls(src),
     );
     for opts in [tabs(), spaces(2), spaces(8)] {
-        let out = format(src, &opts);
+        let out = format::format(src, &opts);
         let after = (
             analyze::route_blocks(&out),
             analyze::route_refs(&out),
@@ -248,9 +251,9 @@ fn reformatting_preserves_everything_the_analyzer_sees() {
 
 #[test]
 fn range_formatting_touches_only_the_requested_lines() {
-    use opensips_lsp::format::format_range;
+    use opensips_lsp::format;
     let src = "route {\nexit;\n}\nroute[A] {\nexit;\n}\n";
-    let edits = format_range(src, &tabs(), 3, 5);
+    let edits = format::format_range(src, &tabs(), 3, 5);
     assert!(
         edits.iter().all(|e| (3..=5).contains(&e.line)),
         "edits escaped the range: {edits:?}"
@@ -270,7 +273,7 @@ fn range_formatting_touches_only_the_requested_lines() {
 fn a_line_continuing_the_previous_statement_keeps_its_own_indent() {
     // arguments spanning lines: the hanging indent is the author's
     let src = "route {\nnats_publish(\"topic\",\n        \"payload\");\nexit;\n}\n";
-    let out = format(src, &spaces(4));
+    let out = format::format(src, &spaces(4));
     assert!(
         out.contains("\n        \"payload\");"),
         "a hanging argument indent was flattened: {out:?}"
@@ -282,7 +285,7 @@ fn a_line_continuing_the_previous_statement_keeps_its_own_indent() {
 #[test]
 fn a_condition_broken_across_lines_keeps_its_own_indent() {
     let src = "route {\nif ($rU == \"a\"\n        || $rU == \"b\") {\nexit;\n}\n}\n";
-    let out = format(src, &spaces(4));
+    let out = format::format(src, &spaces(4));
     assert!(
         out.contains("\n        || $rU == \"b\") {"),
         "a continued condition was flattened: {out:?}"
@@ -297,7 +300,7 @@ fn a_condition_broken_across_lines_keeps_its_own_indent() {
 #[test]
 fn a_braceless_if_body_is_not_dedented_into_a_lie() {
     let src = "route {\nif (!($rU =~ \"x\"))\n        return;\nexit;\n}\n";
-    let out = format(src, &spaces(4));
+    let out = format::format(src, &spaces(4));
     assert!(
         out.contains("\n        return;"),
         "the braceless if body was dedented, so it now reads as unconditional: {out:?}"
@@ -309,7 +312,7 @@ fn blank_and_comment_lines_do_not_end_a_statement() {
     // a comment between a call and its continuation must not make the
     // continuation look like a fresh statement
     let src = "route {\nf(\"a\",\n# why\n        \"b\");\nexit;\n}\n";
-    let out = format(src, &spaces(4));
+    let out = format::format(src, &spaces(4));
     assert!(out.contains("\n        \"b\");"), "{out:?}");
 }
 
@@ -325,7 +328,7 @@ fn a_statement_ending_line_still_reindents_the_next() {
         ("route {\nif (1) {\n}\nexit;\n}\n", 3, "    exit;"),
     ];
     for (src, line, want) in cases {
-        let out = format(src, &spaces(4));
+        let out = format::format(src, &spaces(4));
         assert_eq!(
             out.lines().nth(line).unwrap(),
             want,
@@ -342,12 +345,12 @@ fn a_statement_ending_line_still_reindents_the_next() {
 #[test]
 fn crlf_edits_carry_no_line_ending() {
     let src = "route {\r\nexit;\r\n}\r\n";
-    let edits = format_lines(src, &tabs());
+    let edits = format::format_lines(src, &tabs());
     assert_eq!(edits.len(), 1, "{edits:?}");
     assert_eq!(edits[0].line, 1);
     assert_eq!(edits[0].text, "\texit;");
     // and the whole-document form keeps the CRLF endings intact
-    assert_eq!(format(src, &tabs()), "route {\r\n\texit;\r\n}\r\n");
+    assert_eq!(format::format(src, &tabs()), "route {\r\n\texit;\r\n}\r\n");
 }
 
 /// `case` and `default` labels sit one level inside the switch and
@@ -357,20 +360,20 @@ fn crlf_edits_carry_no_line_ending() {
 fn a_case_body_is_indented_under_its_label() {
     let src = "route {\nswitch ($rU) {\ncase \"1\":\ncase \"2\":\nexit;\ndefault:\nif ($rd) {\ndrop;\n}\n}\nexit;\n}\n";
     assert_eq!(
-        format(src, &tabs()),
+        format::format(src, &tabs()),
         "route {\n\tswitch ($rU) {\n\t\tcase \"1\":\n\t\tcase \"2\":\n\t\t\texit;\n\t\tdefault:\n\t\t\tif ($rd) {\n\t\t\t\tdrop;\n\t\t\t}\n\t}\n\texit;\n}\n"
     );
     // a switch inside a case nests the same way
     let nested =
         "route {\nswitch ($rU) {\ncase 1:\nswitch ($rd) {\ndefault:\nexit;\n}\nbreak;\n}\n}\n";
     assert_eq!(
-        format(nested, &tabs()),
+        format::format(nested, &tabs()),
         "route {\n\tswitch ($rU) {\n\t\tcase 1:\n\t\t\tswitch ($rd) {\n\t\t\t\tdefault:\n\t\t\t\t\texit;\n\t\t\t}\n\t\t\tbreak;\n\t}\n}\n"
     );
     // `default` and `case` as parts of other words are not labels
     let words = "route {\n$var(default_x) = 1;\ncase_x();\ncasex();\nexit;\n}\n";
     assert_eq!(
-        format(words, &tabs()),
+        format::format(words, &tabs()),
         "route {\n\t$var(default_x) = 1;\n\tcase_x();\n\tcasex();\n\texit;\n}\n"
     );
 }
@@ -381,14 +384,14 @@ fn a_case_body_is_indented_under_its_label() {
 fn the_shipped_samples_switch_is_left_as_it_is() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
     let text = std::fs::read_to_string(
-        std::path::Path::new(&tree).join("modules/event_rabbitmq/samples/event_rabbitmq.cfg"),
+        Path::new(&tree).join("modules/event_rabbitmq/samples/event_rabbitmq.cfg"),
     )
     .unwrap();
     let at = text
         .lines()
         .position(|l| l.trim() == "switch ($retcode) {")
         .expect("the sample has its switch");
-    let moved: Vec<u32> = format_lines(&text, &tabs())
+    let moved: Vec<u32> = format::format_lines(&text, &tabs())
         .into_iter()
         .map(|e| e.line)
         .filter(|&l| l as usize >= at && (l as usize) < at + 12)

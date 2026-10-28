@@ -20,8 +20,8 @@
 
 mod common;
 
-use opensips_lsp::catalog::parse_log_levels_c;
-use opensips_lsp::logic::completions_with_core;
+use opensips_lsp::{catalog, logic};
+use std::path::Path;
 
 const SWITCH: &str = r#"
 	else
@@ -41,7 +41,7 @@ const SWITCH: &str = r#"
 
 #[test]
 fn the_levels_come_from_the_c_switch_that_parses_them() {
-    let got = parse_log_levels_c(SWITCH);
+    let got = catalog::parse_log_levels_c(SWITCH);
     assert_eq!(got, vec!["L_ALERT", "L_CRIT", "L_ERR"]);
 }
 
@@ -55,7 +55,7 @@ fn a_switch_that_is_not_the_level_switch_is_not_read() {
 		}
 	"#;
     assert!(
-        parse_log_levels_c(other).is_empty(),
+        catalog::parse_log_levels_c(other).is_empty(),
         "only the switch whose default arm says `unknown log level` is the \
          level switch — any other `case 'X': ... L_Y` in the tree would \
          otherwise be swept in"
@@ -74,7 +74,7 @@ fn a_case_letter_that_contradicts_its_level_is_skipped() {
 		}
 	"#;
     assert_eq!(
-        parse_log_levels_c(wrong),
+        catalog::parse_log_levels_c(wrong),
         vec!["L_ALERT"],
         "the parser dispatches on the third character, so a case letter that \
          is not that character means the shape has changed and the pairing \
@@ -85,7 +85,7 @@ fn a_case_letter_that_contradicts_its_level_is_skipped() {
 #[test]
 fn the_real_tree_yields_the_levels_opensips_accepts() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let core = opensips_lsp::catalog::harvest_core(std::path::Path::new(&tree));
+    let core = opensips_lsp::catalog::harvest_core(Path::new(&tree));
     assert_eq!(
         core.log_levels,
         vec![
@@ -107,7 +107,7 @@ fn the_built_in_catalogue_carries_the_levels() {
 
 fn labels(prefix: &str) -> Vec<String> {
     let core = &opensips_lsp::catalog::builtin_core().core;
-    completions_with_core(&[], core, "route {\n}\n", prefix)
+    logic::completions_with_core(&[], core, "route {\n}\n", prefix)
         .into_iter()
         .map(|c| c.label)
         .collect()
@@ -228,7 +228,7 @@ fn a_comma_inside_a_string_does_not_advance_the_argument() {
 #[test]
 fn the_core_has_exactly_one_enumerated_string_argument() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let src = std::fs::read_to_string(std::path::Path::new(&tree).join("route.c"))
+    let src = std::fs::read_to_string(Path::new(&tree).join("route.c"))
         .expect("route.c in the pinned tree");
     let switches = src.matches("switch(s.s[").count();
     assert_eq!(

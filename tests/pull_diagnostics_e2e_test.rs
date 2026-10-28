@@ -8,8 +8,10 @@
 //! their closures already cover the fragments.
 
 mod common;
-use common::*;
-use std::process::{Command, Stdio};
+use common::Server;
+use std::path::PathBuf;
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::mpsc::Receiver;
 
 /// A client that pulls, as VS Code does.
 fn caps(pull: bool) -> serde_json::Value {
@@ -29,9 +31,9 @@ fn boot(
 ) -> (
     common::Scratch,
     Server,
-    std::sync::mpsc::Receiver<serde_json::Value>,
-    std::process::ChildStdin,
-    std::path::PathBuf,
+    Receiver<serde_json::Value>,
+    ChildStdin,
+    PathBuf,
 ) {
     let base_scratch = common::Scratch::new(&format!("oslsp-pull-{tag}"));
     let base = base_scratch.path().to_path_buf();
@@ -47,27 +49,27 @@ fn boot(
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities": caps(pull),
             "workspaceFolders":[{"uri": format!("file://{}", base.display()), "name":"w"}]}}),
     );
-    let init = wait_for(&rx, |v| v["id"] == 1, "initialize");
+    let init = common::wait_for(&rx, |v| v["id"] == 1, "initialize");
     let provider = &init["result"]["capabilities"]["diagnosticProvider"];
     assert_eq!(provider["interFileDependencies"], serde_json::json!(true));
     assert_eq!(provider["workspaceDiagnostics"], serde_json::json!(true));
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
     (base_scratch, child, rx, stdin, base)
 }
 
-fn open(stdin: &mut std::process::ChildStdin, uri: &str, text: &str) {
-    write_msg(
+fn open(stdin: &mut ChildStdin, uri: &str, text: &str) {
+    common::write_msg(
         stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
@@ -83,12 +85,12 @@ fn a_document_report_carries_the_analyzer_findings() {
     let uri = format!("file://{}", cfg.display());
     open(&mut stdin, &uri, text);
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/diagnostic","params":{
             "textDocument":{"uri":uri}}}),
     );
-    let r = wait_for(&rx, |v| v["id"] == 2, "diagnostic");
+    let r = common::wait_for(&rx, |v| v["id"] == 2, "diagnostic");
     assert_eq!(r["result"]["kind"], "full");
     let items = r["result"]["items"].as_array().expect("items");
     assert_eq!(items.len(), 1, "{}", r["result"]);
@@ -114,20 +116,20 @@ fn an_unchanged_document_reports_unchanged() {
     let uri = format!("file://{}", cfg.display());
     open(&mut stdin, &uri, text);
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/diagnostic","params":{
             "textDocument":{"uri":uri}}}),
     );
-    let first = wait_for(&rx, |v| v["id"] == 2, "diagnostic");
+    let first = common::wait_for(&rx, |v| v["id"] == 2, "diagnostic");
     let id = first["result"]["resultId"].as_str().unwrap().to_string();
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/diagnostic","params":{
             "textDocument":{"uri":uri},"previousResultId": id}}),
     );
-    let again = wait_for(&rx, |v| v["id"] == 3, "diagnostic again");
+    let again = common::wait_for(&rx, |v| v["id"] == 3, "diagnostic again");
     assert_eq!(
         again["result"]["kind"], "unchanged",
         "nothing moved, so the report must not resend: {}",
@@ -145,7 +147,7 @@ fn a_pulling_client_is_not_also_pushed_to() {
     let uri = format!("file://{}", cfg.display());
     open(&mut stdin, &uri, text);
     // an edit would normally trigger the debounced analyzer publish
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
             "textDocument":{"uri":uri,"version":2},
@@ -153,14 +155,14 @@ fn a_pulling_client_is_not_also_pushed_to() {
     );
     // give the debounce time to fire, then prove nothing was pushed by
     // asking for something else and seeing that answer arrive first
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":9,"method":"textDocument/diagnostic","params":{
             "textDocument":{"uri":uri}}}),
     );
     let mut pushed = false;
     loop {
-        let v = wait_for(
+        let v = common::wait_for(
             &rx,
             |v| v["id"] == 9 || v["method"] == "textDocument/publishDiagnostics",
             "pull answer or a push",
@@ -186,13 +188,13 @@ fn a_pushing_client_still_gets_pushed_diagnostics() {
     std::fs::write(&cfg, text).unwrap();
     let uri = format!("file://{}", cfg.display());
     open(&mut stdin, &uri, text);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
             "textDocument":{"uri":uri,"version":2},
             "contentChanges":[{"text":"route {\n    route(STILL_MISSING);\n}\n"}]}}),
     );
-    let d = wait_for(
+    let d = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics",
         "push for a non-pulling client",
@@ -223,12 +225,12 @@ fn only_root_configs_are_reported_never_the_fragments_they_include() {
     )
     .unwrap();
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":5,"method":"workspace/diagnostic","params":{
             "previousResultIds":[]}}),
     );
-    let r = wait_for(&rx, |v| v["id"] == 5, "workspace/diagnostic");
+    let r = common::wait_for(&rx, |v| v["id"] == 5, "workspace/diagnostic");
     let items = r["result"]["items"].as_array().expect("items");
     let reported: Vec<&str> = items
         .iter()
@@ -289,12 +291,12 @@ fn the_sweep_agrees_with_the_include_graph() {
         b"# caf\xe9\nroute {\n    route(GHOST);\n}\n",
     )
     .unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":5,"method":"workspace/diagnostic","params":{
             "previousResultIds":[]}}),
     );
-    let r = wait_for(&rx, |v| v["id"] == 5, "workspace/diagnostic");
+    let r = common::wait_for(&rx, |v| v["id"] == 5, "workspace/diagnostic");
     let items = r["result"]["items"].as_array().expect("items");
     let mut reported: Vec<String> = items
         .iter()

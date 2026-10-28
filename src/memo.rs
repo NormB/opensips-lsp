@@ -7,13 +7,15 @@ use dashmap::DashMap;
 use std::sync::Arc;
 
 use crate::analyze;
+use crate::analyze::{Block, Located};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// The memoized scanner output for one document version.
 pub struct DocAnalysis {
     /// [`analyze::route_blocks`] of the text.
-    pub blocks: Vec<analyze::Block>,
+    pub blocks: Vec<Block>,
     /// [`analyze::route_refs`] of the text.
-    pub refs: Vec<analyze::Located>,
+    pub refs: Vec<Located>,
 }
 
 /// Version-keyed cache: get-or-compute semantics, safe under
@@ -30,11 +32,11 @@ pub struct AnalysisCache {
 /// Without it the memoization is only checkable by reading the code:
 /// a change that recomputed on every request would leave every test
 /// green and only show up as a hot editor.
-static ANALYSIS_BUILDS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static ANALYSIS_BUILDS: AtomicUsize = AtomicUsize::new(0);
 
 /// How many [`DocAnalysis`] builds have run in this process.
 pub fn analysis_builds() -> usize {
-    ANALYSIS_BUILDS.load(std::sync::atomic::Ordering::Relaxed)
+    ANALYSIS_BUILDS.load(Ordering::Relaxed)
 }
 
 impl AnalysisCache {
@@ -46,7 +48,7 @@ impl AnalysisCache {
         {
             return e.1.clone();
         }
-        ANALYSIS_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        ANALYSIS_BUILDS.fetch_add(1, Ordering::Relaxed);
         let a = Arc::new(DocAnalysis {
             blocks: analyze::route_blocks(text),
             refs: analyze::route_refs(text),

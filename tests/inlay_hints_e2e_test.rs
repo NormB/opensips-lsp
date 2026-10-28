@@ -5,11 +5,13 @@
 //! documented function, so it gets nothing.
 
 mod common;
-use common::*;
-use std::process::{Command, Stdio};
+use common::Server;
+use std::path::{Path, PathBuf};
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::mpsc::Receiver;
 
-fn mk_tree(root: &std::path::Path) {
-    let w = |p: std::path::PathBuf, c: &str| {
+fn mk_tree(root: &Path) {
+    let w = |p: PathBuf, c: &str| {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, c).unwrap();
     };
@@ -38,8 +40,8 @@ fn boot(
 ) -> (
     common::Scratch,
     Server,
-    std::sync::mpsc::Receiver<serde_json::Value>,
-    std::process::ChildStdin,
+    Receiver<serde_json::Value>,
+    ChildStdin,
     String,
 ) {
     let base_scratch = common::Scratch::new(&format!("oslsp-hint-{tag}"));
@@ -61,24 +63,24 @@ fn boot(
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{}, "initializationOptions": opts}}),
     );
-    let init = wait_for(&rx, |v| v["id"] == 1, "initialize");
+    let init = common::wait_for(&rx, |v| v["id"] == 1, "initialize");
     assert_eq!(
         init["result"]["capabilities"]["inlayHintProvider"],
         serde_json::json!(true),
         "inlay hint capability not advertised"
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    wait_for(
+    common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -89,7 +91,7 @@ fn boot(
         },
         "harvest-ready",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":CFG}}}),
@@ -98,20 +100,20 @@ fn boot(
 }
 
 fn hints(
-    stdin: &mut std::process::ChildStdin,
-    rx: &std::sync::mpsc::Receiver<serde_json::Value>,
+    stdin: &mut ChildStdin,
+    rx: &Receiver<serde_json::Value>,
     uri: &str,
     id: i64,
     from: u32,
     to: u32,
 ) -> Vec<(u64, u64, String)> {
-    write_msg(
+    common::write_msg(
         stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"textDocument/inlayHint","params":{
             "textDocument":{"uri":uri},
             "range":{"start":{"line":from,"character":0},"end":{"line":to,"character":0}}}}),
     );
-    let r = wait_for(rx, |v| v["id"] == id, "inlayHint");
+    let r = common::wait_for(rx, |v| v["id"] == id, "inlayHint");
     r["result"]
         .as_array()
         .cloned()
@@ -185,7 +187,7 @@ fn the_setting_applies_live() {
         serde_json::json!({"inlayHintParameterNames": false}),
     );
     assert!(hints(&mut stdin, &rx, &uri, 2, 0, 20).is_empty());
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{
             "settings":{"opensipsLsp":{"inlayHintParameterNames": true}}}}),

@@ -2,13 +2,69 @@
 
 use dashmap::DashMap;
 use tower_lsp_server::jsonrpc::Result;
-use tower_lsp_server::ls_types::*;
+use tower_lsp_server::ls_types::{
+    CallHierarchyIncomingCall, CallHierarchyIncomingCallsParams, CallHierarchyItem,
+    CallHierarchyOutgoingCall, CallHierarchyOutgoingCallsParams, CallHierarchyPrepareParams,
+    CallHierarchyServerCapability, CodeAction, CodeActionKind, CodeActionOrCommand,
+    CodeActionParams, CodeActionProviderCapability, CodeActionResponse, CodeLens, CodeLensOptions,
+    CodeLensParams, Command, CompletionItem, CompletionItemKind, CompletionOptions,
+    CompletionParams, CompletionResponse, CompletionTextEdit, Diagnostic, DiagnosticOptions,
+    DiagnosticServerCapabilities, DiagnosticSeverity, DidChangeConfigurationParams,
+    DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidChangeWatchedFilesRegistrationOptions, DidChangeWorkspaceFoldersParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    DocumentDiagnosticParams, DocumentDiagnosticReport, DocumentDiagnosticReportResult,
+    DocumentFormattingParams, DocumentHighlight, DocumentHighlightKind, DocumentHighlightParams,
+    DocumentLink, DocumentLinkOptions, DocumentLinkParams, DocumentRangeFormattingParams,
+    DocumentSymbol, DocumentSymbolParams, DocumentSymbolResponse, Documentation,
+    FileOperationFilter, FileOperationPattern, FileOperationPatternKind,
+    FileOperationRegistrationOptions, FileSystemWatcher, FoldingRange, FoldingRangeKind,
+    FoldingRangeParams, FoldingRangeProviderCapability, FullDocumentDiagnosticReport, GlobPattern,
+    GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, InlayHint,
+    InlayHintKind, InlayHintLabel, InlayHintParams, InsertTextFormat, Location, MarkupContent,
+    MarkupKind, MessageType, NumberOrString, OneOf, ParameterInformation, ParameterLabel, Position,
+    PrepareRenameResponse, ProgressParams, ProgressParamsValue, Range, ReferenceParams,
+    Registration, RelatedFullDocumentDiagnosticReport, RelatedUnchangedDocumentDiagnosticReport,
+    RelativePattern, RenameFilesParams, RenameOptions, RenameParams, SelectionRange,
+    SelectionRangeParams, SelectionRangeProviderCapability, SemanticToken, SemanticTokenType,
+    SemanticTokens, SemanticTokensFullOptions, SemanticTokensLegend, SemanticTokensOptions,
+    SemanticTokensParams, SemanticTokensRangeParams, SemanticTokensRangeResult,
+    SemanticTokensResult, SemanticTokensServerCapabilities, ServerCapabilities, ServerInfo,
+    SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation,
+    SymbolInformation, SymbolKind, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
+    UnchangedDocumentDiagnosticReport, Uri, WorkDoneProgress, WorkDoneProgressBegin,
+    WorkDoneProgressCreateParams, WorkDoneProgressEnd, WorkspaceDiagnosticParams,
+    WorkspaceDiagnosticReport, WorkspaceDiagnosticReportResult, WorkspaceDocumentDiagnosticReport,
+    WorkspaceEdit, WorkspaceFileOperationsServerCapabilities, WorkspaceFoldersServerCapabilities,
+    WorkspaceFullDocumentDiagnosticReport, WorkspaceServerCapabilities, WorkspaceSymbolParams,
+    WorkspaceSymbolResponse, notification, request,
+};
 use tower_lsp_server::{Client, LanguageServer};
 
-use crate::{analyze, catalog, diag, logic, memo};
+use crate::analyze::{Block, Located};
+use crate::catalog::{CatalogOrigin, CoreDocs, ModuleDoc};
+use crate::diag::Severity;
+use crate::format::{LineEdit, Options};
+use crate::logic::{CompKind, IncludeGraph, RouteNs};
+use crate::memo::AnalysisCache;
+use crate::outline::{FoldKind, Span, Sym};
+use crate::{analyze, catalog, diag, logic};
+use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+use tokio::io::AsyncRead;
+use tower_lsp_server::ls_types::notification::Notification;
 
 /// Parameters of the `opensips/analysisRoot` request.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AnalysisRootParams {
     /// The document to locate: `file:` URIs only.
     pub uri: Uri,
@@ -21,7 +77,7 @@ pub struct AnalysisRootParams {
 /// Until then nothing tells the reader which release their file is
 /// being parsed against, and the answer changes with a setting they
 /// may not have set themselves.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CatalogueStatus {
     /// The catalogue named as it reads in a sentence, e.g.
     /// `OpenSIPS 4.0.2 (built in)` or `the configured source tree`.
@@ -36,7 +92,7 @@ pub struct CatalogueStatus {
 /// again whenever it changes.
 pub enum CatalogueNotification {}
 
-impl tower_lsp_server::ls_types::notification::Notification for CatalogueNotification {
+impl Notification for CatalogueNotification {
     type Params = CatalogueStatus;
     const METHOD: &'static str = "opensipsLsp/catalogue";
 }
@@ -49,9 +105,9 @@ impl tower_lsp_server::ls_types::notification::Notification for CatalogueNotific
 /// messages at a time, and a notification that waited for a
 /// subprocess held one of those slots for the whole run: a few files
 /// opened together left every request queued behind their checks.
-pub struct Backend(std::sync::Arc<State>);
+pub struct Backend(Arc<State>);
 
-impl std::ops::Deref for Backend {
+impl Deref for Backend {
     type Target = State;
     fn deref(&self) -> &State {
         &self.0
@@ -61,7 +117,7 @@ impl std::ops::Deref for Backend {
 impl Backend {
     /// Build a backend for one client connection.
     pub fn new(client: Client) -> Self {
-        Self(std::sync::Arc::new(State::new(client)))
+        Self(Arc::new(State::new(client)))
     }
 
     /// `opensips/analysisRoot`; see [`State::analysis_root`].
@@ -82,71 +138,71 @@ pub struct State {
     client: Client,
     /// Open documents: (version, full text).
     docs: DashMap<Uri, (i32, String)>,
-    catalog: std::sync::Arc<std::sync::RwLock<Vec<catalog::ModuleDoc>>>,
+    catalog: Arc<RwLock<Vec<ModuleDoc>>>,
     /// Which catalogue the modparam check judges against, so a
     /// diagnostic can name it. What a module exports moves between
     /// releases, and a parameter absent from a built-in catalogue
     /// may simply be one that version does not have.
-    catalog_origin: std::sync::Arc<std::sync::RwLock<catalog::CatalogOrigin>>,
+    catalog_origin: Arc<RwLock<CatalogOrigin>>,
     /// The built-in release to check against, when the user named
     /// one. A configured source tree still wins over it: that is
     /// exact for their build, and this is a choice among ours.
-    wanted_version: std::sync::RwLock<Option<String>>,
+    wanted_version: RwLock<Option<String>>,
     /// Whether built-in documentation repeats the release it came
     /// from, under every hover and completion item. Off by default:
     /// the status bar says it continuously and every warning that
     /// turns on the release names it.
-    version_in_hints: std::sync::RwLock<bool>,
+    version_in_hints: RwLock<bool>,
     /// Hovers and completion answer at all. A reader walking someone
     /// else's configuration turns the popups off with one key and
     /// back on with the same one; it is pushed live, because a
     /// setting that needs a restart is a pause and not a toggle.
-    assistance: std::sync::RwLock<bool>,
-    core: std::sync::RwLock<catalog::CoreDocs>,
-    src: std::sync::RwLock<Option<String>>,
-    opensips_bin: std::sync::RwLock<Option<String>>,
+    assistance: RwLock<bool>,
+    core: RwLock<CoreDocs>,
+    src: RwLock<Option<String>>,
+    opensips_bin: RwLock<Option<String>>,
     /// Serializes `opensips -C` runs: one at a time, no process storm.
     check_gate: tokio::sync::Mutex<()>,
-    snippet_completions: std::sync::RwLock<bool>,
-    max_diagnostics: std::sync::RwLock<usize>,
-    cache_dir_opt: std::sync::RwLock<Option<String>>,
-    check_timeout: std::sync::RwLock<std::time::Duration>,
+    snippet_completions: RwLock<bool>,
+    max_diagnostics: RwLock<usize>,
+    cache_dir_opt: RwLock<Option<String>>,
+    check_timeout: RwLock<Duration>,
     /// Last published `-C` results per document; merged with analyzer
     /// diagnostics on every publish.
-    check_diags: std::sync::Arc<DashMap<Uri, Vec<Diagnostic>>>,
+    check_diags: Arc<DashMap<Uri, Vec<Diagnostic>>>,
     /// Fast analyzer diagnostics between saves (init option).
-    analyzer_enabled: std::sync::RwLock<bool>,
+    analyzer_enabled: RwLock<bool>,
     /// didChange generation per document: only the latest debounced
     /// analyzer task publishes.
-    change_gen: std::sync::Arc<DashMap<Uri, u64>>,
+    change_gen: Arc<DashMap<Uri, u64>>,
     /// Reference-count code lenses on route definitions (init option).
-    code_lens_refs: std::sync::RwLock<bool>,
+    code_lens_refs: RwLock<bool>,
     /// Per-document check generation: a newer check supersedes (and
     /// kills) an older one still queued or running for the same URI.
-    check_super: std::sync::Arc<DashMap<Uri, u64>>,
+    check_super: Arc<DashMap<Uri, u64>>,
     /// Draw parameter names at documented call sites.
-    inlay_parameter_names: std::sync::Arc<std::sync::RwLock<bool>>,
+    inlay_parameter_names: Arc<RwLock<bool>>,
     /// The client accepts dynamic `didChangeWatchedFiles` registration.
-    watched_files_dynamic: std::sync::RwLock<bool>,
+    watched_files_dynamic: RwLock<bool>,
     /// The client pulls diagnostics; pushing as well would double-report.
-    diagnostics_pulled: std::sync::Arc<std::sync::RwLock<bool>>,
+    diagnostics_pulled: Arc<RwLock<bool>>,
     /// The client can be told to re-pull after an async check lands.
-    diagnostics_refresh: std::sync::Arc<std::sync::RwLock<bool>>,
+    diagnostics_refresh: Arc<RwLock<bool>>,
     /// Workspace roots, for workspace-wide diagnostics.
-    workspace_roots: std::sync::RwLock<Vec<std::path::PathBuf>>,
+    workspace_roots: RwLock<Vec<PathBuf>>,
     /// Per-(document, version) scanner memoization for hot handlers.
-    memo: memo::AnalysisCache,
+    memo: AnalysisCache,
     /// The workspace's include graph, inverted, so an open FRAGMENT
     /// can be answered in the context of the root that includes it.
     /// Built on demand and dropped whenever an include directive
     /// anywhere could have moved.
-    include_graph: std::sync::RwLock<Option<std::sync::Arc<logic::IncludeGraph>>>,
+    include_graph: RwLock<Option<Arc<IncludeGraph>>>,
     /// Whether the bounded scan behind that graph has already been
     /// reported as incomplete.  Said once: the graph is rebuilt often
     /// and the same line every time would bury the log it is in.
-    graph_truncation_logged: std::sync::atomic::AtomicBool,
+    graph_truncation_logged: AtomicBool,
     /// Whether a config the graph could not read has been reported.
-    unreadable_logged: std::sync::atomic::AtomicBool,
+    unreadable_logged: AtomicBool,
 }
 
 impl State {
@@ -155,44 +211,44 @@ impl State {
         Self {
             client,
             docs: DashMap::new(),
-            catalog: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
-            catalog_origin: std::sync::Arc::new(std::sync::RwLock::new(
-                catalog::CatalogOrigin::BuiltIn(catalog::builtin_modules().version.clone()),
-            )),
-            wanted_version: std::sync::RwLock::new(None),
-            version_in_hints: std::sync::RwLock::new(false),
-            assistance: std::sync::RwLock::new(true),
-            core: std::sync::RwLock::new(catalog::CoreDocs::default()),
-            src: std::sync::RwLock::new(None),
-            opensips_bin: std::sync::RwLock::new(None),
+            catalog: Arc::new(RwLock::new(Vec::new())),
+            catalog_origin: Arc::new(RwLock::new(CatalogOrigin::BuiltIn(
+                catalog::builtin_modules().version.clone(),
+            ))),
+            wanted_version: RwLock::new(None),
+            version_in_hints: RwLock::new(false),
+            assistance: RwLock::new(true),
+            core: RwLock::new(CoreDocs::default()),
+            src: RwLock::new(None),
+            opensips_bin: RwLock::new(None),
             check_gate: tokio::sync::Mutex::new(()),
-            snippet_completions: std::sync::RwLock::new(true),
-            inlay_parameter_names: std::sync::Arc::new(std::sync::RwLock::new(true)),
-            watched_files_dynamic: std::sync::RwLock::new(false),
-            diagnostics_pulled: std::sync::Arc::new(std::sync::RwLock::new(false)),
-            diagnostics_refresh: std::sync::Arc::new(std::sync::RwLock::new(false)),
-            workspace_roots: std::sync::RwLock::new(Vec::new()),
-            max_diagnostics: std::sync::RwLock::new(100),
-            cache_dir_opt: std::sync::RwLock::new(None),
-            check_timeout: std::sync::RwLock::new(logic::resolve_timeout(
+            snippet_completions: RwLock::new(true),
+            inlay_parameter_names: Arc::new(RwLock::new(true)),
+            watched_files_dynamic: RwLock::new(false),
+            diagnostics_pulled: Arc::new(RwLock::new(false)),
+            diagnostics_refresh: Arc::new(RwLock::new(false)),
+            workspace_roots: RwLock::new(Vec::new()),
+            max_diagnostics: RwLock::new(100),
+            cache_dir_opt: RwLock::new(None),
+            check_timeout: RwLock::new(logic::resolve_timeout(
                 None,
                 std::env::var("OPENSIPS_LSP_CHECK_TIMEOUT_MS").ok(),
             )),
-            check_diags: std::sync::Arc::new(DashMap::new()),
-            analyzer_enabled: std::sync::RwLock::new(true),
-            change_gen: std::sync::Arc::new(DashMap::new()),
-            code_lens_refs: std::sync::RwLock::new(true),
-            check_super: std::sync::Arc::new(DashMap::new()),
-            memo: memo::AnalysisCache::default(),
-            include_graph: std::sync::RwLock::new(None),
-            graph_truncation_logged: std::sync::atomic::AtomicBool::new(false),
-            unreadable_logged: std::sync::atomic::AtomicBool::new(false),
+            check_diags: Arc::new(DashMap::new()),
+            analyzer_enabled: RwLock::new(true),
+            change_gen: Arc::new(DashMap::new()),
+            code_lens_refs: RwLock::new(true),
+            check_super: Arc::new(DashMap::new()),
+            memo: AnalysisCache::default(),
+            include_graph: RwLock::new(None),
+            graph_truncation_logged: AtomicBool::new(false),
+            unreadable_logged: AtomicBool::new(false),
         }
     }
 
     /// Snapshot of open file-scheme buffers, for include resolution
     /// that prefers editor contents over disk.
-    fn open_docs_snapshot(&self) -> std::collections::HashMap<std::path::PathBuf, String> {
+    fn open_docs_snapshot(&self) -> HashMap<PathBuf, String> {
         self.docs
             .iter()
             .filter_map(|e| {
@@ -208,10 +264,8 @@ impl State {
 
     /// A file loader over an open-buffer snapshot with a disk
     /// fallback, size-capped so a hostile include stays cheap.
-    fn make_loader(
-        open: std::collections::HashMap<std::path::PathBuf, String>,
-    ) -> impl Fn(&std::path::Path) -> Option<String> {
-        move |p: &std::path::Path| {
+    fn make_loader(open: HashMap<PathBuf, String>) -> impl Fn(&Path) -> Option<String> {
+        move |p: &Path| {
             if let Some(t) = open.get(p) {
                 return Some(t.clone());
             }
@@ -230,22 +284,22 @@ impl State {
     /// the closure in that order — and its own entry is the caller's
     /// buffer, which is newer than anything on disk.
     fn closure_rooted_at(
-        root: Option<&std::path::Path>,
-        path: &std::path::Path,
+        root: Option<&Path>,
+        path: &Path,
         text: &str,
-        loader: &dyn Fn(&std::path::Path) -> Option<String>,
-    ) -> Vec<(std::path::PathBuf, String)> {
+        loader: &dyn Fn(&Path) -> Option<String>,
+    ) -> Vec<(PathBuf, String)> {
         Self::closure_rooted_at_bounded(root, path, text, loader).0
     }
 
     /// [`Self::closure_rooted_at`], and whether the file bound left a
     /// file out of it.
     fn closure_rooted_at_bounded(
-        root: Option<&std::path::Path>,
-        path: &std::path::Path,
+        root: Option<&Path>,
+        path: &Path,
         text: &str,
-        loader: &dyn Fn(&std::path::Path) -> Option<String>,
-    ) -> (Vec<(std::path::PathBuf, String)>, bool) {
+        loader: &dyn Fn(&Path) -> Option<String>,
+    ) -> (Vec<(PathBuf, String)>, bool) {
         let (mut files, mut truncated) =
             match root.and_then(|r| loader(r).map(|t| (r.to_path_buf(), t))) {
                 Some((r, rt)) => logic::include_closure_bounded(&r, &rt, loader),
@@ -285,12 +339,12 @@ impl State {
 
     /// Analyzer diagnostics for `text`, mapped to LSP (UTF-16) ranges.
     fn analyzer_lsp_diags(
-        files: &[(std::path::PathBuf, String)],
+        files: &[(PathBuf, String)],
         truncated: bool,
-        path: &std::path::Path,
+        path: &Path,
         text: &str,
-        cat: &[catalog::ModuleDoc],
-        origin: &catalog::CatalogOrigin,
+        cat: &[ModuleDoc],
+        origin: &CatalogOrigin,
     ) -> Vec<Diagnostic> {
         let mut all = logic::analyzer_diagnostics_in_closure(files, path, text);
         if truncated {
@@ -327,7 +381,7 @@ impl State {
         version: i32,
         text: &str,
         skip_if_empty: bool,
-        root: Option<&std::path::Path>,
+        root: Option<&Path>,
     ) {
         // a client that pulls gets everything through
         // `textDocument/diagnostic`; pushing as well shows each
@@ -351,8 +405,8 @@ impl State {
         &self,
         uri: &Uri,
         text: &str,
-        open: std::collections::HashMap<std::path::PathBuf, String>,
-        root: Option<&std::path::Path>,
+        open: HashMap<PathBuf, String>,
+        root: Option<&Path>,
     ) -> Vec<Diagnostic> {
         let cap = *self.max_diagnostics.read().unwrap();
         let mut merged = self
@@ -430,7 +484,7 @@ impl State {
     }
 
     /// The UTF-16 range of a byte-column [`crate::outline::Span`].
-    fn span_range(lines: &[&str], s: crate::outline::Span) -> Range {
+    fn span_range(lines: &[&str], s: Span) -> Range {
         let at = |line: u32, col: u32| {
             Position::new(
                 line,
@@ -441,7 +495,7 @@ impl State {
     }
 
     /// An outline entry as an LSP document symbol, children included.
-    fn document_symbol(lines: &[&str], s: crate::outline::Sym) -> DocumentSymbol {
+    fn document_symbol(lines: &[&str], s: Sym) -> DocumentSymbol {
         use crate::outline::SymKind;
         #[allow(deprecated)]
         DocumentSymbol {
@@ -471,7 +525,7 @@ impl State {
     /// one line's content and never its newline, so an edit list can
     /// be applied in any order and the document's line structure is
     /// untouched.
-    fn line_edits(text: &str, edits: Vec<crate::format::LineEdit>) -> Vec<TextEdit> {
+    fn line_edits(text: &str, edits: Vec<LineEdit>) -> Vec<TextEdit> {
         let lines = Self::lines_of(text);
         edits
             .into_iter()
@@ -519,7 +573,7 @@ impl State {
     /// `selection_range` is the name itself, which is what gets
     /// highlighted on navigation.  `data` carries the route name so
     /// the follow-up calls need not re-derive it from a position.
-    fn hierarchy_item(uri: &Uri, b: &analyze::Block, lines: &[&str]) -> CallHierarchyItem {
+    fn hierarchy_item(uri: &Uri, b: &Block, lines: &[&str]) -> CallHierarchyItem {
         let name_line = Self::line_in(lines, b.name_line);
         let name_start = analyze::byte_to_utf16(name_line, b.name_col as usize);
         let kw_line = Self::line_in(lines, b.line);
@@ -553,7 +607,7 @@ impl State {
     }
 
     /// The UTF-16 range of one `route(NAME)` call site's name.
-    fn call_range(lines: &[&str], call: &analyze::Located) -> Range {
+    fn call_range(lines: &[&str], call: &Located) -> Range {
         let line = Self::line_in(lines, call.line);
         let start = analyze::byte_to_utf16(line, call.col as usize);
         Range {
@@ -576,10 +630,7 @@ impl State {
 
     /// The main-table definition of `name` within an include closure,
     /// as (uri, text, block).
-    fn main_definition(
-        files: &[(std::path::PathBuf, String)],
-        name: &str,
-    ) -> Option<(Uri, String, analyze::Block)> {
+    fn main_definition(files: &[(PathBuf, String)], name: &str) -> Option<(Uri, String, Block)> {
         for (path, text) in files {
             let Some(uri) = Uri::from_file_path(path) else {
                 continue;
@@ -598,7 +649,7 @@ impl State {
     /// unchanged report can say "unchanged" instead of resending.
     fn result_id(diags: &[Diagnostic]) -> String {
         use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut h = DefaultHasher::new();
         for d in diags {
             d.range.start.line.hash(&mut h);
             d.range.start.character.hash(&mut h);
@@ -613,7 +664,7 @@ impl State {
     ///
     /// The bound is announced rather than silent: a truncated sweep
     /// that looks complete is worse than one that says it stopped.
-    fn workspace_configs(&self, limit: usize) -> (Vec<std::path::PathBuf>, bool) {
+    fn workspace_configs(&self, limit: usize) -> (Vec<PathBuf>, bool) {
         logic::scan_configs(&self.workspace_roots.read().unwrap(), limit)
     }
 
@@ -669,7 +720,7 @@ impl State {
         // declares support but never answers must not stall startup,
         // and a decline is not an error worth surfacing
         let _ = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
+            Duration::from_millis(500),
             self.client.register_capability(vec![reg]),
         )
         .await;
@@ -693,7 +744,7 @@ impl State {
             let token = NumberOrString::String("opensips-lsp/harvest".into());
             let progress = with_progress
                 && tokio::time::timeout(
-                    std::time::Duration::from_millis(500),
+                    Duration::from_millis(500),
                     self.client.send_request::<request::WorkDoneProgressCreate>(
                         WorkDoneProgressCreateParams {
                             token: token.clone(),
@@ -723,21 +774,21 @@ impl State {
             let cache_opt = self.cache_dir_opt.read().unwrap().clone();
             let src_tree = src.clone();
             let (harvested, core, hit) = tokio::task::spawn_blocking(move || {
-                let p = std::path::Path::new(&src_tree);
+                let p = Path::new(&src_tree);
                 let cache_dir = cache_opt
-                    .map(std::path::PathBuf::from)
+                    .map(PathBuf::from)
                     .or_else(|| {
                         std::env::var("OPENSIPS_LSP_CACHE_DIR")
-                            .map(std::path::PathBuf::from)
+                            .map(PathBuf::from)
                             .ok()
                     })
                     .or_else(|| {
                         std::env::var("XDG_CACHE_HOME")
-                            .map(std::path::PathBuf::from)
+                            .map(PathBuf::from)
                             .ok()
                             .or_else(|| {
                                 std::env::var("HOME")
-                                    .map(|h| std::path::PathBuf::from(h).join(".cache"))
+                                    .map(|h| PathBuf::from(h).join(".cache"))
                                     .ok()
                             })
                             .map(|c| c.join("opensips-lsp"))
@@ -759,7 +810,7 @@ impl State {
             // a tree the user configured is exact for their build, so
             // its diagnostics name the tree rather than a version
             if !empty {
-                *self.catalog_origin.write().unwrap() = catalog::CatalogOrigin::ConfiguredTree;
+                *self.catalog_origin.write().unwrap() = CatalogOrigin::ConfiguredTree;
             }
             *self.catalog.write().unwrap() = harvested;
             *self.core.write().unwrap() = core;
@@ -798,7 +849,7 @@ impl State {
     /// workspace per character; never rebuilding it would pin a
     /// fragment to a parent it no longer has.  The invalidation points
     /// are [`Self::invalidate_include_graph`]'s callers.
-    fn include_graph(&self) -> std::sync::Arc<logic::IncludeGraph> {
+    fn include_graph(&self) -> Arc<IncludeGraph> {
         if let Some(g) = self.include_graph.read().unwrap().clone() {
             return g;
         }
@@ -807,11 +858,7 @@ impl State {
         // fragment stops being recognised and nothing anywhere says
         // why.  `include_graph` is not async, so the line goes out on
         // its own task.
-        if truncated
-            && !self
-                .graph_truncation_logged
-                .swap(true, std::sync::atomic::Ordering::Relaxed)
-        {
+        if truncated && !self.graph_truncation_logged.swap(true, Ordering::Relaxed) {
             let client = self.client.clone();
             tokio::spawn(async move {
                 client
@@ -828,8 +875,8 @@ impl State {
             });
         }
         let open = self.open_docs_snapshot();
-        let mut unreadable: Vec<std::path::PathBuf> = Vec::new();
-        let scanned: Vec<(std::path::PathBuf, String)> = configs
+        let mut unreadable: Vec<PathBuf> = Vec::new();
+        let scanned: Vec<(PathBuf, String)> = configs
             .into_iter()
             .filter_map(|p| {
                 // the same reading the closure will do, so the graph
@@ -850,11 +897,7 @@ impl State {
         // Same principle as the scan bound: a config the graph could
         // not read is a config whose fragments quietly stop being
         // recognised, so it is named rather than dropped in silence.
-        if !unreadable.is_empty()
-            && !self
-                .unreadable_logged
-                .swap(true, std::sync::atomic::Ordering::Relaxed)
-        {
+        if !unreadable.is_empty() && !self.unreadable_logged.swap(true, Ordering::Relaxed) {
             let client = self.client.clone();
             let names: Vec<String> = unreadable
                 .iter()
@@ -876,7 +919,7 @@ impl State {
                     .await;
             });
         }
-        let g = std::sync::Arc::new(logic::IncludeGraph::build(&scanned));
+        let g = Arc::new(IncludeGraph::build(&scanned));
         *self.include_graph.write().unwrap() = Some(g.clone());
         g
     }
@@ -888,7 +931,7 @@ impl State {
 
     /// The config `uri` must be analysed as part of, or `None` when it
     /// is a program in its own right (or the workspace never saw it).
-    fn analysis_root_of(&self, uri: &Uri) -> Option<std::path::PathBuf> {
+    fn analysis_root_of(&self, uri: &Uri) -> Option<PathBuf> {
         let path = uri.to_file_path()?;
         self.include_graph().analysis_root(&path)
     }
@@ -915,9 +958,9 @@ impl State {
     /// when it is a root, its ROOT's when it is an included fragment
     /// (open buffers first, disk fallback).  Non-file documents get a
     /// single-entry closure.
-    fn closure_for(&self, uri: &Uri, text: &str) -> Vec<(std::path::PathBuf, String)> {
+    fn closure_for(&self, uri: &Uri, text: &str) -> Vec<(PathBuf, String)> {
         let Some(path) = uri.to_file_path() else {
-            return vec![(std::path::PathBuf::new(), text.to_string())];
+            return vec![(PathBuf::new(), text.to_string())];
         };
         let loader = Self::make_loader(self.open_docs_snapshot());
         Self::closure_rooted_at(self.analysis_root_of(uri).as_deref(), &path, text, &loader)
@@ -925,14 +968,14 @@ impl State {
 
     /// The route name under an LSP (UTF-16) position with its
     /// namespace, if any.
-    fn route_name_at(text: &str, pos: Position) -> Option<(String, logic::RouteNs)> {
+    fn route_name_at(text: &str, pos: Position) -> Option<(String, RouteNs)> {
         let line = text.lines().nth(pos.line as usize)?;
         let byte_col = analyze::utf16_to_byte(line, pos.character) as u32;
         logic::route_symbol_ns_at(text, pos.line, byte_col)
     }
 
     /// UTF-16 range of one route-name occurrence.
-    fn occurrence_range(lines: &[&str], l: &analyze::Located) -> Range {
+    fn occurrence_range(lines: &[&str], l: &Located) -> Range {
         let lt = Self::line_in(lines, l.line);
         let s = analyze::byte_to_utf16(lt, l.col as usize);
         let e = analyze::byte_to_utf16(lt, l.col as usize + l.name.len());
@@ -1011,7 +1054,7 @@ impl State {
         // the fragment: checked on its own a fragment reports every
         // construct it continues as a syntax error.
         let root = self.analysis_root_of(uri);
-        let check_path: std::path::PathBuf = match &root {
+        let check_path: PathBuf = match &root {
             Some(r) => r.clone(),
             None => path.to_path_buf(),
         };
@@ -1057,7 +1100,7 @@ impl State {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
         {
-            tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+            tokio::time::sleep(Duration::from_millis(ms)).await;
         }
         // stream stdout+stderr with a byte cap: the timeout bounds
         // seconds, this bounds memory — a flooding checker is killed
@@ -1076,15 +1119,15 @@ impl State {
                     check_path
                         .parent()
                         .filter(|p| !p.as_os_str().is_empty())
-                        .unwrap_or_else(|| std::path::Path::new(".")),
+                        .unwrap_or_else(|| Path::new(".")),
                 )
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
                 .kill_on_drop(true)
                 .spawn()?;
             use tokio::io::AsyncReadExt;
             async fn read_capped(
-                mut s: impl tokio::io::AsyncRead + Unpin,
+                mut s: impl AsyncRead + Unpin,
                 cap: usize,
             ) -> std::io::Result<(Vec<u8>, bool)> {
                 let mut buf = Vec::new();
@@ -1117,7 +1160,7 @@ impl State {
         // `fut` kills the child (kill_on_drop)
         let super_watch = async {
             loop {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                tokio::time::sleep(Duration::from_millis(50)).await;
                 if superseded(&self.check_super, uri) {
                     break;
                 }
@@ -1226,8 +1269,8 @@ impl State {
                         }
                     },
                     severity: Some(match d.severity {
-                        diag::Severity::Error => DiagnosticSeverity::ERROR,
-                        diag::Severity::Warning => DiagnosticSeverity::WARNING,
+                        Severity::Error => DiagnosticSeverity::ERROR,
+                        Severity::Warning => DiagnosticSeverity::WARNING,
                     }),
                     source: Some("opensips -C".into()),
                     message,
@@ -1507,7 +1550,7 @@ impl LanguageServer for Backend {
                 catalog::note_modules(&mut modules, &note);
             }
             *self.catalog.write().unwrap() = modules;
-            *self.catalog_origin.write().unwrap() = catalog::CatalogOrigin::BuiltIn(chosen.version);
+            *self.catalog_origin.write().unwrap() = CatalogOrigin::BuiltIn(chosen.version);
         }
         let n = self.catalog.read().unwrap().len();
         let c = self.core.read().unwrap().functions.len();
@@ -1536,8 +1579,8 @@ impl LanguageServer for Backend {
             .send_notification::<CatalogueNotification>(CatalogueStatus {
                 describe: origin.describe(),
                 version: match &origin {
-                    catalog::CatalogOrigin::BuiltIn(v) => Some(v.clone()),
-                    catalog::CatalogOrigin::ConfiguredTree => None,
+                    CatalogOrigin::BuiltIn(v) => Some(v.clone()),
+                    CatalogOrigin::ConfiguredTree => None,
                 },
             })
             .await;
@@ -1598,7 +1641,7 @@ impl LanguageServer for Backend {
         // An edit that adds or removes an include directive changes
         // which file is a fragment of which; nothing else does, so the
         // graph survives ordinary typing.
-        let targets = |text: &str| -> std::collections::HashSet<std::path::PathBuf> {
+        let targets = |text: &str| -> HashSet<PathBuf> {
             uri.to_file_path()
                 .map(|p| logic::resolved_includes(&p, text).into_iter().collect())
                 .unwrap_or_default()
@@ -1612,8 +1655,7 @@ impl LanguageServer for Backend {
             // `include_file` line is the FIX for the warnings it was
             // showing.  Leaving them up until that buffer is next
             // touched makes the fix look like it did not work.
-            let moved: Vec<std::path::PathBuf> =
-                before.symmetric_difference(&after).cloned().collect();
+            let moved: Vec<PathBuf> = before.symmetric_difference(&after).cloned().collect();
             let stale: Vec<Uri> = self
                 .docs
                 .iter()
@@ -1646,7 +1688,7 @@ impl LanguageServer for Backend {
         let text = change.text;
         let root = self.analysis_root_of(&uri);
         tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(debounce)).await;
+            tokio::time::sleep(Duration::from_millis(debounce)).await;
             // superseded by a newer edit: let the newest task publish
             if state.change_gen.get(&uri).map(|g| *g) != Some(generation) {
                 return;
@@ -1781,15 +1823,12 @@ impl LanguageServer for Backend {
     async fn did_change_watched_files(&self, p: DidChangeWatchedFilesParams) {
         let src = self.src.read().unwrap().clone();
         let mut doc_tree_changed = false;
-        let mut changed: Vec<std::path::PathBuf> = Vec::new();
+        let mut changed: Vec<PathBuf> = Vec::new();
         for ev in &p.changes {
             let Some(path) = ev.uri.to_file_path() else {
                 continue;
             };
-            if src
-                .as_ref()
-                .is_some_and(|s| path.starts_with(std::path::Path::new(s)))
-            {
+            if src.as_ref().is_some_and(|s| path.starts_with(Path::new(s))) {
                 doc_tree_changed = true;
             } else {
                 changed.push(path.into_owned());
@@ -1871,7 +1910,7 @@ impl LanguageServer for Backend {
                 ),
                 end: pos,
             };
-            let list = |dir: &std::path::Path| -> Vec<(String, bool)> {
+            let list = |dir: &Path| -> Vec<(String, bool)> {
                 std::fs::read_dir(dir)
                     .into_iter()
                     .flatten()
@@ -1891,7 +1930,7 @@ impl LanguageServer for Backend {
                         range,
                         new_text: c.label.clone(),
                     })),
-                    kind: Some(if c.kind == logic::CompKind::Folder {
+                    kind: Some(if c.kind == CompKind::Folder {
                         CompletionItemKind::FOLDER
                     } else {
                         CompletionItemKind::FILE
@@ -1922,7 +1961,7 @@ impl LanguageServer for Backend {
                 .map(|c| {
                     // functions insert tabstop snippets unless disabled
                     let (insert_text, insert_text_format) =
-                        if snippets && c.kind == logic::CompKind::Function {
+                        if snippets && c.kind == CompKind::Function {
                             if c.detail.contains("()") {
                                 (
                                     Some(format!("{}()$0", c.label)),
@@ -1955,13 +1994,13 @@ impl LanguageServer for Backend {
                             })
                         }),
                         kind: Some(match c.kind {
-                            logic::CompKind::Module => CompletionItemKind::MODULE,
-                            logic::CompKind::Param => CompletionItemKind::PROPERTY,
-                            logic::CompKind::Function => CompletionItemKind::FUNCTION,
-                            logic::CompKind::Route => CompletionItemKind::REFERENCE,
-                            logic::CompKind::Keyword => CompletionItemKind::KEYWORD,
-                            logic::CompKind::File => CompletionItemKind::FILE,
-                            logic::CompKind::Folder => CompletionItemKind::FOLDER,
+                            CompKind::Module => CompletionItemKind::MODULE,
+                            CompKind::Param => CompletionItemKind::PROPERTY,
+                            CompKind::Function => CompletionItemKind::FUNCTION,
+                            CompKind::Route => CompletionItemKind::REFERENCE,
+                            CompKind::Keyword => CompletionItemKind::KEYWORD,
+                            CompKind::File => CompletionItemKind::FILE,
+                            CompKind::Folder => CompletionItemKind::FOLDER,
                         }),
                         ..Default::default()
                     }
@@ -2032,7 +2071,7 @@ impl LanguageServer for Backend {
             if let Some(d) = analyze::route_blocks(ftext)
                 .into_iter()
                 .filter(|b| b.kind == "route")
-                .map(|b| analyze::Located {
+                .map(|b| Located {
                     name: b.name,
                     line: b.line,
                     col: b.col,
@@ -2194,8 +2233,7 @@ impl LanguageServer for Backend {
                 path.display()
             )));
         }
-        let mut changes: std::collections::HashMap<Uri, Vec<TextEdit>> =
-            std::collections::HashMap::new();
+        let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
         for (path, ftext) in &files {
             let Some(furi) = Uri::from_file_path(path) else {
                 continue;
@@ -2225,7 +2263,7 @@ impl LanguageServer for Backend {
         let open = self.open_docs_snapshot();
         let loader = State::make_loader(open.clone());
         let (paths, _) = self.workspace_configs(logic::MAX_CONFIG_FILES);
-        let mut configs: Vec<(std::path::PathBuf, String)> = paths
+        let mut configs: Vec<(PathBuf, String)> = paths
             .into_iter()
             .filter_map(|p| loader(&p).map(|t| (p, t)))
             .collect();
@@ -2234,8 +2272,7 @@ impl LanguageServer for Backend {
                 configs.push((p, t));
             }
         }
-        let mut changes: std::collections::HashMap<Uri, Vec<TextEdit>> =
-            std::collections::HashMap::new();
+        let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
         for f in &p.files {
             let (Ok(old), Ok(new)) = (f.old_uri.parse::<Uri>(), f.new_uri.parse::<Uri>()) else {
                 continue;
@@ -2275,8 +2312,7 @@ impl LanguageServer for Backend {
 
     async fn symbol(&self, p: WorkspaceSymbolParams) -> Result<Option<WorkspaceSymbolResponse>> {
         let query = p.query.to_lowercase();
-        let mut seen: std::collections::HashSet<std::path::PathBuf> =
-            std::collections::HashSet::new();
+        let mut seen: HashSet<PathBuf> = HashSet::new();
         let mut out = Vec::new();
         // every open document plus its include closure, deduplicated
         let open: Vec<(Uri, String)> = self
@@ -2373,10 +2409,7 @@ impl LanguageServer for Backend {
         let Some(path) = uri.to_file_path() else {
             return Ok(None);
         };
-        let base = path
-            .parent()
-            .unwrap_or(std::path::Path::new("."))
-            .to_path_buf();
+        let base = path.parent().unwrap_or(Path::new(".")).to_path_buf();
         let mut out = Vec::new();
         for inc in analyze::includes(&text) {
             let lt = State::doc_line(&text, inc.line);
@@ -2507,7 +2540,7 @@ impl LanguageServer for Backend {
                 },
             ];
             edits.sort_by_key(|e| e.range.start.line);
-            let mut changes = std::collections::HashMap::new();
+            let mut changes = HashMap::new();
             changes.insert(uri.clone(), edits);
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: format!("Extract into route[{}]", plan.name),
@@ -2535,7 +2568,7 @@ impl LanguageServer for Backend {
                     new_text: String::new(),
                 })
                 .collect();
-            let mut changes = std::collections::HashMap::new();
+            let mut changes = HashMap::new();
             changes.insert(uri.clone(), edits);
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: format!(
@@ -2555,7 +2588,7 @@ impl LanguageServer for Backend {
         for d in &p.context.diagnostics {
             for f in logic::quick_fixes(&cat, &text, &d.message) {
                 let pos = Position::new(f.line, f.col);
-                let mut changes = std::collections::HashMap::new();
+                let mut changes = HashMap::new();
                 changes.insert(
                     uri.clone(),
                     vec![TextEdit {
@@ -2669,7 +2702,7 @@ impl LanguageServer for Backend {
         // only the main table takes part: `route(NAME)` is the only
         // call form the server can see, so a failure_route or
         // event_route has no callers it could honestly report
-        let Some((name, logic::RouteNs::Main)) = State::route_name_at(&text, pos) else {
+        let Some((name, RouteNs::Main)) = State::route_name_at(&text, pos) else {
             return Ok(None);
         };
         let files = self.closure_for(&uri, &text);
@@ -2773,7 +2806,7 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let opts = crate::format::Options {
+        let opts = Options {
             insert_spaces: p.options.insert_spaces,
             tab_size: p.options.tab_size,
         };
@@ -2790,7 +2823,7 @@ impl LanguageServer for Backend {
         let Some(text) = self.docs.get(&p.text_document.uri).map(|d| d.1.clone()) else {
             return Ok(None);
         };
-        let opts = crate::format::Options {
+        let opts = Options {
             insert_spaces: p.options.insert_spaces,
             tab_size: p.options.tab_size,
         };
@@ -2814,8 +2847,8 @@ impl LanguageServer for Backend {
                 end_line: f.end_line,
                 end_character: None,
                 kind: Some(match f.kind {
-                    crate::outline::FoldKind::Region => FoldingRangeKind::Region,
-                    crate::outline::FoldKind::Comment => FoldingRangeKind::Comment,
+                    FoldKind::Region => FoldingRangeKind::Region,
+                    FoldKind::Comment => FoldingRangeKind::Comment,
                 }),
                 collapsed_text: None,
             })

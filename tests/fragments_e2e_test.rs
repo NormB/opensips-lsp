@@ -11,8 +11,12 @@
 //! answer in its root's context.
 
 mod common;
-use common::*;
-use std::process::{Command, Stdio};
+use common::Server;
+use std::cmp::Reverse;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::mpsc::Receiver;
 
 /// Root defines `helper` and includes the fragment; the fragment
 /// defines `entry`, calls `helper` (defined only in the root) and
@@ -20,7 +24,7 @@ use std::process::{Command, Stdio};
 const ROOT_TEXT: &str = "include_file \"inc/routes.cfg\"\nroute[helper] {\n    exit;\n}\nroute {\n    route(entry);\n}\n";
 const FRAG_TEXT: &str = "route[entry] {\n    route(helper);\n    route(ghost);\n}\n";
 
-fn setup(tag: &str) -> (common::Scratch, std::path::PathBuf, String, String) {
+fn setup(tag: &str) -> (common::Scratch, PathBuf, String, String) {
     let base_scratch = common::Scratch::new(&format!("oslsp-frag-{tag}"));
     let base = base_scratch.path().to_path_buf();
     std::fs::create_dir_all(base.join("inc")).unwrap();
@@ -31,26 +35,15 @@ fn setup(tag: &str) -> (common::Scratch, std::path::PathBuf, String, String) {
     (base_scratch, base, root_uri, frag_uri)
 }
 
-fn start(
-    base: &std::path::Path,
-    opensips_path: &str,
-) -> (
-    Server,
-    std::sync::mpsc::Receiver<serde_json::Value>,
-    std::process::ChildStdin,
-) {
+fn start(base: &Path, opensips_path: &str) -> (Server, Receiver<serde_json::Value>, ChildStdin) {
     start_in(base, opensips_path, true)
 }
 
 fn start_in(
-    base: &std::path::Path,
+    base: &Path,
     opensips_path: &str,
     with_workspace_folder: bool,
-) -> (
-    Server,
-    std::sync::mpsc::Receiver<serde_json::Value>,
-    std::process::ChildStdin,
-) {
+) -> (Server, Receiver<serde_json::Value>, ChildStdin) {
     let mut child = Server::new(
         Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
             .env("OPENSIPS_LSP_BIN", "")
@@ -66,27 +59,27 @@ fn start_in(
             .unwrap(),
         base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
     let folders = with_workspace_folder
         .then(|| serde_json::json!([{"uri": format!("file://{}", base.display()), "name":"w"}]));
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{},
             "initializationOptions":{"opensipsPath": opensips_path},
             "workspaceFolders": folders}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
     (child, rx, stdin)
 }
 
-fn did_open(stdin: &mut std::process::ChildStdin, uri: &str, text: &str) {
-    write_msg(
+fn did_open(stdin: &mut ChildStdin, uri: &str, text: &str) {
+    common::write_msg(
         stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
@@ -98,32 +91,32 @@ fn the_server_names_the_root_a_fragment_belongs_to() {
     let (_scratch, base, root_uri, frag_uri) = setup("root");
     let (mut child, rx, mut stdin) = start(&base, "");
     // the fragment's context is the root that includes it...
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "analysisRoot(fragment)");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "analysisRoot(fragment)");
     assert_eq!(
         v["result"], root_uri,
         "the fragment must resolve to its including root: {v}"
     );
     // ...and a config nothing includes is a program in its own right,
     // which is how the client tells "opensips config" from "some .cfg"
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"opensips/analysisRoot",
             "params":{"uri": root_uri}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "analysisRoot(root)");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "analysisRoot(root)");
     assert!(v["result"].is_null(), "a root has no parent: {v}");
     // a file the workspace does not contain is not claimed
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"opensips/analysisRoot",
             "params":{"uri": format!("file://{}", base.join("nope.cfg").display())}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 4, "analysisRoot(unknown)");
+    let v = common::wait_for(&rx, |v| v["id"] == 4, "analysisRoot(unknown)");
     assert!(v["result"].is_null(), "{v}");
     let _ = child.kill();
 }
@@ -133,7 +126,7 @@ fn a_fragment_opened_alone_is_analysed_in_its_roots_closure() {
     let (_scratch, base, _root_uri, frag_uri) = setup("analyze");
     let (mut child, rx, mut stdin) = start(&base, "");
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
         "fragment diagnostics",
@@ -162,24 +155,24 @@ fn navigation_from_a_fragment_reaches_the_root_that_includes_it() {
     let (mut child, rx, mut stdin) = start(&base, "");
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
     // definition of `helper` (fragment line 1) lives in the root
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{
             "textDocument":{"uri":frag_uri},"position":{"line":1,"character":11}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "definition");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "definition");
     assert_eq!(
         v["result"]["uri"], root_uri,
         "the parent's route is only reachable through the root closure: {v}"
     );
     assert_eq!(v["result"]["range"]["start"]["line"], 1);
     // completion inside `route(` offers the parent's routes too
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{
             "textDocument":{"uri":frag_uri},"position":{"line":2,"character":10}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "completion");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "completion");
     let labels: Vec<&str> = v["result"]
         .as_array()
         .unwrap()
@@ -217,7 +210,7 @@ fn the_checker_runs_on_the_root_and_the_fragments_errors_come_back_to_it() {
 
     let (mut child, rx, mut stdin) = start(&base, stub.to_str().unwrap());
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"
@@ -272,12 +265,12 @@ fn the_checker_runs_on_the_root_and_the_fragments_errors_come_back_to_it() {
 fn without_a_workspace_folder_there_is_nothing_to_find_the_root_in() {
     let (_scratch, base, _root_uri, frag_uri) = setup("nows");
     let (mut child, rx, mut stdin) = start_in(&base, "", false);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "analysisRoot(no folder)");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "analysisRoot(no folder)");
     assert!(
         v["result"].is_null(),
         "with no folder open the include graph is empty: {v}"
@@ -298,7 +291,7 @@ fn adding_an_include_clears_the_fragment_it_now_belongs_to() {
     std::fs::write(base.join("opensips.cfg"), &root_without).unwrap();
     let (mut child, rx, mut stdin) = start(&base, "");
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
         "fragment diagnostics before the include exists",
@@ -314,13 +307,13 @@ fn adding_an_include_clears_the_fragment_it_now_belongs_to() {
     );
     // the user opens the root and types the include line
     did_open(&mut stdin, &root_uri, &root_without);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
             "textDocument":{"uri":root_uri,"version":2},
             "contentChanges":[{"text": ROOT_TEXT}]}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"
@@ -362,12 +355,12 @@ fn a_truncated_workspace_scan_says_so() {
         std::fs::write(noise.join(format!("n{i:04}.cfg")), "# unrelated\n").unwrap();
     }
     let (mut child, rx, mut stdin) = start(&base, "");
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -398,12 +391,12 @@ fn call_hierarchy_from_a_fragment_sees_the_whole_closure() {
     let (_scratch, base, root_uri, frag_uri) = setup("callh");
     let (mut child, rx, mut stdin) = start(&base, "");
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/prepareCallHierarchy",
             "params":{"textDocument":{"uri":frag_uri},"position":{"line":1,"character":11}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "prepareCallHierarchy");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "prepareCallHierarchy");
     let item = v["result"][0].clone();
     assert_eq!(
         item["data"]["route"], "helper",
@@ -413,12 +406,12 @@ fn call_hierarchy_from_a_fragment_sees_the_whole_closure() {
         item["uri"], root_uri,
         "and it lives in the root, which is not open: {v}"
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"callHierarchy/incomingCalls",
             "params":{"item": item}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "incomingCalls");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "incomingCalls");
     let froms: Vec<&str> = v["result"]
         .as_array()
         .map(|a| a.iter().filter_map(|x| x["from"]["uri"].as_str()).collect())
@@ -437,12 +430,12 @@ fn call_hierarchy_from_a_fragment_sees_the_whole_closure() {
         .unwrap_or_default();
     assert!(names.contains(&"entry"), "{v}");
     // and the other direction answers with a list rather than nothing
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"callHierarchy/outgoingCalls",
             "params":{"item": item}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 4, "outgoingCalls");
+    let v = common::wait_for(&rx, |v| v["id"] == 4, "outgoingCalls");
     assert!(
         v["result"].is_array(),
         "a route whose body calls nothing has NO outgoing calls; that is \
@@ -500,7 +493,7 @@ fn a_fragment_outside_the_roots_closure_keeps_its_own_includes() {
 
     let (mut child, rx, mut stdin) = start(&base, "");
     did_open(&mut stdin, &leaf_uri, &leaf_text);
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == leaf_uri,
         "diagnostics on a fragment past the closure's depth",
@@ -593,9 +586,9 @@ fn every_request_answers_the_same_shape_split_as_whole() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{},
@@ -604,8 +597,8 @@ fn every_request_answers_the_same_shape_split_as_whole() {
                 {"uri": format!("file://{}", whole_dir.display()), "name":"whole"},
                 {"uri": format!("file://{}", split_dir.display()), "name":"split"}]}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
@@ -641,12 +634,12 @@ fn every_request_answers_the_same_shape_split_as_whole() {
                 params[k] = v.clone();
             }
         }
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
         );
         let want = id;
-        wait_for(&rx, |v| v["id"] == want, method)["result"].clone()
+        common::wait_for(&rx, |v| v["id"] == want, method)["result"].clone()
     };
 
     for (method, extra) in [
@@ -703,13 +696,13 @@ fn every_request_answers_the_same_shape_split_as_whole() {
     for method in ["callHierarchy/incomingCalls", "callHierarchy/outgoingCalls"] {
         for (label, item) in [("whole", &w_item), ("split", &f_item)] {
             id += 1;
-            write_msg(
+            common::write_msg(
                 &mut stdin,
                 &serde_json::json!({"jsonrpc":"2.0","id":id,"method":method,
                     "params":{"item": item}}),
             );
             let want = id;
-            let r = wait_for(&rx, |v| v["id"] == want, method)["result"].clone();
+            let r = common::wait_for(&rx, |v| v["id"] == want, method)["result"].clone();
             if label == "whole" {
                 w_shapes.push(shape(&r));
             } else {
@@ -755,14 +748,14 @@ fn analysis_root_survives_whatever_the_editor_hands_it() {
     let mut id = 100;
     for uri in &hostile {
         id += 1;
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
                 "params":{"uri": uri}}),
         );
         let want = id;
         // an answer OR a protocol error is fine; silence is not
-        let v = wait_for(&rx, |v| v["id"] == want, "analysisRoot on a hostile uri");
+        let v = common::wait_for(&rx, |v| v["id"] == want, "analysisRoot on a hostile uri");
         assert!(
             v.get("result").is_some() || v.get("error").is_some(),
             "neither answered nor refused {uri:?}: {v}"
@@ -770,13 +763,13 @@ fn analysis_root_survives_whatever_the_editor_hands_it() {
     }
     // and it is still correct afterwards, so nothing was left wedged
     id += 1;
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
     let want = id;
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["id"] == want,
         "analysisRoot after the hostile batch",
@@ -804,7 +797,7 @@ fn pull_and_push_agree_about_a_fragment() {
     // push: a client that declares no diagnostic support
     let (mut pusher, rx, mut stdin) = start(&base, "");
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
         "pushed diagnostics",
@@ -834,27 +827,27 @@ fn pull_and_push_agree_about_a_fragment() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{"textDocument":{"diagnostic":{"dynamicRegistration":false}}},
             "initializationOptions":{"opensipsPath":""},
             "workspaceFolders":[{"uri": format!("file://{}", base.display()), "name":"w"}]}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/diagnostic",
             "params":{"textDocument":{"uri":frag_uri}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "pulled diagnostics");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "pulled diagnostics");
     let mut pulled: Vec<String> = v["result"]["items"]
         .as_array()
         .cloned()
@@ -867,12 +860,12 @@ fn pull_and_push_agree_about_a_fragment() {
     assert_eq!(pushed, pulled, "the two channels disagree about a fragment");
 
     // and the workspace sweep reports the ROOT, never the fragment
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"workspace/diagnostic",
             "params":{"previousResultIds":[]}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "workspace sweep");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "workspace sweep");
     let uris: Vec<String> = v["result"]["items"]
         .as_array()
         .cloned()
@@ -920,7 +913,7 @@ fn many_fragments_open_and_edited_at_once_stay_correct() {
     // a burst of edits across all of them, interleaved
     for round in 2..5 {
         for i in 0..N {
-            write_msg(
+            common::write_msg(
                 &mut stdin,
                 &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
                     "textDocument":{"uri": uri(i), "version": round},
@@ -932,13 +925,13 @@ fn many_fragments_open_and_edited_at_once_stay_correct() {
     let mut id = 200;
     for i in 0..N {
         id += 1;
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
                 "params":{"uri": uri(i)}}),
         );
         let want = id;
-        let v = wait_for(&rx, |v| v["id"] == want, "analysisRoot under load");
+        let v = common::wait_for(&rx, |v| v["id"] == want, "analysisRoot under load");
         assert!(
             v["result"]
                 .as_str()
@@ -981,12 +974,12 @@ fn a_config_the_scan_accepts_is_a_config_the_closure_can_load() {
     );
 
     let (mut child, rx, mut stdin) = start(&base, "");
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "analysisRoot with a non-UTF-8 root");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "analysisRoot with a non-UTF-8 root");
     assert!(
         v["result"]
             .as_str()
@@ -994,7 +987,7 @@ fn a_config_the_scan_accepts_is_a_config_the_closure_can_load() {
         "one byte in a comment must not erase the whole configuration: {v}"
     );
     did_open(&mut stdin, &frag_uri, frag);
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
         "diagnostics with a non-UTF-8 root",
@@ -1037,14 +1030,14 @@ fn a_root_too_large_to_load_is_not_claimed_and_is_announced() {
 
     let (mut child, rx, mut stdin) = start(&base, "");
     // the first request is what builds the graph; the log and the
-    // response race, and `wait_for` discards what it is not waiting
+    // response race, and `common::wait_for` discards what it is not waiting
     // for — so take the log first and ask again for the answer
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -1054,12 +1047,12 @@ fn a_root_too_large_to_load_is_not_claimed_and_is_announced() {
         },
         "a log line explaining the skipped config",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
-    let answer = wait_for(&rx, |v| v["id"] == 3, "analysisRoot with an oversized root");
+    let answer = common::wait_for(&rx, |v| v["id"] == 3, "analysisRoot with an oversized root");
     assert!(
         answer["result"].is_null(),
         "a root the closure cannot load must not be handed out: {answer}"
@@ -1145,7 +1138,7 @@ fn encodings_do_not_change_what_a_fragment_is_part_of() {
         let frag_uri = format!("file://{}", base.join("inc/f.cfg").display());
         let (mut child, rx, mut stdin) = start(&base, "");
         did_open(&mut stdin, &frag_uri, &frag);
-        let v = wait_for(
+        let v = common::wait_for(
             &rx,
             |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
             "diagnostics",
@@ -1221,13 +1214,13 @@ fn the_filesystem_being_hostile_does_not_take_the_server_down() {
         "inc/loop",
     ] {
         let uri = format!("file://{}", base.join(name).display());
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":50,"method":"opensips/analysisRoot",
                 "params":{"uri": uri}}),
         );
         // a directory symlink loop must not make the scan run forever
-        let v = wait_for(&rx, |v| v["id"] == 50, "analysisRoot on a hostile path");
+        let v = common::wait_for(&rx, |v| v["id"] == 50, "analysisRoot on a hostile path");
         assert!(
             v.get("result").is_some() || v.get("error").is_some(),
             "{name}: {v}"
@@ -1235,12 +1228,12 @@ fn the_filesystem_being_hostile_does_not_take_the_server_down() {
     }
     // the ordinary fragment among them still resolves
     let f_uri = format!("file://{}", base.join("inc/f.cfg").display());
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":51,"method":"opensips/analysisRoot",
             "params":{"uri": f_uri}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 51, "analysisRoot");
+    let v = common::wait_for(&rx, |v| v["id"] == 51, "analysisRoot");
     assert!(
         v["result"]
             .as_str()
@@ -1249,17 +1242,17 @@ fn the_filesystem_being_hostile_does_not_take_the_server_down() {
     );
     // and the root vanishing mid-session is survivable
     std::fs::remove_file(base.join("opensips.cfg")).unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{
             "changes":[{"uri": format!("file://{}", base.join("opensips.cfg").display()), "type":3}]}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":52,"method":"opensips/analysisRoot",
             "params":{"uri": f_uri}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["id"] == 52,
         "analysisRoot after the root was deleted",
@@ -1320,9 +1313,9 @@ fn splitting_a_configuration_does_not_change_the_findings() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{},
@@ -1331,15 +1324,15 @@ fn splitting_a_configuration_does_not_change_the_findings() {
                 {"uri": format!("file://{}", whole_dir.display()), "name":"w"},
                 {"uri": format!("file://{}", split_dir.display()), "name":"s"}]}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
 
     let whole_uri = format!("file://{}", whole_dir.join("opensips.cfg").display());
     did_open(&mut stdin, &whole_uri, &whole);
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == whole_uri,
         "whole-file diagnostics",
@@ -1360,7 +1353,7 @@ fn splitting_a_configuration_does_not_change_the_findings() {
         );
         did_open(&mut stdin, &uri, b);
         let want = uri.clone();
-        let v = wait_for(
+        let v = common::wait_for(
             &rx,
             move |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == want,
             "fragment diagnostics",
@@ -1389,14 +1382,14 @@ fn the_server_survives_a_client_behaving_badly() {
     let (_scratch, base, _root_uri, frag_uri) = setup("badclient");
     let (mut child, rx, mut stdin) = start(&base, "");
     // close before open, open twice, change a document never opened
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
             "textDocument":{"uri": frag_uri}}}),
     );
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
             "textDocument":{"uri": format!("file://{}", base.join("never.cfg").display()),
@@ -1413,13 +1406,13 @@ fn the_server_survives_a_client_behaving_badly() {
         serde_json::json!({"nope": "x"}),
     ] {
         id += 1;
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
                 "params": bad}),
         );
         let want = id;
-        let v = wait_for(
+        let v = common::wait_for(
             &rx,
             |v| v["id"] == want,
             "analysisRoot with malformed params",
@@ -1427,13 +1420,13 @@ fn the_server_survives_a_client_behaving_badly() {
         assert!(v.get("result").is_some() || v.get("error").is_some(), "{v}");
     }
     id += 1;
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/notARealMethod",
             "params":{}}),
     );
     let want = id;
-    let v = wait_for(&rx, |v| v["id"] == want, "an unknown method");
+    let v = common::wait_for(&rx, |v| v["id"] == want, "an unknown method");
     assert!(
         v.get("error").is_some(),
         "an unknown method is refused: {v}"
@@ -1452,14 +1445,14 @@ fn the_server_survives_a_client_behaving_badly() {
                 char::from_u32(c).unwrap_or('?')
             })
             .collect();
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
                 "textDocument":{"uri": frag_uri, "version": round + 10},
                 "contentChanges":[{"text": junk}]}}),
         );
     }
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
             "textDocument":{"uri": frag_uri, "version": 999},
@@ -1467,13 +1460,13 @@ fn the_server_survives_a_client_behaving_badly() {
     );
     // it must still be answering, and answering correctly
     id += 1;
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
     let want = id;
-    let v = wait_for(&rx, |v| v["id"] == want, "analysisRoot after the abuse");
+    let v = common::wait_for(&rx, |v| v["id"] == want, "analysisRoot after the abuse");
     assert!(
         v["result"]
             .as_str()
@@ -1492,17 +1485,17 @@ fn the_server_survives_a_client_behaving_badly() {
 fn repeated_questions_do_not_drift() {
     let (_scratch, base, root_uri, frag_uri) = setup("stable");
     let (mut child, rx, mut stdin) = start(&base, "");
-    let mut answers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut answers: HashSet<String> = HashSet::new();
     let mut id = 80;
     for _ in 0..20 {
         id += 1;
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
                 "params":{"uri": frag_uri}}),
         );
         let want = id;
-        let v = wait_for(&rx, |v| v["id"] == want, "analysisRoot");
+        let v = common::wait_for(&rx, |v| v["id"] == want, "analysisRoot");
         answers.insert(v["result"].to_string());
     }
     assert_eq!(
@@ -1516,20 +1509,20 @@ fn repeated_questions_do_not_drift() {
     for _ in 0..5 {
         did_open(&mut stdin, &frag_uri, FRAG_TEXT);
         did_open(&mut stdin, &root_uri, ROOT_TEXT);
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
                 "textDocument":{"uri": root_uri}}}),
         );
     }
     id += 1;
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
     let want = id;
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["id"] == want,
         "analysisRoot after open/close churn",
@@ -1568,16 +1561,16 @@ fn a_workspace_folder_added_later_is_picked_up() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{},
             "initializationOptions":{"opensipsPath":""},
             "workspaceFolders": []}}),
     );
-    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    let init = common::wait_for(&rx, |v| v["id"] == 1, "init");
     // a server that does not SAY it handles folder changes will not be
     // told about them, so the capability is half the fix
     assert_eq!(
@@ -1589,31 +1582,31 @@ fn a_workspace_folder_added_later_is_picked_up() {
         true,
         "and that it wants to be told when they change: {init}"
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "analysisRoot with no folder");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "analysisRoot with no folder");
     assert!(v["result"].is_null(), "nothing is open yet: {v}");
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders",
             "params":{"event":{
                 "added":[{"uri": format!("file://{}", base.display()), "name":"w"}],
                 "removed":[]}}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["id"] == 3,
         "analysisRoot after the folder was added",
@@ -1626,18 +1619,18 @@ fn a_workspace_folder_added_later_is_picked_up() {
     );
 
     // and removing it again takes them back out of scope
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWorkspaceFolders",
             "params":{"event":{"added":[],
                 "removed":[{"uri": format!("file://{}", base.display()), "name":"w"}]}}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["id"] == 4,
         "analysisRoot after the folder was removed",
@@ -1660,9 +1653,9 @@ fn the_edits_a_fragment_produces_are_correct_not_merely_present() {
     let (mut child, rx, mut stdin) = start(&base, "");
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
     // Take the publish BEFORE anything else asks a question:
-    // `wait_for` discards what it is not waiting for, so a request
+    // `common::wait_for` discards what it is not waiting for, so a request
     // sent first eats the notification the quick fix needs.
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
         "diagnostics to drive the quick fix",
@@ -1679,13 +1672,13 @@ fn the_edits_a_fragment_produces_are_correct_not_merely_present() {
     did_open(&mut stdin, &root_uri, ROOT_TEXT);
 
     // rename helper from its CALL SITE in the fragment
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/rename","params":{
             "textDocument":{"uri":frag_uri},"position":{"line":1,"character":11},
             "newName":"RENAMED"}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "rename");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "rename");
     let changes = v["result"]["changes"].as_object().expect("edits").clone();
 
     /// Apply edits to text, last first so earlier offsets stay valid.
@@ -1694,8 +1687,8 @@ fn the_edits_a_fragment_produces_are_correct_not_merely_present() {
         let mut es: Vec<&serde_json::Value> = edits.as_array().unwrap().iter().collect();
         es.sort_by_key(|e| {
             (
-                std::cmp::Reverse(e["range"]["start"]["line"].as_u64().unwrap()),
-                std::cmp::Reverse(e["range"]["start"]["character"].as_u64().unwrap()),
+                Reverse(e["range"]["start"]["line"].as_u64().unwrap()),
+                Reverse(e["range"]["start"]["character"].as_u64().unwrap()),
             )
         });
         for e in es {
@@ -1725,12 +1718,12 @@ fn the_edits_a_fragment_produces_are_correct_not_merely_present() {
     );
 
     // the fragment's own route is called once, from the root
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/codeLens",
             "params":{"textDocument":{"uri":frag_uri}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "codeLens");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "codeLens");
     let titles: Vec<String> = v["result"]
         .as_array()
         .cloned()
@@ -1748,14 +1741,14 @@ fn the_edits_a_fragment_produces_are_correct_not_merely_present() {
     // A real client passes the diagnostics it is showing, and the
     // action is offered against them — an empty context asks for
     // nothing and gets nothing.
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"textDocument/codeAction","params":{
             "textDocument":{"uri":frag_uri},
             "range":{"start":{"line":2,"character":10},"end":{"line":2,"character":14}},
             "context":{"diagnostics": published}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 4, "codeAction");
+    let v = common::wait_for(&rx, |v| v["id"] == 4, "codeAction");
     let actions = v["result"].as_array().cloned().unwrap_or_default();
     assert!(!actions.is_empty(), "a stub must be offered for ghost: {v}");
     for a in &actions {
@@ -1784,21 +1777,21 @@ fn a_root_appearing_and_vanishing_is_noticed() {
 
     let (mut child, rx, mut stdin) = start(&base, "");
     let mut id = 10;
-    let ask = |stdin: &mut std::process::ChildStdin, id: &mut i32| {
+    let ask = |stdin: &mut ChildStdin, id: &mut i32| {
         *id += 1;
-        write_msg(
+        common::write_msg(
             stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":*id,"method":"opensips/analysisRoot",
                 "params":{"uri": frag_uri}}),
         );
         let want = *id;
-        wait_for(&rx, |v| v["id"] == want, "analysisRoot")["result"].clone()
+        common::wait_for(&rx, |v| v["id"] == want, "analysisRoot")["result"].clone()
     };
     assert!(ask(&mut stdin, &mut id).is_null(), "no root on disk yet");
 
     // CREATED
     std::fs::write(&root_path, &saved).unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles",
             "params":{"changes":[{"uri": root_uri, "type": 1}]}}),
@@ -1816,7 +1809,7 @@ fn a_root_appearing_and_vanishing_is_noticed() {
         saved.replace("include_file \"inc/routes.cfg\"\n", ""),
     )
     .unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles",
             "params":{"changes":[{"uri": root_uri, "type": 2}]}}),
@@ -1828,7 +1821,7 @@ fn a_root_appearing_and_vanishing_is_noticed() {
 
     // CHANGED back, then DELETED
     std::fs::write(&root_path, &saved).unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles",
             "params":{"changes":[{"uri": root_uri, "type": 2}]}}),
@@ -1838,7 +1831,7 @@ fn a_root_appearing_and_vanishing_is_noticed() {
         "and back again"
     );
     std::fs::remove_file(&root_path).unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles",
             "params":{"changes":[{"uri": root_uri, "type": 3}]}}),
@@ -1858,28 +1851,28 @@ fn state_survives_repeated_open_edit_close_cycles() {
     let (_scratch, base, root_uri, frag_uri) = setup("churn");
     let (mut child, rx, mut stdin) = start(&base, "");
     let mut id = 300;
-    let ask = |stdin: &mut std::process::ChildStdin, id: &mut i32| -> String {
+    let ask = |stdin: &mut ChildStdin, id: &mut i32| -> String {
         *id += 1;
-        write_msg(
+        common::write_msg(
             stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":*id,"method":"opensips/analysisRoot",
                 "params":{"uri": frag_uri}}),
         );
         let want = *id;
-        wait_for(&rx, |v| v["id"] == want, "analysisRoot")["result"].to_string()
+        common::wait_for(&rx, |v| v["id"] == want, "analysisRoot")["result"].to_string()
     };
     let before = ask(&mut stdin, &mut id);
     for round in 0..25 {
         did_open(&mut stdin, &frag_uri, FRAG_TEXT);
         did_open(&mut stdin, &root_uri, ROOT_TEXT);
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
                 "textDocument":{"uri": frag_uri, "version": round + 2},
                 "contentChanges":[{"text": format!("{FRAG_TEXT}// {round}\n")}]}}),
         );
         for u in [&frag_uri, &root_uri] {
-            write_msg(
+            common::write_msg(
                 &mut stdin,
                 &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
                     "textDocument":{"uri": u}}}),
@@ -1890,7 +1883,7 @@ fn state_survives_repeated_open_edit_close_cycles() {
     assert_eq!(before, after, "25 open/edit/close cycles moved the answer");
     // and it still analyses, rather than merely answering
     did_open(&mut stdin, &frag_uri, FRAG_TEXT);
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == frag_uri,
         "diagnostics after the churn",
@@ -1932,12 +1925,12 @@ fn a_conditionally_guarded_include_is_still_claimed() {
         std::fs::write(base.join("inc/on.cfg"), "route[COND] {\n    exit;\n}\n").unwrap();
         let frag_uri = format!("file://{}", base.join("inc/on.cfg").display());
         let (mut child, rx, mut stdin) = start(&base, "");
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
                 "params":{"uri": frag_uri}}),
         );
-        let v = wait_for(&rx, |v| v["id"] == 2, "analysisRoot");
+        let v = common::wait_for(&rx, |v| v["id"] == 2, "analysisRoot");
         assert!(
             v["result"]
                 .as_str()
@@ -1998,13 +1991,13 @@ fn a_configuration_split_into_many_cross_calling_fragments_is_clean() {
         "{}route[EXTRA] {{\n    route(NO_SUCH_ROUTE);\n}}\n",
         piece(0)
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
             "textDocument":{"uri": ghost_uri, "version": 2},
             "contentChanges":[{"text": ghost_text}]}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"
@@ -2033,13 +2026,13 @@ fn a_configuration_split_into_many_cross_calling_fragments_is_clean() {
     for i in 0..N {
         id += 1;
         let uri = format!("file://{}", base.join(format!("inc/p{i}.cfg")).display());
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"opensips/analysisRoot",
                 "params":{"uri": uri}}),
         );
         let want = id;
-        let v = wait_for(&rx, |v| v["id"] == want, "analysisRoot");
+        let v = common::wait_for(&rx, |v| v["id"] == want, "analysisRoot");
         assert!(
             v["result"]
                 .as_str()
@@ -2075,7 +2068,7 @@ fn every_setting_behaves_the_same_for_a_fragment() {
         (base_scratch, uri, frag)
     };
 
-    let boot = |base: &std::path::Path, opts: serde_json::Value| {
+    let boot = |base: &Path, opts: serde_json::Value| {
         let mut child = Server::new(
             Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
                 .env("OPENSIPS_LSP_BIN", "")
@@ -2091,21 +2084,21 @@ fn every_setting_behaves_the_same_for_a_fragment() {
                 .unwrap(),
             base,
         );
-        let rx = spawn_reader(&mut child);
+        let rx = common::spawn_reader(&mut child);
         let mut stdin = child.stdin.take().unwrap();
         let mut init = serde_json::json!({"opensipsPath": ""});
         for (k, v) in opts.as_object().unwrap() {
             init[k] = v.clone();
         }
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
                 "capabilities":{},
                 "initializationOptions": init,
                 "workspaceFolders":[{"uri": format!("file://{}", base.display()), "name":"w"}]}}),
         );
-        wait_for(&rx, |v| v["id"] == 1, "init");
-        write_msg(
+        common::wait_for(&rx, |v| v["id"] == 1, "init");
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
         );
@@ -2116,7 +2109,7 @@ fn every_setting_behaves_the_same_for_a_fragment() {
     let (base, uri, frag) = mk("on");
     let (mut child, rx, mut stdin) = boot(&base, serde_json::json!({"analyzerDiagnostics": true}));
     did_open(&mut stdin, &uri, frag);
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == uri,
         "diagnostics",
@@ -2143,7 +2136,7 @@ fn every_setting_behaves_the_same_for_a_fragment() {
     let (base, uri, frag) = mk("cap");
     let (mut child, rx, mut stdin) = boot(&base, serde_json::json!({"maxDiagnostics": 2}));
     did_open(&mut stdin, &uri, frag);
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == uri,
         "capped diagnostics",
@@ -2160,17 +2153,17 @@ fn every_setting_behaves_the_same_for_a_fragment() {
     let (base, uri, frag) = mk("live");
     let (mut child, rx, mut stdin) = boot(&base, serde_json::json!({"analyzerDiagnostics": true}));
     did_open(&mut stdin, &uri, frag);
-    wait_for(
+    common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == uri,
         "initial diagnostics",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration",
             "params":{"settings":{"opensipsLsp":{"analyzerDiagnostics": false}}}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"
@@ -2180,12 +2173,12 @@ fn every_setting_behaves_the_same_for_a_fragment() {
         "the fragment cleared when the analyzer went off",
     );
     assert!(v["params"]["diagnostics"].as_array().unwrap().is_empty());
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration",
             "params":{"settings":{"opensipsLsp":{"analyzerDiagnostics": true}}}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"
@@ -2237,35 +2230,35 @@ fn renaming_a_fragment_rewrites_the_include_that_names_it() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{"workspace":{"fileOperations":{"willRename":true}}},
             "initializationOptions":{"opensipsPath": ""},
             "workspaceFolders": [{"uri": format!("file://{}", base.display()), "name":"w"}]}}),
     );
-    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    let init = common::wait_for(&rx, |v| v["id"] == 1, "init");
     let filters =
         &init["result"]["capabilities"]["workspace"]["fileOperations"]["willRename"]["filters"];
     assert!(
         filters.as_array().is_some_and(|f| !f.is_empty()),
         "willRename is advertised: {init}"
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
     let root_uri = format!("file://{}", base.join("opensips.cfg").display());
     let old = format!("file://{}", base.join("inc/a.cfg").display());
     let new = format!("file://{}", base.join("lib/a.cfg").display());
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"workspace/willRenameFiles","params":{
             "files":[{"oldUri": old, "newUri": new}]}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "willRenameFiles");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "willRenameFiles");
     let edits = &v["result"]["changes"][root_uri.as_str()];
     assert_eq!(
         edits,
@@ -2275,12 +2268,12 @@ fn renaming_a_fragment_rewrites_the_include_that_names_it() {
     // the negative control: a file nothing includes
     let other = format!("file://{}", base.join("other.cfg").display());
     let renamed = format!("file://{}", base.join("renamed.cfg").display());
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"workspace/willRenameFiles","params":{
             "files":[{"oldUri": other, "newUri": renamed}]}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "willRenameFiles unrelated");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "willRenameFiles unrelated");
     assert!(v["result"].is_null(), "no edit for an unrelated file: {v}");
     let _ = child.kill();
 }

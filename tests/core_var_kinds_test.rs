@@ -20,7 +20,8 @@
 
 mod common;
 
-use opensips_lsp::catalog::{harvest_core, parse_core_vars_md};
+use opensips_lsp::catalog;
+use std::path::Path;
 
 const PAGE: &str = r#"# Core variables
 
@@ -51,7 +52,7 @@ They provide access to information from the SIP message.
 
 #[test]
 fn a_naming_section_becomes_the_variable_it_names() {
-    let vars = parse_core_vars_md(PAGE).expect("the page parses");
+    let vars = catalog::parse_core_vars_md(PAGE).expect("the page parses");
     let names: Vec<&str> = vars.iter().map(|v| v.name.as_str()).collect();
     assert!(names.contains(&"$var"), "$var missing: {names:?}");
     assert!(names.contains(&"$avp"), "$avp missing: {names:?}");
@@ -63,7 +64,7 @@ fn a_naming_section_becomes_the_variable_it_names() {
 
 #[test]
 fn a_naming_section_with_children_is_a_category_not_a_variable() {
-    let vars = parse_core_vars_md(PAGE).expect("the page parses");
+    let vars = catalog::parse_core_vars_md(PAGE).expect("the page parses");
     let names: Vec<&str> = vars.iter().map(|v| v.name.as_str()).collect();
     assert!(
         !names.contains(&"$name"),
@@ -74,7 +75,7 @@ fn a_naming_section_with_children_is_a_category_not_a_variable() {
 
 #[test]
 fn the_variable_doc_is_the_prose_and_not_just_the_naming_line() {
-    let vars = parse_core_vars_md(PAGE).expect("the page parses");
+    let vars = catalog::parse_core_vars_md(PAGE).expect("the page parses");
     let var = vars.iter().find(|v| v.name == "$var").unwrap();
     assert!(
         var.doc.contains("persistent for the whole top route"),
@@ -92,7 +93,7 @@ fn the_variable_doc_is_the_prose_and_not_just_the_naming_line() {
 
 #[test]
 fn the_naming_form_survives_in_the_detail() {
-    let vars = parse_core_vars_md(PAGE).expect("the page parses");
+    let vars = catalog::parse_core_vars_md(PAGE).expect("the page parses");
     let avp = vars.iter().find(|v| v.name == "$avp").unwrap();
     assert!(
         avp.detail.contains("$avp(name)"),
@@ -113,7 +114,7 @@ fn a_malformed_naming_line_yields_no_variable() {
         "## X\n\n**Naming**:\n\ndoc\n",
         "## \n\n**Naming**: `$`\n\ndoc\n",
     ] {
-        let got = parse_core_vars_md(md).expect("parses");
+        let got = catalog::parse_core_vars_md(md).expect("parses");
         assert!(
             got.is_empty(),
             "{md:?} names no variable, yet yielded {:?}",
@@ -123,7 +124,8 @@ fn a_malformed_naming_line_yields_no_variable() {
     // POSITIVE CONTROL: the same shape, well formed, does yield one —
     // so the assertions above are not passing on a parser that reads
     // nothing at all.
-    let ok = parse_core_vars_md("## X\n\n**Naming**: `$var(name)`\n\ndoc\n").expect("parses");
+    let ok =
+        catalog::parse_core_vars_md("## X\n\n**Naming**: `$var(name)`\n\ndoc\n").expect("parses");
     assert_eq!(ok.len(), 1, "{ok:?}");
 }
 
@@ -131,7 +133,7 @@ fn a_malformed_naming_line_yields_no_variable() {
 #[test]
 fn the_real_page_documents_both_variable_kinds() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let core = harvest_core(std::path::Path::new(&tree));
+    let core = catalog::harvest_core(Path::new(&tree));
     let names: Vec<&str> = core.pvars.iter().map(|v| v.name.as_str()).collect();
 
     // POSITIVE CONTROL: an empty harvest must not read as two misses.

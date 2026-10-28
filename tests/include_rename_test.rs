@@ -7,7 +7,9 @@
 //! that includes others by relative path gets those paths rewritten too,
 //! so they still name the same files from its new directory.
 
-use opensips_lsp::logic::{IncludeEdit, include_rename_edits};
+use opensips_lsp::logic;
+
+use opensips_lsp::logic::IncludeEdit;
 use std::path::{Path, PathBuf};
 
 fn configs(files: &[(&str, &str)]) -> Vec<(PathBuf, String)> {
@@ -19,7 +21,7 @@ fn configs(files: &[(&str, &str)]) -> Vec<(PathBuf, String)> {
 
 fn edits(files: &[(&str, &str)], old: &str, new: &str) -> Vec<(String, u32, u32, u32, String)> {
     let mut out: Vec<(String, u32, u32, u32, String)> =
-        include_rename_edits(&configs(files), Path::new(old), Path::new(new))
+        logic::include_rename_edits(&configs(files), Path::new(old), Path::new(new))
             .into_iter()
             .map(
                 |IncludeEdit {

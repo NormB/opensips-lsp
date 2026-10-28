@@ -13,6 +13,9 @@
 //! Everything here is byte-based; the server converts to UTF-16.
 
 use crate::analyze::{self, Class, Lines};
+use std::cmp::Reverse;
+use std::collections::HashSet;
+use std::ops::Range;
 
 /// A text extent: 0-based lines, 0-based byte columns, end exclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,7 +91,7 @@ struct Node {
     /// Offset of the closing brace.
     close: usize,
     name: String,
-    sel: std::ops::Range<usize>,
+    sel: Range<usize>,
     route: bool,
 }
 
@@ -96,7 +99,7 @@ struct Node {
 fn nodes(text: &str, classes: &[Class], lines: &Lines) -> Vec<Node> {
     let b = text.as_bytes();
     let mut out: Vec<Node> = Vec::new();
-    let mut route_closes = std::collections::HashSet::new();
+    let mut route_closes = HashSet::new();
     for r in analyze::route_blocks(text) {
         let start = lines.offset(r.line, r.col);
         let end = lines.offset(r.end_line, r.end_col);
@@ -157,7 +160,7 @@ fn nodes(text: &str, classes: &[Class], lines: &Lines) -> Vec<Node> {
         });
     }
     out.extend(inner);
-    out.sort_by_key(|n| (n.start, std::cmp::Reverse(n.end)));
+    out.sort_by_key(|n| (n.start, Reverse(n.end)));
     out
 }
 
@@ -208,7 +211,7 @@ fn header_before(b: &[u8], classes: &[Class], open: usize) -> (usize, String) {
     (start, text)
 }
 
-fn span(lines: &Lines, r: std::ops::Range<usize>) -> Span {
+fn span(lines: &Lines, r: Range<usize>) -> Span {
     let (start_line, start_col) = lines.line_col(r.start);
     let (end_line, end_col) = lines.line_col(r.end);
     Span {
@@ -315,10 +318,7 @@ fn offset_of(lines: &Lines, s: Span) -> usize {
 /// Top-level `name = value` statements: the name's extent and the
 /// statement's, which ends with its line (a trailing comment and
 /// whitespace left out).
-fn assignments(
-    text: &str,
-    classes: &[Class],
-) -> Vec<(String, std::ops::Range<usize>, std::ops::Range<usize>)> {
+fn assignments(text: &str, classes: &[Class]) -> Vec<(String, Range<usize>, Range<usize>)> {
     let b = text.as_bytes();
     let mut out = Vec::new();
     let mut line_start = 0;
@@ -441,7 +441,7 @@ pub fn folds(text: &str) -> Vec<Fold> {
         }
     }
     flush(&mut hash_run, &mut out);
-    out.sort_by_key(|f| (f.start_line, std::cmp::Reverse(f.end_line)));
+    out.sort_by_key(|f| (f.start_line, Reverse(f.end_line)));
     // an editor keeps one fold per start line: the widest
     out.dedup_by_key(|f| f.start_line);
     out
@@ -455,7 +455,7 @@ pub fn selection_chain(text: &str, at: usize) -> Vec<Span> {
     let lines = Lines::new(text);
     let b = text.as_bytes();
     let at = at.min(b.len());
-    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    let mut ranges: Vec<Range<usize>> = Vec::new();
     let mut s = at;
     while s > 0 && analyze::is_word_byte(b[s - 1]) {
         s -= 1;
@@ -467,7 +467,7 @@ pub fn selection_chain(text: &str, at: usize) -> Vec<Span> {
     if e > s {
         ranges.push(s..e);
     }
-    let mut around: Vec<std::ops::Range<usize>> = nodes(text, &classes, &lines)
+    let mut around: Vec<Range<usize>> = nodes(text, &classes, &lines)
         .into_iter()
         .filter(|n| n.start <= at && at < n.end)
         .map(|n| n.start..n.end)

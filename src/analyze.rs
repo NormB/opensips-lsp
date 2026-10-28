@@ -4,6 +4,10 @@
 //! completion, symbols and go-to-definition.  Full-fidelity semantic
 //! validation is delegated to `opensips -C` (see `diag`).
 
+use regex::Regex;
+use std::ops::Range;
+use std::sync::OnceLock;
+
 /// A named item found in a cfg document, with its position.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Located {
@@ -208,9 +212,9 @@ fn is_word(c: u8) -> bool {
 
 macro_rules! static_regex {
     ($name:ident, $pat:expr) => {
-        fn $name() -> &'static regex::Regex {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            RE.get_or_init(|| regex::Regex::new($pat).unwrap())
+        fn $name() -> &'static Regex {
+            static RE: OnceLock<Regex> = OnceLock::new();
+            RE.get_or_init(|| Regex::new($pat).unwrap())
         }
     };
 }
@@ -367,7 +371,7 @@ pub(crate) struct LoadStatement {
     /// Byte offset of the `loadmodule` keyword.
     pub start: usize,
     /// Byte extent of the path inside the quotes.
-    pub path: std::ops::Range<usize>,
+    pub path: Range<usize>,
     /// Byte offset just past the closing quote.
     pub end: usize,
 }
@@ -719,7 +723,7 @@ pub(crate) struct ModparamStatement {
     /// Byte offset of the `modparam` keyword.
     pub start: usize,
     /// Byte extent of the parameter name inside its quotes.
-    pub param: std::ops::Range<usize>,
+    pub param: Range<usize>,
     /// Byte offset just past the closing parenthesis, or past the
     /// parameter name when the call is never closed.
     pub end: usize,

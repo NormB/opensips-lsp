@@ -28,6 +28,7 @@
 mod common;
 
 use opensips_lsp::analyze;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -413,7 +414,7 @@ fn grammar_and_scanner_agree_on_every_accepted_config() {
     std::fs::create_dir_all(&scratch).unwrap();
     let corpus = corpus_inputs();
     assert!(corpus.len() >= 8, "corpus went missing? {}", corpus.len());
-    let mut titles = std::collections::HashMap::new();
+    let mut titles = HashMap::new();
     for (n, (title, input)) in corpus.iter().enumerate() {
         let f = scratch.join(format!("case-{n}.cfg"));
         std::fs::write(&f, input).unwrap();

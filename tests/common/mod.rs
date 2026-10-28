@@ -1,10 +1,13 @@
 //! Shared stdio-LSP test harness.
 #![allow(dead_code)]
 
+use std::collections::BTreeSet;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::process::Child;
+use std::ops::{Deref, DerefMut};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub fn write_msg(w: &mut impl Write, v: &serde_json::Value) {
     let s = v.to_string();
@@ -51,10 +54,10 @@ pub fn wait_for<F: Fn(&serde_json::Value) -> bool>(
     pred: F,
     what: &str,
 ) -> serde_json::Value {
-    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         let left = deadline
-            .checked_duration_since(std::time::Instant::now())
+            .checked_duration_since(Instant::now())
             .unwrap_or_else(|| panic!("timeout waiting for {what}"));
         let v = rx
             .recv_timeout(left)
@@ -101,11 +104,11 @@ pub fn required_env(var: &str) -> String {
 /// rather than the only thing standing between a failure and a leak.
 pub struct Server {
     child: Child,
-    dir: std::path::PathBuf,
+    dir: PathBuf,
 }
 
 impl Server {
-    pub fn new(child: Child, dir: impl AsRef<std::path::Path>) -> Self {
+    pub fn new(child: Child, dir: impl AsRef<Path>) -> Self {
         Self {
             child,
             dir: dir.as_ref().to_path_buf(),
@@ -119,14 +122,14 @@ impl Server {
     }
 }
 
-impl std::ops::Deref for Server {
+impl Deref for Server {
     type Target = Child;
     fn deref(&self) -> &Child {
         &self.child
     }
 }
 
-impl std::ops::DerefMut for Server {
+impl DerefMut for Server {
     fn deref_mut(&mut self) -> &mut Child {
         &mut self.child
     }
@@ -143,7 +146,7 @@ impl Drop for Server {
 }
 
 /// Every `.cfg` under `dir`, recursively, appended to `out`.
-pub fn cfgs_under(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+pub fn cfgs_under(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
     };
@@ -159,8 +162,8 @@ pub fn cfgs_under(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
 
 /// `opensips -C` on `f`, run from its directory as the server runs it;
 /// true when the parser reported a syntax error.
-pub fn syntax_error(bin: &str, f: &std::path::Path) -> bool {
-    let out = std::process::Command::new(bin)
+pub fn syntax_error(bin: &str, f: &Path) -> bool {
+    let out = Command::new(bin)
         .arg("-C")
         .arg("-f")
         .arg(f)
@@ -228,10 +231,9 @@ pub fn parse_corpus(text: &str) -> Vec<(String, String, String)> {
 /// while a test still holds the same one deletes the test's fixture,
 /// and two tests running in parallel on one path clobber each other;
 /// both happened here, and both passed silently.
-pub struct Scratch(std::path::PathBuf);
+pub struct Scratch(PathBuf);
 
-static LIVE: std::sync::Mutex<std::collections::BTreeSet<std::path::PathBuf>> =
-    std::sync::Mutex::new(std::collections::BTreeSet::new());
+static LIVE: std::sync::Mutex<BTreeSet<PathBuf>> = std::sync::Mutex::new(BTreeSet::new());
 
 impl Scratch {
     pub fn new(name: &str) -> Self {
@@ -249,20 +251,20 @@ impl Scratch {
         Scratch(path)
     }
 
-    pub fn path(&self) -> &std::path::Path {
+    pub fn path(&self) -> &Path {
         &self.0
     }
 }
 
-impl std::ops::Deref for Scratch {
-    type Target = std::path::Path;
-    fn deref(&self) -> &std::path::Path {
+impl Deref for Scratch {
+    type Target = Path;
+    fn deref(&self) -> &Path {
         &self.0
     }
 }
 
-impl AsRef<std::path::Path> for Scratch {
-    fn as_ref(&self) -> &std::path::Path {
+impl AsRef<Path> for Scratch {
+    fn as_ref(&self) -> &Path {
         &self.0
     }
 }
@@ -276,7 +278,7 @@ impl Drop for Scratch {
     }
 }
 
-fn remove_path(path: &std::path::Path) {
+fn remove_path(path: &Path) {
     if std::fs::remove_dir_all(path).is_err() {
         let _ = std::fs::remove_file(path);
     }

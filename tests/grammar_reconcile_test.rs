@@ -20,12 +20,14 @@
 
 mod common;
 
-use opensips_lsp::catalog::lexer_spellings;
+use opensips_lsp::catalog;
+use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 #[test]
 fn alternatives_in_one_group_are_aliases() {
     assert_eq!(
-        lexer_spellings("\"workdir\"|\"wdir\""),
+        catalog::lexer_spellings("\"workdir\"|\"wdir\""),
         vec!["workdir", "wdir"],
         "one setting, two spellings"
     );
@@ -34,7 +36,7 @@ fn alternatives_in_one_group_are_aliases() {
 #[test]
 fn separate_groups_are_parts_of_one_spelling() {
     assert_eq!(
-        lexer_spellings("(\"allow\"|\"ALLOW\")[-_](\"proxy\"|\"PROXY\")"),
+        catalog::lexer_spellings("(\"allow\"|\"ALLOW\")[-_](\"proxy\"|\"PROXY\")"),
         vec!["allow_proxy"],
         "one spelling in two parts — not two settings"
     );
@@ -42,14 +44,14 @@ fn separate_groups_are_parts_of_one_spelling() {
 
 #[test]
 fn a_bare_word_is_its_own_spelling() {
-    assert_eq!(lexer_spellings("error"), vec!["error"]);
-    assert_eq!(lexer_spellings("\"xdbg\""), vec!["xdbg"]);
+    assert_eq!(catalog::lexer_spellings("error"), vec!["error"]);
+    assert_eq!(catalog::lexer_spellings("\"xdbg\""), vec!["xdbg"]);
 }
 
 #[test]
 fn upper_case_alternatives_are_not_spellings_of_their_own() {
     assert_eq!(
-        lexer_spellings("\"memlog\"|\"MEMLOG\"|\"mem_log\"|\"MEM_LOG\""),
+        catalog::lexer_spellings("\"memlog\"|\"MEMLOG\"|\"mem_log\"|\"MEM_LOG\""),
         vec!["memlog", "mem_log"],
         "the shouted forms are the same two spellings"
     );
@@ -57,8 +59,8 @@ fn upper_case_alternatives_are_not_spellings_of_their_own() {
 
 #[test]
 fn a_pattern_with_no_word_at_all_yields_nothing() {
-    assert!(lexer_spellings("{EAT_ABLE}").is_empty());
-    assert!(lexer_spellings("").is_empty());
+    assert!(catalog::lexer_spellings("{EAT_ABLE}").is_empty());
+    assert!(catalog::lexer_spellings("").is_empty());
 }
 
 /// The reported class: a spelling the manual skips still hovers.
@@ -162,7 +164,7 @@ fn the_manual_wins_wherever_it_speaks() {
 /// The real tree decides the numbers, not this test.
 #[test]
 fn the_reconciliation_covers_the_real_tree() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let core = opensips_lsp::catalog::harvest_core(&tree);
     let names: Vec<&str> = core.params.iter().map(|p| p.name.as_str()).collect();
 
@@ -218,7 +220,7 @@ fn a_directive_or_an_operator_is_not_a_core_function() {
 /// changing until someone regenerates. The rule needs its own test.
 #[test]
 fn a_harvest_excludes_directives_and_operators() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let core = opensips_lsp::catalog::harvest_core(&tree);
     let names: Vec<&str> = core.functions.iter().map(|f| f.name.as_str()).collect();
 
@@ -248,7 +250,7 @@ fn a_harvest_excludes_directives_and_operators() {
 /// completion twice, and the two can disagree.
 #[test]
 fn the_reconciliation_leaves_no_duplicate_names() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let core = opensips_lsp::catalog::harvest_core(&tree);
     for (what, items) in [("parameters", &core.params), ("functions", &core.functions)] {
         let mut seen: Vec<&str> = Vec::new();
@@ -276,12 +278,12 @@ fn the_reconciliation_leaves_no_duplicate_names() {
 #[test]
 fn a_spelling_may_contain_digits() {
     assert_eq!(
-        lexer_spellings("\"tcp_source_ipv4\""),
+        catalog::lexer_spellings("\"tcp_source_ipv4\""),
         vec!["tcp_source_ipv4"],
         "a digit in the middle of a name is part of the name"
     );
     assert_eq!(
-        lexer_spellings("\"disable_503_translation\""),
+        catalog::lexer_spellings("\"disable_503_translation\""),
         vec!["disable_503_translation"]
     );
 }
@@ -294,12 +296,15 @@ fn a_spelling_may_contain_digits() {
 #[test]
 fn a_bare_number_is_not_a_spelling() {
     assert!(
-        lexer_spellings("\"5060\"").is_empty(),
+        catalog::lexer_spellings("\"5060\"").is_empty(),
         "a number is a value, not a setting name"
     );
-    assert!(lexer_spellings("\"4xx\"").is_empty(), "nor is `4xx`");
+    assert!(
+        catalog::lexer_spellings("\"4xx\"").is_empty(),
+        "nor is `4xx`"
+    );
     // POSITIVE CONTROL: the same shape starting with a letter is one
-    assert_eq!(lexer_spellings("\"x4\""), vec!["x4"]);
+    assert_eq!(catalog::lexer_spellings("\"x4\""), vec!["x4"]);
 }
 
 /// Owed #1: nothing the grammar uses is dropped without a trace.
@@ -312,11 +317,11 @@ fn a_bare_number_is_not_a_spelling() {
 /// one spelling, whatever characters upstream chooses next.
 #[test]
 fn no_assignable_token_is_silently_dropped_by_the_spelling_reader() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let lex = std::fs::read_to_string(tree.join("cfg.lex")).expect("cfg.lex");
     let y = std::fs::read_to_string(tree.join("cfg.y")).expect("cfg.y");
 
-    let assignable: std::collections::BTreeSet<&str> = y
+    let assignable: BTreeSet<&str> = y
         .match_indices(" EQUAL")
         .filter_map(|(i, _)| y[..i].rsplit(|c: char| c.is_whitespace()).next())
         .filter(|t| !t.is_empty() && t.chars().next().is_some_and(|c| c.is_ascii_uppercase()))
@@ -418,7 +423,7 @@ fn no_catalogue_name_contains_a_separator() {
 /// Owed #4: and the same for a fresh harvest, not just the artefact.
 #[test]
 fn no_harvested_name_contains_a_separator() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let core = opensips_lsp::catalog::harvest_core(&tree);
     let mut bad: Vec<&str> = Vec::new();
     let mut n = 0usize;
@@ -462,7 +467,7 @@ fn no_harvested_name_contains_a_separator() {
 /// file rather than over a fixture that would agree by construction.
 #[test]
 fn the_two_spelling_readers_agree_on_every_line_of_the_real_lexer() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let lex = std::fs::read_to_string(tree.join("cfg.lex")).expect("cfg.lex");
     let mut checked = 0usize;
     for line in lex.split("\n%%").next().unwrap_or(&lex).lines() {
@@ -516,7 +521,7 @@ fn a_hyphenated_spelling_reaches_every_reader() {
 /// configuration word.
 #[test]
 fn every_spelling_from_the_real_lexer_is_writable() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let lex = std::fs::read_to_string(tree.join("cfg.lex")).expect("cfg.lex");
     let mut bad: Vec<String> = Vec::new();
     let mut n = 0usize;
@@ -551,7 +556,7 @@ fn every_spelling_from_the_real_lexer_is_writable() {
 /// must appear VERBATIM in the lexer that is supposed to accept it.
 #[test]
 fn every_name_the_reconciliation_adds_appears_in_the_lexer() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let lex = std::fs::read_to_string(tree.join("cfg.lex")).expect("cfg.lex");
     let manual_only = {
         // what the manual alone yields, before any grammar reading
@@ -714,7 +719,7 @@ fn an_alias_lands_in_the_same_list_as_what_it_aliases() {
 /// parameters that are a syntax error at the top level.
 #[test]
 fn globals_are_read_from_the_assignment_statement_only() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let y = std::fs::read_to_string(tree.join("cfg.y")).expect("cfg.y");
     let start = y
         .find("\nassign_stm:")

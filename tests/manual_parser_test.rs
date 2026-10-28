@@ -10,15 +10,17 @@
 //! page says something slightly different from what the code assumed,
 //! and nothing failed.
 
-use opensips_lsp::catalog::{parse_core_routes_md, parse_core_statements_md};
+use opensips_lsp::catalog;
+use opensips_lsp::catalog::Item;
 
-fn names(v: Vec<opensips_lsp::catalog::Item>) -> Vec<String> {
+fn names(v: Vec<Item>) -> Vec<String> {
     v.into_iter().map(|i| i.name).collect()
 }
 
 #[test]
 fn a_section_with_no_prose_is_not_offered() {
-    let got = names(parse_core_routes_md("## route\n\n## timer_route\n\nHas text.\n").unwrap());
+    let got =
+        names(catalog::parse_core_routes_md("## route\n\n## timer_route\n\nHas text.\n").unwrap());
     assert_eq!(
         got,
         vec!["timer_route"],
@@ -29,7 +31,7 @@ fn a_section_with_no_prose_is_not_offered() {
 
 #[test]
 fn duplicate_headings_yield_one_entry() {
-    let got = parse_core_statements_md("## if\n\nFirst.\n\n## if\n\nSecond.\n").unwrap();
+    let got = catalog::parse_core_statements_md("## if\n\nFirst.\n\n## if\n\nSecond.\n").unwrap();
     let ifs: Vec<_> = got.iter().filter(|i| i.name == "if").collect();
     assert_eq!(
         ifs.len(),
@@ -42,7 +44,7 @@ fn duplicate_headings_yield_one_entry() {
 
 #[test]
 fn an_alias_follows_the_entry_that_survived_dedup() {
-    let got = parse_core_statements_md("## if\n\nFirst.\n\n## if\n\nSecond.\n").unwrap();
+    let got = catalog::parse_core_statements_md("## if\n\nFirst.\n\n## if\n\nSecond.\n").unwrap();
     let else_ = got
         .iter()
         .find(|i| i.name == "else")
@@ -58,7 +60,7 @@ fn an_alias_follows_the_entry_that_survived_dedup() {
 
 #[test]
 fn a_capitalised_heading_still_names_the_keyword() {
-    let got = names(parse_core_statements_md("## If\n\nCapitalised.\n").unwrap());
+    let got = names(catalog::parse_core_statements_md("## If\n\nCapitalised.\n").unwrap());
     assert!(
         got.contains(&"if".to_string()),
         "keywords are lower case; a name differing by case never matches a hover \
@@ -72,7 +74,7 @@ fn a_capitalised_heading_still_names_the_keyword() {
 
 #[test]
 fn a_capitalised_prose_heading_still_maps_to_its_keyword() {
-    let got = names(parse_core_statements_md("## For Each\n\nIterates.\n").unwrap());
+    let got = names(catalog::parse_core_statements_md("## For Each\n\nIterates.\n").unwrap());
     assert_eq!(
         got,
         vec!["for"],
@@ -83,7 +85,7 @@ fn a_capitalised_prose_heading_still_maps_to_its_keyword() {
 
 #[test]
 fn a_prose_heading_with_no_prose_is_dropped() {
-    let got = names(parse_core_statements_md("## for each\n\n## if\n\nText.\n").unwrap());
+    let got = names(catalog::parse_core_statements_md("## for each\n\n## if\n\nText.\n").unwrap());
     assert!(
         !got.contains(&"for".to_string()),
         "a mapped heading is not exempt from needing text: {got:?}"
@@ -93,7 +95,8 @@ fn a_prose_heading_with_no_prose_is_dropped() {
 #[test]
 fn a_heading_inside_a_fenced_block_opens_no_section() {
     let got = names(
-        parse_core_routes_md("## route\n\nReal.\n\n```\n## startup_route\nbody\n```\n").unwrap(),
+        catalog::parse_core_routes_md("## route\n\nReal.\n\n```\n## startup_route\nbody\n```\n")
+            .unwrap(),
     );
     assert_eq!(
         got,
@@ -107,7 +110,7 @@ fn a_heading_inside_a_fenced_block_opens_no_section() {
 
 #[test]
 fn duplicate_route_headings_also_yield_one_entry() {
-    let got = parse_core_routes_md("## route\n\nFirst.\n\n## route\n\nSecond.\n").unwrap();
+    let got = catalog::parse_core_routes_md("## route\n\nFirst.\n\n## route\n\nSecond.\n").unwrap();
     assert_eq!(
         got.len(),
         1,
@@ -127,7 +130,7 @@ fn duplicate_route_headings_also_yield_one_entry() {
 /// Pinning it means that arrives as a failure rather than as silence.
 #[test]
 fn a_deeper_heading_is_not_a_section() {
-    let got = names(parse_core_statements_md("### if\n\nToo deep.\n").unwrap());
+    let got = names(catalog::parse_core_statements_md("### if\n\nToo deep.\n").unwrap());
     assert!(
         got.is_empty(),
         "entries are `##`; if upstream demotes them this must fail loudly rather \

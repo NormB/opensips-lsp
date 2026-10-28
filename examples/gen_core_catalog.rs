@@ -7,6 +7,9 @@
 //! still equals a fresh harvest of the pinned tree, so it cannot drift.
 #![deny(clippy::unwrap_used)]
 
+use opensips_lsp::catalog::BuiltinCore;
+use std::path::Path;
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let tree = args
@@ -15,8 +18,8 @@ fn main() {
     let version = args
         .next()
         .expect("usage: gen_core_catalog <tree> <version>");
-    let core = opensips_lsp::catalog::harvest_core(std::path::Path::new(&tree));
-    let out = opensips_lsp::catalog::BuiltinCore { version, core };
+    let core = opensips_lsp::catalog::harvest_core(Path::new(&tree));
+    let out = BuiltinCore { version, core };
     println!(
         "{}",
         serde_json::to_string_pretty(&out).expect("a catalog of strings serializes to JSON")

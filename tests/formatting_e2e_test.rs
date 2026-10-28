@@ -4,8 +4,9 @@
 //! document that is already correct must produce no edits at all.
 
 mod common;
-use common::*;
-use std::process::{Command, Stdio};
+use common::Server;
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::mpsc::Receiver;
 
 fn boot(
     tag: &str,
@@ -13,8 +14,8 @@ fn boot(
 ) -> (
     common::Scratch,
     Server,
-    std::sync::mpsc::Receiver<serde_json::Value>,
-    std::process::ChildStdin,
+    Receiver<serde_json::Value>,
+    ChildStdin,
     String,
 ) {
     let dir_scratch = common::Scratch::new(&format!("oslsp-fmt-{tag}"));
@@ -34,13 +35,13 @@ fn boot(
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    let init = wait_for(&rx, |v| v["id"] == 1, "initialize");
+    let init = common::wait_for(&rx, |v| v["id"] == 1, "initialize");
     assert_eq!(
         init["result"]["capabilities"]["documentFormattingProvider"],
         serde_json::json!(true),
@@ -51,11 +52,11 @@ fn boot(
         serde_json::json!(true),
         "range formatting capability not advertised"
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
@@ -72,12 +73,12 @@ fn formatting_returns_whole_line_edits_and_honours_client_options() {
     let src = "route {\nexit;\n}\n";
     let (_scratch, mut child, rx, mut stdin, uri) = boot("basic", src);
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{
             "textDocument":{"uri":uri},"options":opts(true, 2)}}),
     );
-    let edits = wait_for(&rx, |v| v["id"] == 2, "formatting");
+    let edits = common::wait_for(&rx, |v| v["id"] == 2, "formatting");
     let edits = edits["result"].as_array().expect("an edit array");
     assert_eq!(edits.len(), 1, "only the misindented line moves: {edits:?}");
     let e = &edits[0];
@@ -95,12 +96,12 @@ fn formatting_returns_whole_line_edits_and_honours_client_options() {
 #[test]
 fn an_already_formatted_document_produces_no_edits() {
     let (_scratch, mut child, rx, mut stdin, uri) = boot("clean", "route {\n\texit;\n}\n");
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{
             "textDocument":{"uri":uri},"options":opts(false, 4)}}),
     );
-    let r = wait_for(&rx, |v| v["id"] == 2, "formatting");
+    let r = common::wait_for(&rx, |v| v["id"] == 2, "formatting");
     assert_eq!(
         r["result"].as_array().map(|a| a.len()),
         Some(0),
@@ -113,14 +114,14 @@ fn an_already_formatted_document_produces_no_edits() {
 fn range_formatting_edits_only_the_requested_lines() {
     let src = "route {\nexit;\n}\nroute[A] {\nexit;\n}\n";
     let (_scratch, mut child, rx, mut stdin, uri) = boot("range", src);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/rangeFormatting","params":{
             "textDocument":{"uri":uri},
             "range":{"start":{"line":3,"character":0},"end":{"line":5,"character":1}},
             "options":opts(false, 4)}}),
     );
-    let r = wait_for(&rx, |v| v["id"] == 2, "rangeFormatting");
+    let r = common::wait_for(&rx, |v| v["id"] == 2, "rangeFormatting");
     let edits = r["result"].as_array().expect("an edit array");
     assert!(!edits.is_empty(), "nothing was formatted");
     assert!(
@@ -149,12 +150,12 @@ fn apply(text: &str, edits: &[serde_json::Value]) -> String {
 fn formatting_a_crlf_document_keeps_one_carriage_return_per_line() {
     let src = "route {\r\nexit;\r\n}\r\n";
     let (_scratch, mut child, rx, mut stdin, uri) = boot("crlf", src);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/formatting","params":{
             "textDocument":{"uri":uri},"options":opts(false, 4)}}),
     );
-    let r = wait_for(&rx, |v| v["id"] == 2, "formatting");
+    let r = common::wait_for(&rx, |v| v["id"] == 2, "formatting");
     let edits = r["result"].as_array().expect("an edit array");
     assert_eq!(
         apply(src, edits),

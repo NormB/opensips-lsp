@@ -12,6 +12,7 @@
 mod common;
 
 use std::collections::BTreeSet;
+use std::process::Command;
 
 fn root() -> &'static str {
     env!("CARGO_MANIFEST_DIR")
@@ -195,7 +196,7 @@ fn the_zed_walkthrough_is_valid_shell() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("block.sh");
     std::fs::write(&path, block).unwrap();
-    let out = std::process::Command::new("bash")
+    let out = Command::new("bash")
         .arg("-n")
         .arg(&path)
         .output()

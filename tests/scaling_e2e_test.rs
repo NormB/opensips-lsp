@@ -12,7 +12,7 @@
 //! meet with a wide margin on a loaded host.
 
 mod common;
-use common::*;
+use common::Server;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -59,19 +59,19 @@ fn per_item_requests_scale_with_the_document() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{}, "initializationOptions": {}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "initialize");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "initialize");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    wait_for(
+    common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -82,7 +82,7 @@ fn per_item_requests_scale_with_the_document() {
         },
         "harvest-ready",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":cfg_text}}}),
@@ -126,11 +126,11 @@ fn per_item_requests_scale_with_the_document() {
     for (i, (method, params)) in requests.into_iter().enumerate() {
         let id = 100 + i as i64;
         let t = Instant::now();
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
         );
-        let r = wait_for(&rx, |v| v["id"] == id, method);
+        let r = common::wait_for(&rx, |v| v["id"] == id, method);
         let took = t.elapsed();
         assert!(r.get("error").is_none(), "{method} failed: {r}");
         assert!(

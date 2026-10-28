@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use serde_json::{Map, Value};
+use std::process::Command;
 
 /// The largest file the site reads.
 const MAX_FILE: usize = 100_000;
@@ -187,7 +188,7 @@ fn linked_paths(text: &str) -> Vec<String> {
 
 /// The paths `git ls-files` lists, and every directory above them.
 fn tracked() -> BTreeSet<String> {
-    let out = std::process::Command::new("git")
+    let out = Command::new("git")
         .args(["ls-files", "-z"])
         .current_dir(root())
         .output()

@@ -3,6 +3,7 @@
 //! binary is configured) from a shell.
 #![deny(clippy::unwrap_used)]
 
+use opensips_lsp::server::Backend;
 use tower_lsp_server::{LspService, Server};
 
 #[tokio::main]
@@ -16,11 +17,8 @@ async fn main() {
     // `analysisRoot` is not an LSP request: the client needs it before
     // a document has a language, which is exactly when the standard
     // document requests do not apply to it yet.
-    let (service, socket) = LspService::build(opensips_lsp::server::Backend::new)
-        .custom_method(
-            "opensips/analysisRoot",
-            opensips_lsp::server::Backend::analysis_root,
-        )
+    let (service, socket) = LspService::build(Backend::new)
+        .custom_method("opensips/analysisRoot", Backend::analysis_root)
         .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
 }

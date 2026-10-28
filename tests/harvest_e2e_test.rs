@@ -13,11 +13,14 @@
 //!     quiet default.
 
 mod common;
-use common::*;
-use std::process::{Command, Stdio};
+use common::Server;
+use std::path::{Path, PathBuf};
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::mpsc::Receiver;
+use std::time::Duration;
 
 /// A tree with one documented module, in the 4.x markdown shape.
-fn mk_tree(root: &std::path::Path) {
+fn mk_tree(root: &Path) {
     let readme = root.join("modules/mymod/README.md");
     std::fs::create_dir_all(readme.parent().unwrap()).unwrap();
     std::fs::write(
@@ -29,13 +32,13 @@ fn mk_tree(root: &std::path::Path) {
 
 fn boot(
     tag: &str,
-    src: Option<&std::path::Path>,
+    src: Option<&Path>,
 ) -> (
     common::Scratch,
     Server,
-    std::sync::mpsc::Receiver<serde_json::Value>,
-    std::process::ChildStdin,
-    std::path::PathBuf,
+    Receiver<serde_json::Value>,
+    ChildStdin,
+    PathBuf,
 ) {
     let base_scratch = common::Scratch::new(&format!("oslsp-harv-boot-{tag}"));
     let base = base_scratch.path().to_path_buf();
@@ -55,15 +58,15 @@ fn boot(
         }
     }
     let mut child = Server::new(cmd.spawn().unwrap(), &base);
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{"window":{"workDoneProgress":true}}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "initialize");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "initialize");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
@@ -95,7 +98,7 @@ fn harvest_reports_progress_when_the_client_answers_the_create() {
         "booting must leave the configured tree in place: {}",
         tree.display()
     );
-    let create = wait_for(
+    let create = common::wait_for(
         &rx,
         |v| v["method"] == "window/workDoneProgress/create",
         "progress create request",
@@ -105,12 +108,12 @@ fn harvest_reports_progress_when_the_client_answers_the_create() {
         token, "opensips-lsp/harvest",
         "the server names its own token: {create}"
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":create["id"],"result":null}),
     );
 
-    let begin = wait_for(
+    let begin = common::wait_for(
         &rx,
         |v| v["method"] == "$/progress" && v["params"]["value"]["kind"] == "begin",
         "progress begin",
@@ -129,13 +132,13 @@ fn harvest_reports_progress_when_the_client_answers_the_create() {
         "{begin}"
     );
 
-    let end = wait_for(
+    let end = common::wait_for(
         &rx,
         |v| v["method"] == "$/progress" && v["params"]["value"]["kind"] == "end",
         "progress end",
     );
     assert_eq!(end["params"]["token"], token);
-    wait_for(&rx, is_ready, "ready");
+    common::wait_for(&rx, is_ready, "ready");
 
     child.kill().ok();
 }
@@ -161,13 +164,13 @@ fn a_client_that_never_answers_the_create_still_gets_a_ready_server() {
         tree.display()
     );
     // the create arrives and is deliberately left unanswered
-    wait_for(
+    common::wait_for(
         &rx,
         |v| v["method"] == "window/workDoneProgress/create",
         "progress create request",
     );
     // the harvest must still finish and the server still announce itself
-    let ready = wait_for(&rx, is_ready, "ready despite an unanswered create");
+    let ready = common::wait_for(&rx, is_ready, "ready despite an unanswered create");
     let msg = ready["params"]["message"].as_str().unwrap_or("");
     assert!(
         msg.contains("documented modules"),
@@ -193,7 +196,7 @@ fn a_configured_tree_documenting_nothing_warns_visibly() {
         "booting must leave the configured tree in place: {}",
         tree.display()
     );
-    let warn = wait_for(
+    let warn = common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/showMessage"
@@ -228,7 +231,7 @@ fn a_configured_tree_documenting_nothing_warns_visibly() {
 #[test]
 fn an_unconfigured_tree_stays_silent() {
     let (_scratch, mut child, rx, _stdin, _) = boot("silent", None);
-    let ready = wait_for(&rx, is_ready, "ready");
+    let ready = common::wait_for(&rx, is_ready, "ready");
     assert!(
         ready["params"]["message"]
             .as_str()
@@ -237,7 +240,7 @@ fn an_unconfigured_tree_stays_silent() {
         "the built-in catalogue must be in use: {ready}"
     );
     // nothing queued behind it complains
-    while let Ok(v) = rx.recv_timeout(std::time::Duration::from_millis(300)) {
+    while let Ok(v) = rx.recv_timeout(Duration::from_millis(300)) {
         assert!(
             v["method"] != "window/showMessage",
             "an unconfigured server must not warn: {v}"

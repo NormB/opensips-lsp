@@ -1,10 +1,7 @@
 //! The cfg scanner in `analyze`: loaded modules, route definitions and
 //! references, includes and modparam calls, each found only in code position.
 
-use opensips_lsp::analyze::{
-    includes, loaded_modules, modparam_calls, modparam_context, pvars, route_blocks, route_defs,
-    route_refs, word_at,
-};
+use opensips_lsp::analyze;
 
 const CFG: &str = r#"# reachability-only config
 loadmodule "proto_udp.so"
@@ -40,26 +37,29 @@ failure_route[nat_fail] {
 
 #[test]
 fn finds_loaded_modules_skipping_comments() {
-    let mods: Vec<String> = loaded_modules(CFG).into_iter().map(|m| m.name).collect();
+    let mods: Vec<String> = analyze::loaded_modules(CFG)
+        .into_iter()
+        .map(|m| m.name)
+        .collect();
     assert_eq!(mods, vec!["proto_udp", "tm", "cachedb_nats"]);
 }
 
 #[test]
 fn loadmodule_inside_string_is_not_collected() {
-    let mods = loaded_modules(CFG);
+    let mods = analyze::loaded_modules(CFG);
     assert!(!mods.iter().any(|m| m.name == "fake"));
 }
 
 #[test]
 fn loadmodule_positions_are_line_accurate() {
-    let mods = loaded_modules(CFG);
+    let mods = analyze::loaded_modules(CFG);
     assert_eq!(mods[0].line, 1); // 0-based: second line of file
     assert_eq!(mods[2].line, 5);
 }
 
 #[test]
 fn finds_route_definitions() {
-    let defs = route_defs(CFG);
+    let defs = analyze::route_defs(CFG);
     let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
     assert!(names.contains(&"")); // main route
     assert!(names.contains(&"check_source"));
@@ -70,7 +70,7 @@ fn finds_route_definitions() {
 
 #[test]
 fn finds_route_references() {
-    let refs = route_refs(CFG);
+    let refs = analyze::route_refs(CFG);
     assert_eq!(refs.len(), 1);
     assert_eq!(refs[0].name, "check_source");
     assert_eq!(refs[0].line, 16);
@@ -81,24 +81,27 @@ fn modparam_context_detects_module_of_param_position() {
     // inside the second string of a modparam → completion should offer
     // params of that module
     let line = r#"modparam("cachedb_nats", "kv_"#;
-    assert_eq!(modparam_context(line), Some("cachedb_nats".to_string()));
     assert_eq!(
-        modparam_context(r#"modparam("tm", "#),
+        analyze::modparam_context(line),
+        Some("cachedb_nats".to_string())
+    );
+    assert_eq!(
+        analyze::modparam_context(r#"modparam("tm", "#),
         Some("tm".to_string())
     );
-    assert_eq!(modparam_context("xlog(\"nope\""), None);
+    assert_eq!(analyze::modparam_context("xlog(\"nope\""), None);
     // first argument still open → no module context yet
-    assert_eq!(modparam_context(r#"modparam("cache"#), None);
+    assert_eq!(analyze::modparam_context(r#"modparam("cache"#), None);
 }
 
 #[test]
 fn word_at_extracts_identifier() {
     let text = "    send_reply(200, \"OK\");";
-    assert_eq!(word_at(text, 6), Some("send_reply".to_string()));
-    assert_eq!(word_at(text, 0), None);
-    assert_eq!(word_at("", 5), None);
+    assert_eq!(analyze::word_at(text, 6), Some("send_reply".to_string()));
+    assert_eq!(analyze::word_at(text, 0), None);
+    assert_eq!(analyze::word_at("", 5), None);
     // out-of-range column must not panic
-    assert_eq!(word_at("ab", 99), None);
+    assert_eq!(analyze::word_at("ab", 99), None);
 }
 
 #[test]
@@ -113,18 +116,18 @@ fn adversarial_inputs_do_not_panic() {
         "modparam(\"",
         "route[\\\"x]",
     ] {
-        let _ = loaded_modules(s);
-        let _ = route_defs(s);
-        let _ = route_refs(s);
-        let _ = modparam_context(s);
-        let _ = word_at(s, 3);
+        let _ = analyze::loaded_modules(s);
+        let _ = analyze::route_defs(s);
+        let _ = analyze::route_refs(s);
+        let _ = analyze::modparam_context(s);
+        let _ = analyze::word_at(s, 3);
     }
 }
 
 #[test]
 fn route_blocks_report_full_extents() {
     let text = "loadmodule \"tm.so\"\nroute {\n    if (1) {\n        exit;\n    }\n}\nfailure_route[fr] {\n    xlog(\"x\");\n}\n";
-    let blocks = route_blocks(text);
+    let blocks = analyze::route_blocks(text);
     assert_eq!(blocks.len(), 2);
     assert_eq!(blocks[0].kind, "route");
     assert_eq!(blocks[0].name, "");
@@ -139,7 +142,7 @@ fn route_blocks_report_full_extents() {
 #[test]
 fn route_blocks_ignore_braces_in_strings_and_comments() {
     let text = "route {\n    xlog(\"}\");\n    # }\n    /* } */\n    exit;\n}\n";
-    let blocks = route_blocks(text);
+    let blocks = analyze::route_blocks(text);
     assert_eq!(blocks.len(), 1);
     assert_eq!((blocks[0].end_line, blocks[0].end_col), (5, 1));
 }
@@ -147,7 +150,7 @@ fn route_blocks_ignore_braces_in_strings_and_comments() {
 #[test]
 fn unterminated_route_block_extends_to_eof() {
     let text = "route {\n    exit;\n";
-    let blocks = route_blocks(text);
+    let blocks = analyze::route_blocks(text);
     assert_eq!(blocks.len(), 1);
     assert_eq!(blocks[0].end_line, 2);
 }
@@ -163,14 +166,14 @@ fn route_blocks_adversarial_do_not_panic() {
         "route[a] { \"unterminated",
         "}}}}",
     ] {
-        let _ = route_blocks(s);
+        let _ = analyze::route_blocks(s);
     }
 }
 
 #[test]
 fn includes_are_extracted_from_code_position_only() {
     let text = "include_file \"a.cfg\"\nimport_file \"sub/b.cfg\"\n# include_file \"no.cfg\"\n/* include_file \"no2.cfg\" */\nxlog(\"include_file \\\"no3.cfg\\\"\");\n";
-    let inc = includes(text);
+    let inc = analyze::includes(text);
     let names: Vec<&str> = inc.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, vec!["a.cfg", "sub/b.cfg"]);
     assert_eq!(inc[0].line, 0);
@@ -187,26 +190,30 @@ fn includes_adversarial_do_not_panic() {
         "import_file \"\\\"\"",
         "reinclude_file \"x\"",
     ] {
-        let _ = includes(s);
+        let _ = analyze::includes(s);
     }
     // an identifier tail must not match (reinclude_file)
-    assert!(includes("reinclude_file \"x.cfg\"").is_empty());
+    assert!(analyze::includes("reinclude_file \"x.cfg\"").is_empty());
 }
 
 #[test]
 fn timer_route_with_interval_is_recognized() {
     // OpenSIPS grammar REQUIRES the interval: timer_route[name, N] { }
     let text = "timer_route[gw_update, 30] {\n    exit;\n}\n";
-    let defs = route_defs(text);
+    let defs = analyze::route_defs(text);
     assert_eq!(defs.len(), 1, "{defs:?}");
     assert_eq!(defs[0].name, "gw_update");
-    let blocks = route_blocks(text);
+    let blocks = analyze::route_blocks(text);
     assert_eq!(blocks[0].kind, "timer_route");
     assert_eq!(blocks[0].end_line, 2);
     // space-free variant
-    assert_eq!(route_defs("timer_route[t,30]{exit;}\n").len(), 1);
+    assert_eq!(analyze::route_defs("timer_route[t,30]{exit;}\n").len(), 1);
     // interval must not leak into the name
-    assert!(route_defs(text).iter().all(|d| !d.name.contains("30")));
+    assert!(
+        analyze::route_defs(text)
+            .iter()
+            .all(|d| !d.name.contains("30"))
+    );
 }
 
 #[test]
@@ -214,21 +221,21 @@ fn single_quoted_strings_are_strings() {
     // OpenSIPS accepts single-quoted strings; '#', '{', '}' inside
     // them must not derail comment detection or brace matching
     let text = "route {\n    xlog('hello # } {');\n    exit;\n}\nroute[sq] { exit; }\n";
-    let blocks = route_blocks(text);
+    let blocks = analyze::route_blocks(text);
     assert_eq!(blocks.len(), 2, "{blocks:?}");
     assert_eq!(blocks[0].end_line, 3);
     // single-quoted route names in defs and refs
     let text = "route['sq'] { exit; }\nroute {\n    route('sq');\n}\n";
-    assert!(route_defs(text).iter().any(|d| d.name == "sq"));
-    assert!(route_refs(text).iter().any(|r| r.name == "sq"));
+    assert!(analyze::route_defs(text).iter().any(|d| d.name == "sq"));
+    assert!(analyze::route_refs(text).iter().any(|r| r.name == "sq"));
     // and single-quoted includes
-    let inc = includes("include_file 'a.cfg'\n");
+    let inc = analyze::includes("include_file 'a.cfg'\n");
     assert_eq!(inc.len(), 1);
     assert_eq!(inc[0].name, "a.cfg");
     // adversarial: unterminated single quote
     for s in ["'", "x'", "route['", "xlog('a\\'b');"] {
-        let _ = route_blocks(s);
-        let _ = includes(s);
+        let _ = analyze::route_blocks(s);
+        let _ = analyze::includes(s);
     }
 }
 
@@ -244,7 +251,7 @@ fn kamailio_only_route_kinds_are_not_opensips_defs() {
         "onsend_route {\n    exit;\n}\n",
     ] {
         assert!(
-            route_defs(cfg).is_empty(),
+            analyze::route_defs(cfg).is_empty(),
             "kamailio-only kind must not define a route: {cfg:?}"
         );
     }
@@ -253,7 +260,7 @@ fn kamailio_only_route_kinds_are_not_opensips_defs() {
 #[test]
 fn modparam_calls_are_extracted_with_param_positions() {
     let text = "modparam(\"tm\", \"fr_timeout\", 5)\n# modparam(\"no\", \"x\", 1)\nmodparam('sq', 'p2', \"v\")\n";
-    let mp = modparam_calls(text);
+    let mp = analyze::modparam_calls(text);
     assert_eq!(mp.len(), 2, "{mp:?}");
     assert_eq!(
         (mp[0].module.as_str(), mp[0].param.as_str()),
@@ -270,7 +277,7 @@ fn modparam_calls_are_extracted_with_param_positions() {
         "modparam(\"a\"",
         "modparam(\"a\",\"\0\",1)",
     ] {
-        let _ = modparam_calls(s);
+        let _ = analyze::modparam_calls(s);
     }
 }
 
@@ -279,14 +286,14 @@ fn pvars_are_classifier_scoped() {
     // strings (both quote styles) keep pvars; comments drop them
     let text =
         "xlog(\"call #1: $ru\");\nxlog('#: $rd');\n# $avp(x)\n/* $var(y) */ $rU;\n/*\n $si\n*/\n";
-    let got = pvars(text);
+    let got = analyze::pvars(text);
     assert_eq!(
         got,
         vec![(0, 15, 3), (1, 9, 3), (3, 14, 3)],
         "in-string pvars stay, commented pvars go: {got:?}"
     );
     // multibyte before the pvar: col is a BYTE column
-    let got = pvars("xlog(\"héllo $ru\");\n");
+    let got = analyze::pvars("xlog(\"héllo $ru\");\n");
     assert_eq!(got, vec![(0, 13, 3)]);
     // adversarial: NUL, backslash escapes, unterminated — no panic
     for s in [
@@ -298,7 +305,7 @@ fn pvars_are_classifier_scoped() {
         "'$ru",
         "$ru\u{7f}$rd",
     ] {
-        let _ = pvars(s);
+        let _ = analyze::pvars(s);
     }
 }
 
@@ -311,30 +318,42 @@ fn block_comments_nest() {
     let t = "/* outer /* inner */ route(ghost); */\n\
              route[real] {\n    route(after);\n}\n\
              /* a /* b */ route[gone] { exit; } */\n";
-    let refs: Vec<String> = route_refs(t).into_iter().map(|r| r.name).collect();
+    let refs: Vec<String> = analyze::route_refs(t).into_iter().map(|r| r.name).collect();
     assert_eq!(refs, vec!["after"]);
-    let defs: Vec<String> = route_defs(t).into_iter().map(|d| d.name).collect();
+    let defs: Vec<String> = analyze::route_defs(t).into_iter().map(|d| d.name).collect();
     assert_eq!(defs, vec!["real"]);
 }
 
 #[test]
 fn the_cursor_is_in_a_comment_only_before_the_comment_ends() {
-    use opensips_lsp::analyze::in_comment;
+    use opensips_lsp::analyze;
     let at = |t: &str, needle: &str| t.find(needle).unwrap() + needle.len();
     let t = "route {\n    # xlo\n    xlo\n    /* a /* b */ xl */ xlo\n}\n";
-    assert!(in_comment(t, at(t, "# xlo")), "inside a # comment");
-    assert!(!in_comment(t, at(t, "    xlo\n") - 1), "plain code");
-    assert!(in_comment(t, at(t, "b */ xl")), "still inside the outer /*");
-    assert!(!in_comment(t, at(t, "xl */")), "after the outer */ closes");
-    assert!(!in_comment(t, at(t, "*/ xlo")), "code after the comment");
+    assert!(analyze::in_comment(t, at(t, "# xlo")), "inside a # comment");
+    assert!(
+        !analyze::in_comment(t, at(t, "    xlo\n") - 1),
+        "plain code"
+    );
+    assert!(
+        analyze::in_comment(t, at(t, "b */ xl")),
+        "still inside the outer /*"
+    );
+    assert!(
+        !analyze::in_comment(t, at(t, "xl */")),
+        "after the outer */ closes"
+    );
+    assert!(
+        !analyze::in_comment(t, at(t, "*/ xlo")),
+        "code after the comment"
+    );
     // a `#` or `/*` inside a string opens no comment
     let s = "route {\n    xlog(\"# /* x\"); xl\n}\n";
-    assert!(!in_comment(s, at(s, "# /* x")));
-    assert!(!in_comment(s, at(s, "; xl")));
+    assert!(!analyze::in_comment(s, at(s, "# /* x")));
+    assert!(!analyze::in_comment(s, at(s, "; xl")));
     // the end of a `#` line is still in it; the next line is not
     let e = "# c\nxl";
-    assert!(in_comment(e, 3));
-    assert!(!in_comment(e, e.len()));
+    assert!(analyze::in_comment(e, 3));
+    assert!(!analyze::in_comment(e, e.len()));
 }
 
 #[test]
@@ -342,7 +361,7 @@ fn a_backslash_in_single_quotes_escapes_nothing() {
     // cfg.lex STRING2 ends at the next `'` and has no escapes, so
     // `'\'` is a complete string and the route call after it is code
     let t = "route {\n    xlog('\\'); route(after);\n}\n";
-    let refs: Vec<String> = route_refs(t).into_iter().map(|r| r.name).collect();
+    let refs: Vec<String> = analyze::route_refs(t).into_iter().map(|r| r.name).collect();
     assert_eq!(refs, vec!["after"]);
 }
 
@@ -352,7 +371,10 @@ fn loadmodule_takes_a_single_quoted_string_too() {
     // of either quote; `opensips -C` resolves t_relay after
     // `loadmodule 'tm.so'` and fails to parse without it
     let t = "loadmodule 'tm.so'\nloadmodule \"sl.so\"\n# loadmodule 'gone.so'\n";
-    let names: Vec<String> = loaded_modules(t).into_iter().map(|m| m.name).collect();
+    let names: Vec<String> = analyze::loaded_modules(t)
+        .into_iter()
+        .map(|m| m.name)
+        .collect();
     assert_eq!(names, vec!["tm", "sl"]);
 }
 
@@ -364,7 +386,7 @@ fn loadmodule_takes_a_single_quoted_string_too() {
 /// to `opensips -C` 4.0.2.
 #[test]
 fn a_script_variable_body_opens_no_comment_or_string() {
-    use opensips_lsp::analyze::in_comment;
+    use opensips_lsp::analyze;
     let t = "route {\n\
              \t$ru = $(ru{re.subst,/;transport=[A-Za-z]*#//g});\n\
              \t$var(a) = $(var(a){re.subst,/\"//g});\n\
@@ -372,17 +394,20 @@ fn a_script_variable_body_opens_no_comment_or_string() {
              \troute(after);\n\
              }\n\
              route[after] {\n\texit; # real\n}\n";
-    let spans: Vec<(String, u32, u32)> = route_blocks(t)
+    let spans: Vec<(String, u32, u32)> = analyze::route_blocks(t)
         .into_iter()
         .map(|b| (b.name, b.line, b.end_line))
         .collect();
     assert_eq!(spans, vec![("".into(), 0, 5), ("after".into(), 6, 8)]);
-    let refs: Vec<String> = route_refs(t).into_iter().map(|r| r.name).collect();
+    let refs: Vec<String> = analyze::route_refs(t).into_iter().map(|r| r.name).collect();
     assert_eq!(refs, vec!["after"]);
     let at = |needle: &str| t.find(needle).unwrap() + needle.len();
-    assert!(!in_comment(t, at("]*#")), "`#` inside $(...)");
-    assert!(!in_comment(t, at("X#")), "`#` inside $hdr(...)");
-    assert!(in_comment(t, at("# re")), "a `#` after the variable closes");
+    assert!(!analyze::in_comment(t, at("]*#")), "`#` inside $(...)");
+    assert!(!analyze::in_comment(t, at("X#")), "`#` inside $hdr(...)");
+    assert!(
+        analyze::in_comment(t, at("# re")),
+        "a `#` after the variable closes"
+    );
 }
 
 /// A `$(` with no `)` on its line ends there: one being typed must not
@@ -390,7 +415,7 @@ fn a_script_variable_body_opens_no_comment_or_string() {
 #[test]
 fn an_unclosed_script_variable_ends_at_its_line() {
     let t = "route {\n\t$var(a) = $(ru{s.len\n}\nroute[n] {\n\texit;\n}\n";
-    let spans: Vec<(String, u32, u32)> = route_blocks(t)
+    let spans: Vec<(String, u32, u32)> = analyze::route_blocks(t)
         .into_iter()
         .map(|b| (b.name, b.line, b.end_line))
         .collect();
@@ -402,7 +427,7 @@ fn an_unclosed_script_variable_ends_at_its_line() {
 #[test]
 fn a_script_variable_nested_in_another_is_still_reported() {
     let t = "$var(x) = $hdr($var(n));";
-    let got: Vec<&str> = pvars(t)
+    let got: Vec<&str> = analyze::pvars(t)
         .into_iter()
         .map(|(_, c, n)| &t[c as usize..(c + n) as usize])
         .collect();

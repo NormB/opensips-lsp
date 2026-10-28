@@ -11,11 +11,14 @@
 
 mod common;
 
+use opensips_lsp::diag::Severity;
 use opensips_lsp::{analyze, diag};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
-fn corpus(tree: &std::path::Path) -> Vec<std::path::PathBuf> {
+fn corpus(tree: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let mut push_dir = |d: std::path::PathBuf, recurse: bool| {
+    let mut push_dir = |d: PathBuf, recurse: bool| {
         let mut stack = vec![d];
         while let Some(dir) = stack.pop() {
             let Ok(rd) = std::fs::read_dir(&dir) else {
@@ -45,7 +48,7 @@ fn corpus(tree: &std::path::Path) -> Vec<std::path::PathBuf> {
 #[test]
 fn corpus_sweep_no_panics_and_no_silent_failures() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let tree = std::path::PathBuf::from(tree);
+    let tree = PathBuf::from(tree);
     let files = corpus(&tree);
     assert!(
         files.len() >= 20,
@@ -100,7 +103,7 @@ fn corpus_sweep_no_panics_and_no_silent_failures() {
         // invariant 3: real-parser rejection is never silent
         {
             let bin = &bin;
-            let out = std::process::Command::new(bin)
+            let out = Command::new(bin)
                 .args(["-C", "-f"])
                 .arg(f)
                 .output()
@@ -118,7 +121,7 @@ fn corpus_sweep_no_panics_and_no_silent_failures() {
                 // ERROR-severity diagnostics are forbidden here
                 let errors: Vec<_> = diags
                     .iter()
-                    .filter(|d| d.severity == diag::Severity::Error)
+                    .filter(|d| d.severity == Severity::Error)
                     .collect();
                 assert!(
                     errors.is_empty(),

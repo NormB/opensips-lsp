@@ -2,8 +2,10 @@
 //! RGBA PNG the manifest references, and security-sensitive settings
 //! must be restricted in untrusted workspaces.
 
-fn root() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
+use std::path::{Path, PathBuf};
+
+fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).to_path_buf()
 }
 
 #[test]

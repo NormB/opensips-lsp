@@ -4,6 +4,8 @@
 mod common;
 
 use common::Scratch;
+use std::panic::AssertUnwindSafe;
+use std::path::Path;
 
 #[test]
 fn a_scratch_directory_is_removed_when_the_test_passes() {
@@ -21,7 +23,7 @@ fn a_scratch_directory_is_removed_when_the_test_passes() {
 #[test]
 fn a_scratch_directory_is_removed_when_the_test_fails() {
     let mut seen = None;
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| {
         let scratch = Scratch::new("oslsp-scratch-fail");
         std::fs::create_dir_all(scratch.path()).unwrap();
         std::fs::write(scratch.path().join("f.cfg"), "route {}\n").unwrap();
@@ -74,7 +76,7 @@ fn a_path_held_by_a_live_guard_cannot_be_taken_again() {
 #[test]
 fn no_test_builds_a_temp_path_without_the_guard() {
     let needles = [concat!("temp", "_dir("), concat!("CARGO_TARGET", "_TMPDIR")];
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let mut files = Vec::new();
     let mut stack = vec![root.clone()];
     while let Some(dir) = stack.pop() {

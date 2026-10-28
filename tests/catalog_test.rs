@@ -3,7 +3,8 @@
 
 mod common;
 
-use opensips_lsp::catalog::parse_admin_xml;
+use opensips_lsp::catalog;
+use std::path::Path;
 
 const FIXTURE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 <chapter>
@@ -31,7 +32,7 @@ const FIXTURE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
 
 #[test]
 fn parses_params_and_functions() {
-    let m = parse_admin_xml("cachedb_nats", FIXTURE).expect("fixture must parse");
+    let m = catalog::parse_admin_xml("cachedb_nats", FIXTURE).expect("fixture must parse");
     assert_eq!(m.name, "cachedb_nats");
     assert_eq!(m.params.len(), 2);
     assert_eq!(m.functions.len(), 1);
@@ -56,24 +57,24 @@ fn parses_params_and_functions() {
 
 #[test]
 fn backslashes_survive() {
-    let m = parse_admin_xml("cachedb_nats", FIXTURE).unwrap();
+    let m = catalog::parse_admin_xml("cachedb_nats", FIXTURE).unwrap();
     assert!(m.params[1].doc.contains(r"C:\nats\store"));
 }
 
 #[test]
 fn empty_input_is_error_not_panic() {
-    assert!(parse_admin_xml("m", "").is_err());
+    assert!(catalog::parse_admin_xml("m", "").is_err());
 }
 
 #[test]
 fn malformed_xml_is_error_not_panic() {
-    assert!(parse_admin_xml("m", "<chapter><section id=").is_err());
+    assert!(catalog::parse_admin_xml("m", "<chapter><section id=").is_err());
 }
 
 #[test]
 fn embedded_nul_is_error_not_panic() {
     let s = format!("<chapter>{}</chapter>", '\0');
-    assert!(parse_admin_xml("m", &s).is_err());
+    assert!(catalog::parse_admin_xml("m", &s).is_err());
 }
 
 #[test]
@@ -82,7 +83,7 @@ fn unknown_entities_do_not_kill_the_parse() {
       <title><varname>x</varname> (string)</title>
       <para>Uses &totallymadeup; entity and &amp; a real one.</para>
     </section></chapter>"#;
-    let m = parse_admin_xml("m", xml).expect("unknown entity must not be fatal");
+    let m = catalog::parse_admin_xml("m", xml).expect("unknown entity must not be fatal");
     assert_eq!(m.params[0].name, "x");
     assert!(m.params[0].doc.contains("& a real one"));
 }
@@ -91,7 +92,7 @@ fn unknown_entities_do_not_kill_the_parse() {
 fn harvests_the_real_opensips_tree_when_present() {
     // point OPENSIPS_LSP_TEST_TREE at an OpenSIPS source tree to run
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let root = std::path::Path::new(&tree);
+    let root = Path::new(&tree);
     assert!(
         root.join("modules").is_dir(),
         "OPENSIPS_LSP_TEST_TREE points at {}, which is not an OpenSIPS \
@@ -214,10 +215,9 @@ Text with <img src=x onerror=alert(1)> raw html, a
 
 #[test]
 fn missing_tree_harvests_empty() {
-    let modules =
-        opensips_lsp::catalog::harvest_tree(std::path::Path::new("/nonexistent/tree-xyz"));
+    let modules = opensips_lsp::catalog::harvest_tree(Path::new("/nonexistent/tree-xyz"));
     assert!(modules.is_empty());
-    let core = opensips_lsp::catalog::harvest_core(std::path::Path::new("/nonexistent/tree-xyz"));
+    let core = opensips_lsp::catalog::harvest_core(Path::new("/nonexistent/tree-xyz"));
     assert!(core.functions.is_empty() && core.params.is_empty() && core.pvars.is_empty());
 }
 
@@ -288,7 +288,7 @@ fn every_function_an_exported_functions_section_documents_is_harvested() {
   </section>
 </chapter>
 "#;
-    let m = parse_admin_xml("m", xml).unwrap();
+    let m = catalog::parse_admin_xml("m", xml).unwrap();
     let got: Vec<(&str, &str, &str)> = m
         .functions
         .iter()
@@ -340,7 +340,7 @@ fn the_title_names_the_function_and_the_id_is_a_fallback() {
   </section>
 </chapter>
 "#;
-    let m = parse_admin_xml("m", xml).unwrap();
+    let m = catalog::parse_admin_xml("m", xml).unwrap();
     let names: Vec<&str> = m.functions.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, vec!["get_dialogs_by_val", "t_relay"]);
 }
@@ -351,7 +351,8 @@ fn the_title_names_the_function_and_the_id_is_a_fallback() {
 /// with `has_body_f`, and documents only `has_body_part`.
 #[test]
 fn an_undocumented_export_sharing_a_documented_handler_is_an_alias() {
-    use opensips_lsp::catalog::{Item, function_aliases_from_c};
+    use opensips_lsp::catalog;
+    use opensips_lsp::catalog::Item;
     let c = r#"
 static const cmd_export_t cmds[]={
 	{"has_body",         (cmd_function)has_body_f, {
@@ -380,7 +381,7 @@ static const cmd_export_t cmds[]={
             doc: "Check Privacy.".into(),
         },
     ];
-    let got: Vec<(String, String, String)> = function_aliases_from_c(c, &documented)
+    let got: Vec<(String, String, String)> = catalog::function_aliases_from_c(c, &documented)
         .into_iter()
         .map(|i| (i.name, i.detail, i.doc))
         .collect();
@@ -413,7 +414,7 @@ fn a_docbook_section_whose_id_names_nothing_gives_no_item() {
 <section id="func_go"><title><function>go()</function></title><para>Go.</para></section>
 </section>
 </chapter>"#;
-    let m = parse_admin_xml("x", xml).expect("parses");
+    let m = catalog::parse_admin_xml("x", xml).expect("parses");
     let params: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
     let functions: Vec<&str> = m.functions.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(params, ["real"]);

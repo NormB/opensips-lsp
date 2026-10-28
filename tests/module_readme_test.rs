@@ -1,7 +1,7 @@
 //! `catalog::parse_readme_md`: module parameters and functions read from a
 //! module's `README.md`, as the 4.x documentation writes them.
 
-use opensips_lsp::catalog::parse_readme_md;
+use opensips_lsp::catalog;
 
 const FIXTURE: &str = r#"# TM Module
 
@@ -49,7 +49,7 @@ Not a script function; must not be collected.
 
 #[test]
 fn parses_readme_params_and_functions() {
-    let m = parse_readme_md("tm", FIXTURE).expect("fixture parses");
+    let m = catalog::parse_readme_md("tm", FIXTURE).expect("fixture parses");
     assert_eq!(m.name, "tm");
     assert_eq!(m.params.len(), 2);
     assert_eq!(m.params[0].name, "fr_timeout");
@@ -70,19 +70,19 @@ fn parses_readme_params_and_functions() {
 
 #[test]
 fn mi_functions_are_not_script_functions() {
-    let m = parse_readme_md("tm", FIXTURE).unwrap();
+    let m = catalog::parse_readme_md("tm", FIXTURE).unwrap();
     assert!(!m.functions.iter().any(|f| f.name == "t_uac_dlg"));
 }
 
 #[test]
 fn empty_and_nul_are_errors() {
-    assert!(parse_readme_md("m", "").is_err());
-    assert!(parse_readme_md("m", "a\0b").is_err());
+    assert!(catalog::parse_readme_md("m", "").is_err());
+    assert!(catalog::parse_readme_md("m", "a\0b").is_err());
 }
 
 #[test]
 fn readme_without_export_sections_is_ok_and_empty() {
-    let m = parse_readme_md("m", "# Hi\n\nJust prose.\n").unwrap();
+    let m = catalog::parse_readme_md("m", "# Hi\n\nJust prose.\n").unwrap();
     assert!(m.params.is_empty() && m.functions.is_empty());
 }
 
@@ -131,7 +131,7 @@ Offer.
 
 #[test]
 fn a_fenced_example_does_not_end_the_parameter_section() {
-    let m = parse_readme_md("rtpengine", REAL_SHAPE).expect("fixture parses");
+    let m = catalog::parse_readme_md("rtpengine", REAL_SHAPE).expect("fixture parses");
     let names: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
     assert!(
         names.contains(&"connect_timeout"),
@@ -141,7 +141,7 @@ fn a_fenced_example_does_not_end_the_parameter_section() {
 
 #[test]
 fn a_heading_inside_a_fence_is_not_an_item() {
-    let m = parse_readme_md("rtpengine", REAL_SHAPE).unwrap();
+    let m = catalog::parse_readme_md("rtpengine", REAL_SHAPE).unwrap();
     assert!(
         !m.params.iter().any(|p| p.name == "not_a_param"),
         "an example showing markdown was harvested as documentation"
@@ -150,7 +150,7 @@ fn a_heading_inside_a_fence_is_not_an_item() {
 
 #[test]
 fn a_sub_heading_in_a_parameters_prose_does_not_end_the_section() {
-    let m = parse_readme_md("rtpengine", REAL_SHAPE).unwrap();
+    let m = catalog::parse_readme_md("rtpengine", REAL_SHAPE).unwrap();
     let names: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
     assert!(names.contains(&"db_url"), "{names:?}");
     assert!(
@@ -161,7 +161,7 @@ fn a_sub_heading_in_a_parameters_prose_does_not_end_the_section() {
 
 #[test]
 fn a_type_written_without_a_space_is_not_part_of_the_name() {
-    let m = parse_readme_md("rtpengine", REAL_SHAPE).unwrap();
+    let m = catalog::parse_readme_md("rtpengine", REAL_SHAPE).unwrap();
     let p = m
         .params
         .iter()
@@ -172,7 +172,7 @@ fn a_type_written_without_a_space_is_not_part_of_the_name() {
 
 #[test]
 fn functions_after_an_example_are_still_harvested() {
-    let m = parse_readme_md("rtpengine", REAL_SHAPE).unwrap();
+    let m = catalog::parse_readme_md("rtpengine", REAL_SHAPE).unwrap();
     let names: Vec<&str> = m.functions.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["rtpengine_offer"]);
 }
@@ -190,7 +190,7 @@ fn functions_after_an_example_are_still_harvested() {
 #[test]
 fn a_heading_listing_several_parameters_documents_each_of_them() {
     let md = "# m\n\n### Exported Parameters\n\n#### private_key, local_certificate, ca_certificates\n\nThe TLS material.\n\n#### server_domain, client_domain (string)\n\nA domain.\n\n#### sp1_uri, sp2_uri, ..., sp16_uri\n\nService points.\n";
-    let m = parse_readme_md("osp", md).expect("parses");
+    let m = catalog::parse_readme_md("osp", md).expect("parses");
     let names: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(
         names,
@@ -217,7 +217,7 @@ fn a_heading_listing_several_parameters_documents_each_of_them() {
 #[test]
 fn a_function_signature_with_commas_is_still_one_function() {
     let md = "# m\n\n### Exported Functions\n\n#### jwt_db_authorize(jwt_token, out_decoded_token, out_sip_username)\n\nAuthorize.\n";
-    let m = parse_readme_md("auth_jwt", md).unwrap();
+    let m = catalog::parse_readme_md("auth_jwt", md).unwrap();
     let names: Vec<&str> = m.functions.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, vec!["jwt_db_authorize"], "{names:?}");
 }
@@ -230,7 +230,7 @@ fn a_function_signature_with_commas_is_still_one_function() {
 #[test]
 fn a_templated_parameter_name_is_left_alone() {
     let md = "# m\n\n### Exported Parameters\n\n#### app[index]_call_state_column(string)\n\nA column.\n";
-    let m = parse_readme_md("b2b_sca", md).unwrap();
+    let m = catalog::parse_readme_md("b2b_sca", md).unwrap();
     let names: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(names, vec!["app[index]_call_state_column"], "{names:?}");
 }
@@ -245,7 +245,7 @@ fn a_templated_parameter_name_is_left_alone() {
 #[test]
 fn a_section_heading_at_item_depth_is_not_an_item() {
     let md = "# m\n\n### Exported Parameters\n\n#### cachedb_url (string)\n\nThe URL.\n\n#### Exported Functions\n\nThe module does not export functions.\n";
-    let m = parse_readme_md("cachedb_sql", md).expect("parses");
+    let m = catalog::parse_readme_md("cachedb_sql", md).expect("parses");
     let names: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(names, vec!["cachedb_url"], "{names:?}");
     assert!(m.functions.is_empty(), "{:?}", m.functions);
@@ -255,7 +255,7 @@ fn a_section_heading_at_item_depth_is_not_an_item() {
 #[test]
 fn items_under_a_deeper_section_heading_are_that_sections() {
     let md = "# m\n\n### Exported Parameters\n\n#### cachedb_url (string)\n\nThe URL.\n\n#### Exported Functions\n\n#### cache_query(key)\n\nQuery it.\n";
-    let m = parse_readme_md("cachedb_sql", md).unwrap();
+    let m = catalog::parse_readme_md("cachedb_sql", md).unwrap();
     let params: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
     let funcs: Vec<&str> = m.functions.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(params, vec!["cachedb_url"], "{params:?}");
@@ -277,7 +277,7 @@ fn a_heading_naming_two_functions_documents_both() {
               Replace the display name or the URI.\n\n\
               #### rtpproxy_stream2uac(prompt_name, count[, [set_id][, sock_var]]), rtpproxy_stream2uas(prompt_name, count[, [set_id][, sock_var]])\n\n\
               Stream a prompt.\n";
-    let m = parse_readme_md("m", md).unwrap();
+    let m = catalog::parse_readme_md("m", md).unwrap();
     let got: Vec<(&str, &str, &str)> = m
         .functions
         .iter()
@@ -318,7 +318,7 @@ fn argument_parentheses_and_overloads_are_one_function() {
     let md = "# m\n\n### Exported Functions\n\n\
               #### json_link($json(dest_id), $json(source_id))\n\nLink.\n\n\
               #### record_route() and record_route(string)\n\nAdd a Record-Route.\n";
-    let m = parse_readme_md("m", md).unwrap();
+    let m = catalog::parse_readme_md("m", md).unwrap();
     let got: Vec<(&str, &str)> = m
         .functions
         .iter()
@@ -341,7 +341,7 @@ fn a_parameter_heading_with_no_name_gives_no_parameter() {
     for heading in ["#### ", "####  ", "#### (integer)", "#### (str)"] {
         let md =
             format!("### Exported Parameters\n\n{heading}\n\nText.\n\n#### real (int)\n\nMore.\n");
-        let m = parse_readme_md("x", &md).expect("parses");
+        let m = catalog::parse_readme_md("x", &md).expect("parses");
         let names: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["real"], "{heading:?}");
     }

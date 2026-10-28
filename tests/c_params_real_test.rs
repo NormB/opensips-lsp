@@ -7,14 +7,14 @@
 
 mod common;
 
-use opensips_lsp::catalog::{builtin_modules, param_names_from_c};
-use std::path::Path;
+use opensips_lsp::catalog;
+use std::path::{Path, PathBuf};
 
 fn tree() -> String {
     common::required_env("OPENSIPS_LSP_TEST_TREE")
 }
 
-fn module_dirs(root: &Path) -> Vec<std::path::PathBuf> {
+fn module_dirs(root: &Path) -> Vec<PathBuf> {
     let mut dirs: Vec<_> = std::fs::read_dir(root.join("modules"))
         .expect("an OpenSIPS source tree has modules/")
         .flatten()
@@ -52,7 +52,7 @@ fn the_extraction_still_reads_the_tree() {
     let mut with_tables = 0usize;
     let mut total = 0usize;
     for dir in &dirs {
-        let found = param_names_from_c(dir, root);
+        let found = catalog::param_names_from_c(dir, root);
         if !found.names.is_empty() {
             with_tables += 1;
             total += found.names.len();
@@ -85,7 +85,7 @@ fn known_parameters_are_extracted() {
         ("usrloc", "user_column"),
         ("dialog", "table_name"),
     ] {
-        let found = param_names_from_c(&root.join("modules").join(module), root);
+        let found = catalog::param_names_from_c(&root.join("modules").join(module), root);
         assert!(
             found.names.iter().any(|n| n == param),
             "{module}::{param} must come out of the C tables, got {} names",
@@ -104,7 +104,7 @@ fn macro_spliced_parameters_are_expanded() {
     let root = tree();
     let root = Path::new(&root);
     for module in ["registrar", "mid_registrar"] {
-        let found = param_names_from_c(&root.join("modules").join(module), root);
+        let found = catalog::param_names_from_c(&root.join("modules").join(module), root);
         assert!(found.complete, "{module}: table did not fully resolve");
         for param in ["max_contacts", "max_aor_len", "expires_max_deviation"] {
             assert!(
@@ -124,13 +124,13 @@ fn macro_spliced_parameters_are_expanded() {
 fn the_catalogue_contains_no_parameter_absent_from_the_c_tables() {
     let root = tree();
     let root = Path::new(&root);
-    let catalogue = builtin_modules();
+    let catalogue = catalog::builtin_modules();
 
     let mut phantoms: Vec<String> = Vec::new();
     let mut checked = 0usize;
     for dir in module_dirs(root) {
         let module = dir.file_name().unwrap().to_string_lossy().into_owned();
-        let found = param_names_from_c(&dir, root);
+        let found = catalog::param_names_from_c(&dir, root);
         // only modules the reconciliation treats as authoritative: an
         // empty or unresolved parse holds the README harvest as-is
         if found.names.is_empty() || !found.complete {
@@ -163,7 +163,7 @@ fn the_catalogue_contains_no_parameter_absent_from_the_c_tables() {
 /// catalogue, carrying a doc line that says where it came from.
 #[test]
 fn undocumented_parameters_are_harvested_from_c() {
-    let catalogue = builtin_modules();
+    let catalogue = catalog::builtin_modules();
     for (module, param) in [
         ("rtpengine", "extra_failover_error"),
         ("tcp_mgm", "connect_timeout_col"),
@@ -193,7 +193,7 @@ fn undocumented_parameters_are_harvested_from_c() {
 fn modules_without_a_table_are_left_alone() {
     let root = tree();
     let root = Path::new(&root);
-    let catalogue = builtin_modules();
+    let catalogue = catalog::builtin_modules();
 
     let mut seen = 0usize;
     for module in ["textops", "sipmsgops", "uuid", "xml"] {
@@ -202,7 +202,7 @@ fn modules_without_a_table_are_left_alone() {
             continue;
         }
         seen += 1;
-        let found = param_names_from_c(&dir, root);
+        let found = catalog::param_names_from_c(&dir, root);
         assert!(
             found.names.is_empty(),
             "{module} was expected to export no parameters, got {:?}",
@@ -218,7 +218,7 @@ fn modules_without_a_table_are_left_alone() {
     assert!(seen >= 3, "the fixture modules are missing from the tree");
 }
 
-/// The live path. `builtin_modules()` reads a JSON file generated
+/// The live path. `catalog::builtin_modules()` reads a JSON file generated
 /// ahead of time, so a reconciliation that stopped running would leave
 /// that file — and every test reading it — looking correct. This
 /// exercises `harvest_tree` itself, which is what a user pointing
@@ -271,7 +271,7 @@ fn harvesting_the_tree_directly_reconciles_against_c() {
 
     let mut phantoms: Vec<String> = Vec::new();
     for doc in &harvested {
-        let found = param_names_from_c(&root.join("modules").join(&doc.name), root);
+        let found = catalog::param_names_from_c(&root.join("modules").join(&doc.name), root);
         if found.names.is_empty() || !found.complete {
             continue;
         }
@@ -364,7 +364,7 @@ fn conditional_tables_still_resolve_completely() {
     let root = tree();
     let root = Path::new(&root);
     let dir = root.join("modules").join("rr");
-    let found = param_names_from_c(&dir, root);
+    let found = catalog::param_names_from_c(&dir, root);
     assert!(
         found.names.iter().any(|n| n == "ignore_user"),
         "rr::ignore_user sits behind a `#ifdef` and must still be collected, got {:?}",

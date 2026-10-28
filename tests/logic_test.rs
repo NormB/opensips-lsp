@@ -3,14 +3,12 @@
 
 mod common;
 
-use opensips_lsp::catalog::{Item, ModuleDoc};
-use opensips_lsp::logic::{
-    CompKind, SemKind, analyzer_diagnostics, attribute_foreign_diag, catalog_diagnostics,
-    completions, completions_with_core, configs_in_dir, definition_of, encode_semantic_tokens,
-    hover_markdown, include_closure, loaded_modules_multi, pvar_tail, quick_fixes,
-    route_defs_multi, route_occurrences, route_symbol_at, scan_configs, semantic_spans,
-    signature_at, split_params, valid_route_name,
-};
+use opensips_lsp::catalog::{CatalogOrigin, CoreDocs, Item, ModuleDoc};
+use opensips_lsp::logic;
+use opensips_lsp::logic::{CompKind, SemKind};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 fn catalog() -> Vec<ModuleDoc> {
     vec![
@@ -48,7 +46,7 @@ const DOC: &str =
 
 #[test]
 fn modparam_value_position_offers_params_of_that_module() {
-    let items = completions(&catalog(), DOC, r#"modparam("cachedb_nats", ""#);
+    let items = logic::completions(&catalog(), DOC, r#"modparam("cachedb_nats", ""#);
     let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert_eq!(names, vec!["kv_bucket"]);
     assert_eq!(items[0].kind, CompKind::Param);
@@ -56,7 +54,7 @@ fn modparam_value_position_offers_params_of_that_module() {
 
 #[test]
 fn modparam_module_position_offers_module_names() {
-    let items = completions(&catalog(), DOC, r#"modparam(""#);
+    let items = logic::completions(&catalog(), DOC, r#"modparam(""#);
     let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(names.contains(&"tm") && names.contains(&"cachedb_nats"));
     assert!(items.iter().all(|i| i.kind == CompKind::Module));
@@ -64,7 +62,7 @@ fn modparam_module_position_offers_module_names() {
 
 #[test]
 fn loadmodule_position_offers_so_names() {
-    let items = completions(&catalog(), DOC, r#"loadmodule ""#);
+    let items = logic::completions(&catalog(), DOC, r#"loadmodule ""#);
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(labels.contains(&"tm.so"));
     assert!(labels.contains(&"cachedb_nats.so"));
@@ -75,7 +73,7 @@ fn argument_completions_follow_a_single_quote_too() {
     // cfg.lex makes a STRING of either quote, so every quoted argument
     // context must be recognised after `'` as it is after `"`
     let labels = |prefix: &str| -> Vec<String> {
-        completions(&catalog(), DOC, prefix)
+        logic::completions(&catalog(), DOC, prefix)
             .into_iter()
             .map(|i| i.label)
             .collect()
@@ -91,7 +89,7 @@ fn argument_completions_follow_a_single_quote_too() {
 
 #[test]
 fn code_position_offers_loaded_module_functions_and_routes() {
-    let items = completions(&catalog(), DOC, "    t_re");
+    let items = logic::completions(&catalog(), DOC, "    t_re");
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     // tm is loaded → t_relay offered; cachedb_nats is NOT loaded → not offered
     assert!(labels.contains(&"t_relay"));
@@ -102,41 +100,41 @@ fn code_position_offers_loaded_module_functions_and_routes() {
 
 #[test]
 fn hover_finds_function_param_and_module() {
-    let h = hover_markdown(&catalog(), DOC, "t_relay").expect("function hover");
+    let h = logic::hover_markdown(&catalog(), DOC, "t_relay").expect("function hover");
     assert!(h.contains("t_relay([flags],[outbound_proxy])"));
     assert!(h.contains("Relay statefully."));
 
-    let h = hover_markdown(&catalog(), DOC, "kv_bucket").expect("param hover");
+    let h = logic::hover_markdown(&catalog(), DOC, "kv_bucket").expect("param hover");
     assert!(h.contains("string") && h.contains("Bucket name."));
 
-    let h = hover_markdown(&catalog(), DOC, "tm").expect("module hover");
+    let h = logic::hover_markdown(&catalog(), DOC, "tm").expect("module hover");
     assert!(h.contains("tm"));
 
-    assert!(hover_markdown(&catalog(), DOC, "no_such_thing").is_none());
+    assert!(logic::hover_markdown(&catalog(), DOC, "no_such_thing").is_none());
 }
 
 #[test]
 fn definition_resolves_route_reference() {
     // cursor on "check" inside route(check) on line 6
-    let d = definition_of(DOC, 6, 11).expect("definition");
+    let d = logic::definition_of(DOC, 6, 11).expect("definition");
     assert_eq!(d.line, 2); // route[check] { on line 2
     // cursor elsewhere → none
-    assert!(definition_of(DOC, 0, 0).is_none());
+    assert!(logic::definition_of(DOC, 0, 0).is_none());
     // out of range must not panic
-    assert!(definition_of(DOC, 999, 999).is_none());
+    assert!(logic::definition_of(DOC, 999, 999).is_none());
 }
 
 #[test]
 fn adversarial_docs_do_not_panic() {
     for text in ["", "\0", "route(", "modparam(\"x"] {
-        let _ = completions(&catalog(), text, text);
-        let _ = hover_markdown(&catalog(), text, "x");
-        let _ = definition_of(text, 0, 0);
+        let _ = logic::completions(&catalog(), text, text);
+        let _ = logic::hover_markdown(&catalog(), text, "x");
+        let _ = logic::definition_of(text, 0, 0);
     }
 }
 
-fn core() -> opensips_lsp::catalog::CoreDocs {
-    opensips_lsp::catalog::CoreDocs {
+fn core() -> CoreDocs {
+    CoreDocs {
         functions: vec![Item {
             name: "cache_store".into(),
             detail: "cache_store(storage_id, attribute, value, [timeout])".into(),
@@ -173,8 +171,8 @@ fn core() -> opensips_lsp::catalog::CoreDocs {
 
 #[test]
 fn code_position_offers_core_functions() {
-    use opensips_lsp::logic::completions_with_core;
-    let items = completions_with_core(&catalog(), &core(), DOC, "    cache_");
+    use opensips_lsp::logic;
+    let items = logic::completions_with_core(&catalog(), &core(), DOC, "    cache_");
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(labels.contains(&"cache_store"));
     assert!(labels.contains(&"t_relay")); // module functions still there
@@ -183,23 +181,24 @@ fn code_position_offers_core_functions() {
 
 #[test]
 fn dollar_prefix_offers_pseudo_variables_only() {
-    use opensips_lsp::logic::completions_with_core;
-    let items = completions_with_core(&catalog(), &core(), DOC, "    xlog(\"$");
+    use opensips_lsp::logic;
+    let items = logic::completions_with_core(&catalog(), &core(), DOC, "    xlog(\"$");
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert_eq!(labels, vec!["$ru"]);
 }
 
 #[test]
 fn hover_covers_core_items() {
-    use opensips_lsp::logic::hover_markdown_with_core;
-    let h = hover_markdown_with_core(&catalog(), &core(), DOC, "cache_store").unwrap();
+    use opensips_lsp::logic;
+    let h = logic::hover_markdown_with_core(&catalog(), &core(), DOC, "cache_store").unwrap();
     assert!(h.contains("cache_store(storage_id"));
-    let h = hover_markdown_with_core(&catalog(), &core(), DOC, "ru").unwrap();
+    let h = logic::hover_markdown_with_core(&catalog(), &core(), DOC, "ru").unwrap();
     assert!(h.contains("Request URI"));
-    let h = hover_markdown_with_core(&catalog(), &core(), DOC, "advertised_address").unwrap();
+    let h =
+        logic::hover_markdown_with_core(&catalog(), &core(), DOC, "advertised_address").unwrap();
     assert!(h.contains("Via"));
     // module symbols still win where they exist
-    let h = hover_markdown_with_core(&catalog(), &core(), DOC, "t_relay").unwrap();
+    let h = logic::hover_markdown_with_core(&catalog(), &core(), DOC, "t_relay").unwrap();
     assert!(h.contains("module tm"));
 }
 
@@ -207,39 +206,39 @@ fn hover_covers_core_items() {
 fn route_symbol_at_finds_refs_and_def_names() {
     let doc = "route {\n    route(to.b);\n}\nroute[to.b] {\n    exit;\n}\n";
     // on the ref name (line 1, "to.b" starts at byte col 10)
-    assert_eq!(route_symbol_at(doc, 1, 10), Some("to.b".to_string()));
-    assert_eq!(route_symbol_at(doc, 1, 13), Some("to.b".to_string()));
+    assert_eq!(logic::route_symbol_at(doc, 1, 10), Some("to.b".to_string()));
+    assert_eq!(logic::route_symbol_at(doc, 1, 13), Some("to.b".to_string()));
     // one past the name → no symbol
-    assert_eq!(route_symbol_at(doc, 1, 14), None);
+    assert_eq!(logic::route_symbol_at(doc, 1, 14), None);
     // on the def name (line 3, "to.b" starts at byte col 6)
-    assert_eq!(route_symbol_at(doc, 3, 6), Some("to.b".to_string()));
+    assert_eq!(logic::route_symbol_at(doc, 3, 6), Some("to.b".to_string()));
     // on the keyword, not the name
-    assert_eq!(route_symbol_at(doc, 3, 0), None);
+    assert_eq!(logic::route_symbol_at(doc, 3, 0), None);
     // out of range must not panic
-    assert_eq!(route_symbol_at(doc, 99, 99), None);
-    assert_eq!(route_symbol_at("", 0, 0), None);
+    assert_eq!(logic::route_symbol_at(doc, 99, 99), None);
+    assert_eq!(logic::route_symbol_at("", 0, 0), None);
 }
 
 #[test]
 fn route_occurrences_cover_defs_and_refs() {
     let doc = "route {\n    route(a);\n    route(\"a\");\n}\nroute[a] {\n    route(a);\n}\nroute[b] { exit; }\n";
-    let occ = route_occurrences(doc, "a");
+    let occ = logic::route_occurrences(doc, "a");
     // 3 refs + 1 def
     assert_eq!(occ.len(), 4);
     assert_eq!(occ.iter().filter(|(_, is_def)| *is_def).count(), 1);
     let def = occ.iter().find(|(_, d)| *d).unwrap();
     assert_eq!((def.0.line, def.0.col), (4, 6));
     // no occurrences of an unknown name
-    assert!(route_occurrences(doc, "zz").is_empty());
+    assert!(logic::route_occurrences(doc, "zz").is_empty());
     // adversarial: empty name never matches the main route
-    assert!(route_occurrences(doc, "").is_empty());
+    assert!(logic::route_occurrences(doc, "").is_empty());
 }
 
 #[test]
 fn definition_resolves_dotted_route_names() {
     let doc = "route {\n    route(to.b);\n}\nroute[to.b] {\n    exit;\n}\n";
     // cursor on the dot: word_at-based matching used to split here
-    let d = definition_of(doc, 1, 12).expect("definition of dotted name");
+    let d = logic::definition_of(doc, 1, 12).expect("definition of dotted name");
     assert_eq!(d.name, "to.b");
     assert_eq!(d.line, 3);
 }
@@ -248,21 +247,21 @@ fn definition_resolves_dotted_route_names() {
 fn valid_route_name_gate() {
     // rename writes names UNQUOTED, so the gate must match the
     // unquoted grammar: ID = [A-Za-z][A-Za-z0-9_]* or NUMBER
-    assert!(valid_route_name("relay"));
-    assert!(valid_route_name("Relay_2"));
-    assert!(valid_route_name("42")); // numeric route names are legal
+    assert!(logic::valid_route_name("relay"));
+    assert!(logic::valid_route_name("Relay_2"));
+    assert!(logic::valid_route_name("42")); // numeric route names are legal
     // legal only QUOTED in the cfg → renaming to them breaks configs
-    assert!(!valid_route_name("to.b_1:x-y"));
-    assert!(!valid_route_name("a.b"));
-    assert!(!valid_route_name("a-b"));
-    assert!(!valid_route_name("a:b"));
-    assert!(!valid_route_name("1foo"));
-    assert!(!valid_route_name("_lead")); // ID starts with a letter
-    assert!(!valid_route_name(""));
-    assert!(!valid_route_name("has space"));
-    assert!(!valid_route_name("quote\""));
-    assert!(!valid_route_name("nul\0"));
-    assert!(!valid_route_name("paren("));
+    assert!(!logic::valid_route_name("to.b_1:x-y"));
+    assert!(!logic::valid_route_name("a.b"));
+    assert!(!logic::valid_route_name("a-b"));
+    assert!(!logic::valid_route_name("a:b"));
+    assert!(!logic::valid_route_name("1foo"));
+    assert!(!logic::valid_route_name("_lead")); // ID starts with a letter
+    assert!(!logic::valid_route_name(""));
+    assert!(!logic::valid_route_name("has space"));
+    assert!(!logic::valid_route_name("quote\""));
+    assert!(!logic::valid_route_name("nul\0"));
+    assert!(!logic::valid_route_name("paren("));
 }
 
 fn sig_catalog() -> Vec<ModuleDoc> {
@@ -279,17 +278,17 @@ fn sig_catalog() -> Vec<ModuleDoc> {
 
 #[test]
 fn signature_at_finds_active_parameter() {
-    let core = opensips_lsp::catalog::CoreDocs::default();
+    let core = CoreDocs::default();
     let doc = "loadmodule \"tm.so\"\nroute {\n}\n";
     // first argument
-    let s = signature_at(&sig_catalog(), &core, doc, "    t_relay(").expect("sig");
+    let s = logic::signature_at(&sig_catalog(), &core, doc, "    t_relay(").expect("sig");
     assert_eq!(s.0, "t_relay([flags], [next_hop])");
     assert_eq!(s.2, 0);
     // second argument (comma inside a string must not count)
-    let s = signature_at(&sig_catalog(), &core, doc, r#"    t_relay("a,b", "#).expect("sig");
+    let s = logic::signature_at(&sig_catalog(), &core, doc, r#"    t_relay("a,b", "#).expect("sig");
     assert_eq!(s.2, 1);
     // nested call: innermost unclosed wins
-    let core_with_fn = opensips_lsp::catalog::CoreDocs {
+    let core_with_fn = CoreDocs {
         functions: vec![Item {
             name: "xlog".into(),
             detail: "xlog([level], format)".into(),
@@ -297,10 +296,11 @@ fn signature_at_finds_active_parameter() {
         }],
         ..Default::default()
     };
-    let s = signature_at(&sig_catalog(), &core_with_fn, doc, "    t_relay(xlog(").expect("sig");
+    let s =
+        logic::signature_at(&sig_catalog(), &core_with_fn, doc, "    t_relay(xlog(").expect("sig");
     assert_eq!(s.0, "xlog([level], format)");
     // a CLOSED nested call pops back to the outer one
-    let s = signature_at(
+    let s = logic::signature_at(
         &sig_catalog(),
         &core_with_fn,
         doc,
@@ -310,10 +310,10 @@ fn signature_at_finds_active_parameter() {
     assert_eq!(s.0, "t_relay([flags], [next_hop])");
     assert_eq!(s.2, 1);
     // unknown function → none
-    assert!(signature_at(&sig_catalog(), &core, doc, "    nope(").is_none());
+    assert!(logic::signature_at(&sig_catalog(), &core, doc, "    nope(").is_none());
     // adversarial: never panic
     for p in ["", "(", ")))((", "\"", "t_relay(\"\\", "#t_relay(", "\0("] {
-        let _ = signature_at(&sig_catalog(), &core, doc, p);
+        let _ = logic::signature_at(&sig_catalog(), &core, doc, p);
     }
 }
 
@@ -321,14 +321,14 @@ fn signature_at_finds_active_parameter() {
 fn signature_at_reads_single_quoted_strings_as_the_lexer_does() {
     // cfg.lex: `'` opens STRING2, which ends at the next `'` and has
     // no escapes, so a backslash inside it is just a character
-    let core = opensips_lsp::catalog::CoreDocs::default();
+    let core = CoreDocs::default();
     let doc = "loadmodule \"tm.so\"\nroute {\n}\n";
-    let s = signature_at(&sig_catalog(), &core, doc, "    t_relay('a,b', ").expect("sig");
+    let s = logic::signature_at(&sig_catalog(), &core, doc, "    t_relay('a,b', ").expect("sig");
     assert_eq!(s.2, 1, "the comma inside '' is not a separator");
-    let s = signature_at(&sig_catalog(), &core, doc, r"    t_relay('\', ").expect("sig");
+    let s = logic::signature_at(&sig_catalog(), &core, doc, r"    t_relay('\', ").expect("sig");
     assert_eq!(s.2, 1, "'\\' is a closed string holding a backslash");
     // a double quote inside single quotes does not open a string
-    let s = signature_at(&sig_catalog(), &core, doc, "    t_relay('\"', ").expect("sig");
+    let s = logic::signature_at(&sig_catalog(), &core, doc, "    t_relay('\"', ").expect("sig");
     assert_eq!(s.2, 1);
     // signature help and the enumerated offers walk the line the same way
     let site = opensips_lsp::logic::call_site("    xlog('a,b', 'x").expect("in a call");
@@ -339,7 +339,7 @@ fn signature_at_reads_single_quoted_strings_as_the_lexer_does() {
 fn completions_dedup_prefers_richer_items() {
     // "xlog" exists as a core KEYWORD and as a core function: one item
     // must survive, and it must be the function (it carries docs)
-    let core = opensips_lsp::catalog::CoreDocs {
+    let core = CoreDocs {
         functions: vec![Item {
             name: "xlog".into(),
             detail: "xlog([level], format)".into(),
@@ -347,7 +347,7 @@ fn completions_dedup_prefers_richer_items() {
         }],
         ..Default::default()
     };
-    let out = completions_with_core(&[], &core, "route {\n}\n", "    ");
+    let out = logic::completions_with_core(&[], &core, "route {\n}\n", "    ");
     let xlogs: Vec<_> = out.iter().filter(|c| c.label == "xlog").collect();
     assert_eq!(xlogs.len(), 1, "duplicate labels must collapse");
     assert_eq!(xlogs[0].kind, CompKind::Function);
@@ -356,12 +356,7 @@ fn completions_dedup_prefers_richer_items() {
 #[test]
 fn route_call_argument_completes_route_names() {
     let doc = "route[relay] {\n    exit;\n}\nroute {\n}\n";
-    let out = completions_with_core(
-        &[],
-        &opensips_lsp::catalog::CoreDocs::default(),
-        doc,
-        "    route(",
-    );
+    let out = logic::completions_with_core(&[], &CoreDocs::default(), doc, "    route(");
     assert!(!out.is_empty());
     assert!(
         out.iter().all(|c| c.kind == CompKind::Route),
@@ -370,26 +365,21 @@ fn route_call_argument_completes_route_names() {
     );
     assert!(out.iter().any(|c| c.label == "relay"));
     // quoted form and partial names too
-    let out = completions_with_core(
-        &[],
-        &opensips_lsp::catalog::CoreDocs::default(),
-        doc,
-        "    route(\"re",
-    );
+    let out = logic::completions_with_core(&[], &CoreDocs::default(), doc, "    route(\"re");
     assert!(out.iter().any(|c| c.label == "relay"));
 }
 
 #[test]
 fn pvar_tail_reports_replacement_length() {
     // "$ru" → replace "$ru" (3 bytes)
-    assert_eq!(pvar_tail("    $ru"), Some(3));
-    assert_eq!(pvar_tail("$"), Some(1));
-    assert_eq!(pvar_tail("xlog($si"), Some(3));
+    assert_eq!(logic::pvar_tail("    $ru"), Some(3));
+    assert_eq!(logic::pvar_tail("$"), Some(1));
+    assert_eq!(logic::pvar_tail("xlog($si"), Some(3));
     // not a pvar context
-    assert_eq!(pvar_tail("xlog("), None);
-    assert_eq!(pvar_tail(""), None);
+    assert_eq!(logic::pvar_tail("xlog("), None);
+    assert_eq!(logic::pvar_tail(""), None);
     // "$x y" — space breaks the tail
-    assert_eq!(pvar_tail("$x y"), None);
+    assert_eq!(logic::pvar_tail("$x y"), None);
 }
 
 #[test]
@@ -406,7 +396,7 @@ fn include_closure_follows_cycles_and_depth_safely() {
         }
     };
     let root_text = loader(Path::new("/x/a.cfg")).unwrap();
-    let files = include_closure(Path::new("/x/a.cfg"), &root_text, &loader);
+    let files = logic::include_closure(Path::new("/x/a.cfg"), &root_text, &loader);
     let paths: Vec<&str> = files.iter().map(|(p, _)| p.to_str().unwrap()).collect();
     assert_eq!(
         paths,
@@ -414,9 +404,9 @@ fn include_closure_follows_cycles_and_depth_safely() {
         "cycle visited once, missing skipped"
     );
     // multi-file views
-    let mods = loaded_modules_multi(&files);
+    let mods = logic::loaded_modules_multi(&files);
     assert_eq!(mods, vec!["tm"]);
-    let defs = route_defs_multi(&files);
+    let defs = logic::route_defs_multi(&files);
     let names: Vec<(&str, &str)> = defs
         .iter()
         .map(|(p, l)| (p.to_str().unwrap(), l.name.as_str()))
@@ -425,7 +415,7 @@ fn include_closure_follows_cycles_and_depth_safely() {
     assert!(names.contains(&("/x/b.cfg", "b_r")));
     // depth bomb: a chain of self-includes must terminate
     let bomb = |_: &Path| -> Option<String> { Some("include_file \"z.cfg\"\n".into()) };
-    let files = include_closure(Path::new("/x/z.cfg"), "include_file \"z.cfg\"\n", &bomb);
+    let files = logic::include_closure(Path::new("/x/z.cfg"), "include_file \"z.cfg\"\n", &bomb);
     assert_eq!(files.len(), 1);
     let _ = PathBuf::new();
 }
@@ -436,7 +426,7 @@ fn analyzer_diagnostics_flag_undefined_and_duplicate_routes() {
     let loader = |_: &Path| -> Option<String> { None };
     // undefined route ref
     let text = "route {\n    route(nope);\n}\n";
-    let ds = analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader);
+    let ds = logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader);
     assert_eq!(ds.len(), 1, "{ds:?}");
     assert!(ds[0].message.contains("nope"));
     assert_eq!(ds[0].line, 1);
@@ -446,15 +436,17 @@ fn analyzer_diagnostics_flag_undefined_and_duplicate_routes() {
         (p.to_str() == Some("/x/inc.cfg")).then(|| "route[nope] { exit; }\n".to_string())
     };
     let text2 = "include_file \"inc.cfg\"\nroute {\n    route(nope);\n}\n";
-    assert!(analyzer_diagnostics(Path::new("/x/t.cfg"), text2, &loader2).is_empty());
+    assert!(logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text2, &loader2).is_empty());
     // duplicate definitions: the LATER one in this file is flagged
     let text3 = "route[dup] { exit; }\nroute[dup] { exit; }\n";
-    let ds = analyzer_diagnostics(Path::new("/x/t.cfg"), text3, &loader);
+    let ds = logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text3, &loader);
     assert_eq!(ds.len(), 1, "{ds:?}");
     assert_eq!(ds[0].line, 1);
     assert!(ds[0].message.contains("dup"));
     // clean file → empty; adversarial → no panic
-    assert!(analyzer_diagnostics(Path::new("/x/t.cfg"), "route { exit; }\n", &loader).is_empty());
+    assert!(
+        logic::analyzer_diagnostics(Path::new("/x/t.cfg"), "route { exit; }\n", &loader).is_empty()
+    );
     for s in [
         "",
         "\0",
@@ -462,15 +454,15 @@ fn analyzer_diagnostics_flag_undefined_and_duplicate_routes() {
         "include_file \"\0\"",
         "route(x) route[x]{}",
     ] {
-        let _ = analyzer_diagnostics(Path::new("/x/t.cfg"), s, &loader);
+        let _ = logic::analyzer_diagnostics(Path::new("/x/t.cfg"), s, &loader);
     }
 }
 
 /// Configs as the workspace scan hands them over.
-fn ws(entries: &[(&str, &str)]) -> Vec<(std::path::PathBuf, String)> {
+fn ws(entries: &[(&str, &str)]) -> Vec<(PathBuf, String)> {
     entries
         .iter()
-        .map(|(p, t)| (std::path::PathBuf::from(p), t.to_string()))
+        .map(|(p, t)| (PathBuf::from(p), t.to_string()))
         .collect()
 }
 
@@ -548,7 +540,7 @@ fn the_include_graph_terminates_on_cycles_and_chooses_one_root_stably() {
 
 #[test]
 fn a_fragment_is_analysed_in_its_roots_closure_not_on_its_own() {
-    use opensips_lsp::logic::analyzer_diagnostics_in_closure;
+    use opensips_lsp::logic;
     use std::path::Path;
     // opensips.cfg defines HELPER and includes inc.cfg, which calls
     // it.  Checked on its own inc.cfg looks broken; in the root's
@@ -563,22 +555,23 @@ fn a_fragment_is_analysed_in_its_roots_closure_not_on_its_own() {
             _ => None,
         }
     };
-    let alone = include_closure(Path::new("/w/inc.cfg"), inc_text, &loader);
-    let ds = analyzer_diagnostics_in_closure(&alone, Path::new("/w/inc.cfg"), inc_text);
+    let alone = logic::include_closure(Path::new("/w/inc.cfg"), inc_text, &loader);
+    let ds = logic::analyzer_diagnostics_in_closure(&alone, Path::new("/w/inc.cfg"), inc_text);
     assert_eq!(ds.len(), 1, "on its own the call is undefined: {ds:?}");
 
-    let via_root = include_closure(Path::new("/w/opensips.cfg"), main_text, &loader);
-    let ds = analyzer_diagnostics_in_closure(&via_root, Path::new("/w/inc.cfg"), inc_text);
+    let via_root = logic::include_closure(Path::new("/w/opensips.cfg"), main_text, &loader);
+    let ds = logic::analyzer_diagnostics_in_closure(&via_root, Path::new("/w/inc.cfg"), inc_text);
     assert!(ds.is_empty(), "in the root's closure it is defined: {ds:?}");
     // positions still belong to the reported file only
-    let ds = analyzer_diagnostics_in_closure(&via_root, Path::new("/w/opensips.cfg"), main_text);
+    let ds =
+        logic::analyzer_diagnostics_in_closure(&via_root, Path::new("/w/opensips.cfg"), main_text);
     assert!(ds.is_empty(), "{ds:?}");
 }
 
 #[test]
 fn a_fragments_check_diagnostics_are_routed_to_the_fragment() {
     use opensips_lsp::diag::{Diag, Severity};
-    use opensips_lsp::logic::fragment_check_diag;
+    use opensips_lsp::logic;
     use std::path::Path;
     // `opensips -C` ran on the ROOT (cwd = its directory); the buffer
     // on screen is the fragment.
@@ -593,22 +586,23 @@ fn a_fragments_check_diagnostics_are_routed_to_the_fragment() {
         message: "syntax error".into(),
     };
     // relative, as the checker spells an include
-    let d = fragment_check_diag(checked, reported, &mk("incdir/sub.cfg")).expect("fragment diag");
+    let d = logic::fragment_check_diag(checked, reported, &mk("incdir/sub.cfg"))
+        .expect("fragment diag");
     assert_eq!(d.line, 7, "at the fragment's own line, not folded");
     assert_eq!(d.col_start, 4);
     assert_eq!(d.message, "syntax error", "no include-directive prefix");
     assert_eq!(d.file, reported.display().to_string());
     // absolute spelling of the same file
-    assert!(fragment_check_diag(checked, reported, &mk("/w/incdir/sub.cfg")).is_some());
+    assert!(logic::fragment_check_diag(checked, reported, &mk("/w/incdir/sub.cfg")).is_some());
     // the root's own errors belong to the root's buffer, not here
-    assert!(fragment_check_diag(checked, reported, &mk("/w/opensips.cfg")).is_none());
+    assert!(logic::fragment_check_diag(checked, reported, &mk("/w/opensips.cfg")).is_none());
     // a sibling fragment's errors are not this fragment's
-    assert!(fragment_check_diag(checked, reported, &mk("incdir/other.cfg")).is_none());
+    assert!(logic::fragment_check_diag(checked, reported, &mk("incdir/other.cfg")).is_none());
     // an unpositioned line must not silently become the fragment's
-    assert!(fragment_check_diag(checked, reported, &mk("")).is_none());
+    assert!(logic::fragment_check_diag(checked, reported, &mk("")).is_none());
     // adversarial: never panic
     for f in ["\0", "..", "a\\b", "incdir/../incdir/sub.cfg"] {
-        let _ = fragment_check_diag(checked, reported, &mk(f));
+        let _ = logic::fragment_check_diag(checked, reported, &mk(f));
     }
 }
 
@@ -619,27 +613,27 @@ fn analyzer_understands_route_zero_and_kind_namespaces() {
     // route(0) targets the anonymous main route — no warning
     let text = "route {\n    route(0);\n}\n";
     assert!(
-        analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader).is_empty(),
+        logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader).is_empty(),
         "route(0) is the main route"
     );
     // ...but with NO main route it is undefined
     let text = "failure_route[f] {\n    route(0);\n}\n";
     assert_eq!(
-        analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader).len(),
+        logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader).len(),
         1
     );
     // a failure_route[x] does NOT satisfy route(x): separate namespace
     let text = "failure_route[x] {\n    exit;\n}\nroute {\n    route(x);\n}\n";
-    let ds = analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader);
+    let ds = logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader);
     assert_eq!(ds.len(), 1, "{ds:?}");
     // a route[x] does
     let text = "route[x] {\n    exit;\n}\nroute {\n    route(x);\n}\n";
-    assert!(analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader).is_empty());
+    assert!(logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader).is_empty());
 }
 
 #[test]
 fn core_keyword_seed_matches_opensips() {
-    let out = completions(&[], "route {\n}\n", "    ");
+    let out = logic::completions(&[], "route {\n}\n", "    ");
     let labels: Vec<&str> = out.iter().map(|c| c.label.as_str()).collect();
     // real core tokens
     for kw in ["break", "exit", "drop", "async", "launch", "xlog"] {
@@ -656,20 +650,20 @@ fn core_keyword_seed_matches_opensips() {
 #[test]
 fn signature_params_split_is_depth_aware() {
     // real harvested signature from the json module
-    let parts = split_params("json_link($json(dest_id), $json(source_id))");
+    let parts = logic::split_params("json_link($json(dest_id), $json(source_id))");
     assert_eq!(parts, vec!["$json(dest_id)", "$json(source_id)"]);
     // plain
     assert_eq!(
-        split_params("t_relay([flags], [next_hop])"),
+        logic::split_params("t_relay([flags], [next_hop])"),
         vec!["[flags]", "[next_hop]"]
     );
     // no params
-    assert!(split_params("fix_nated_contact()").is_empty());
+    assert!(logic::split_params("fix_nated_contact()").is_empty());
     // commas inside quotes stay put
-    assert_eq!(split_params(r#"f("a,b", c)"#), vec![r#""a,b""#, "c"]);
+    assert_eq!(logic::split_params(r#"f("a,b", c)"#), vec![r#""a,b""#, "c"]);
     // adversarial: no panic
     for s in ["", "(", ")", "f(((", "f\0(a,b)"] {
-        let _ = split_params(s);
+        let _ = logic::split_params(s);
     }
 }
 
@@ -679,7 +673,7 @@ fn foreign_diags_attach_to_the_include_directive() {
     let text = "include_file \"sub_bad.cfg\"\nroute {\n    exit;\n}\n";
     // error attributed to the include's (absolute) path → maps to the
     // include_file directive's line in the root
-    let f = attribute_foreign_diag(
+    let f = logic::attribute_foreign_diag(
         Path::new("/x/main.cfg"),
         text,
         "/x/sub_bad.cfg",
@@ -697,7 +691,7 @@ fn foreign_diags_attach_to_the_include_directive() {
     assert!(f.message.contains("syntax error"));
     // an error in a TRANSITIVE include (no matching directive here)
     // still lands visibly at the top of the root
-    let f = attribute_foreign_diag(
+    let f = logic::attribute_foreign_diag(
         Path::new("/x/main.cfg"),
         text,
         "/x/deeper.cfg",
@@ -708,7 +702,7 @@ fn foreign_diags_attach_to_the_include_directive() {
     assert!(f.message.contains("deeper.cfg") && f.message.contains("bad thing"));
     // adversarial: no panic
     for (df, t) in [("", ""), ("\0", "include_file \"\0\""), ("/x/a", "#")] {
-        let _ = attribute_foreign_diag(Path::new("/x/m.cfg"), t, df, 0, "m");
+        let _ = logic::attribute_foreign_diag(Path::new("/x/m.cfg"), t, df, 0, "m");
     }
 }
 
@@ -718,7 +712,7 @@ fn quick_fixes_offer_loadmodule_and_route_stub() {
     let cat = sig_catalog();
     // unknown command → "load module tm" inserted after the last loadmodule
     let doc = "loadmodule \"proto_udp.so\"\nroute {\n    t_relay();\n}\n";
-    let fixes = quick_fixes(&cat, doc, "unknown command <t_relay>, missing loadmodule?");
+    let fixes = logic::quick_fixes(&cat, doc, "unknown command <t_relay>, missing loadmodule?");
     assert_eq!(fixes.len(), 1, "{fixes:?}");
     assert!(fixes[0].title.contains("tm"));
     assert_eq!(
@@ -729,20 +723,24 @@ fn quick_fixes_offer_loadmodule_and_route_stub() {
     assert_eq!(fixes[0].insert, "loadmodule \"tm.so\"\n");
     // module already loaded → no fix
     let doc2 = "loadmodule \"tm.so\"\nroute {\n    t_relay();\n}\n";
-    assert!(quick_fixes(&cat, doc2, "unknown command <t_relay>, missing loadmodule?").is_empty());
+    assert!(
+        logic::quick_fixes(&cat, doc2, "unknown command <t_relay>, missing loadmodule?").is_empty()
+    );
     // no loadmodule lines at all → insert at the top
-    let fixes = quick_fixes(
+    let fixes = logic::quick_fixes(
         &cat,
         "route {\n    t_relay();\n}\n",
         "unknown command <t_relay>, missing loadmodule?",
     );
     assert_eq!((fixes[0].line, fixes[0].col), (0, 0));
     // unknown function nobody exports → no fix
-    assert!(quick_fixes(&cat, doc, "unknown command <nope_fn>, missing loadmodule?").is_empty());
+    assert!(
+        logic::quick_fixes(&cat, doc, "unknown command <nope_fn>, missing loadmodule?").is_empty()
+    );
 
     // undefined route → create a stub at end of file
     let doc3 = "route {\n    route(missing);\n}\n";
-    let fixes = quick_fixes(
+    let fixes = logic::quick_fixes(
         &[],
         doc3,
         "route 'missing' is not defined here or in included files",
@@ -759,7 +757,7 @@ fn quick_fixes_offer_loadmodule_and_route_stub() {
         "route '' is not defined",
         "unknown command <\0>",
     ] {
-        let _ = quick_fixes(&cat, doc, m);
+        let _ = logic::quick_fixes(&cat, doc, m);
     }
 }
 
@@ -768,24 +766,27 @@ fn catalog_diagnostics_flag_undocumented_modparams() {
     let cat = catalog(); // tm has fr_timeout; cachedb_nats has kv_bucket
     // unknown param of a KNOWN module → warning at the param
     let text = "modparam(\"tm\", \"fr_timeot\", 5)\n";
-    let origin = opensips_lsp::catalog::CatalogOrigin::BuiltIn("4.0.2".to_string());
-    let ds = catalog_diagnostics(&cat, &origin, text);
+    let origin = CatalogOrigin::BuiltIn("4.0.2".to_string());
+    let ds = logic::catalog_diagnostics(&cat, &origin, text);
     assert_eq!(ds.len(), 1, "{ds:?}");
     assert!(ds[0].message.contains("fr_timeot") && ds[0].message.contains("tm"));
     assert_eq!(ds[0].line, 0);
     assert!(ds[0].col_start < ds[0].col_end);
     // documented param → clean
-    assert!(catalog_diagnostics(&cat, &origin, "modparam(\"tm\", \"fr_timeout\", 5)\n").is_empty());
+    assert!(
+        logic::catalog_diagnostics(&cat, &origin, "modparam(\"tm\", \"fr_timeout\", 5)\n")
+            .is_empty()
+    );
     // UNKNOWN module → silent (the catalog may simply not cover it)
-    assert!(catalog_diagnostics(&cat, &origin, "modparam(\"nope\", \"x\", 1)\n").is_empty());
+    assert!(logic::catalog_diagnostics(&cat, &origin, "modparam(\"nope\", \"x\", 1)\n").is_empty());
     // empty catalog → silent everywhere
-    assert!(catalog_diagnostics(&[], &origin, text).is_empty());
+    assert!(logic::catalog_diagnostics(&[], &origin, text).is_empty());
 }
 
 #[test]
 fn semantic_spans_cover_routes_and_pvars() {
     let text = "route[relay] {\n    xlog(\"$ru\");\n    $var(x) = 1;\n    route(relay);\n}\n";
-    let spans = semantic_spans(text);
+    let spans = logic::semantic_spans(text);
     // route def name, pvar $ru is inside a STRING (still a pvar in
     // opensips — interpolated), $var(x), route ref name
     let routes: Vec<_> = spans
@@ -799,34 +800,34 @@ fn semantic_spans_cover_routes_and_pvars() {
     assert!(pvars.iter().any(|p| p.line == 1), "$ru inside the string");
     assert!(pvars.iter().any(|p| p.line == 2 && p.len == 7), "$var(x)");
     // comments contribute nothing
-    assert!(semantic_spans("# $ru route(x)\n").is_empty());
+    assert!(logic::semantic_spans("# $ru route(x)\n").is_empty());
     // adversarial: no panic
     for s in ["", "$", "$(", "route[", "\0$ru"] {
-        let _ = semantic_spans(s);
+        let _ = logic::semantic_spans(s);
     }
 }
 
 #[test]
 fn semantic_spans_exclude_comments_via_classifier() {
     // a '#' INSIDE a string does not comment out the rest of the line
-    let spans = semantic_spans("xlog(\"call #1: $ru\");\n");
+    let spans = logic::semantic_spans("xlog(\"call #1: $ru\");\n");
     assert!(
         spans.iter().any(|s| s.kind == SemKind::Pvar),
         "pvar after an in-string '#' must be tokenized: {spans:?}"
     );
     // same rule for single-quoted strings
-    let spans = semantic_spans("xlog('#: $ru');\n");
+    let spans = logic::semantic_spans("xlog('#: $ru');\n");
     assert!(spans.iter().any(|s| s.kind == SemKind::Pvar), "{spans:?}");
     // block comments hide pvars — on one line...
-    assert!(semantic_spans("/* $ru */\n").is_empty());
+    assert!(logic::semantic_spans("/* $ru */\n").is_empty());
     // ...and across lines (no '#' anywhere near the pvar)
-    assert!(semantic_spans("/*\n  $ru\n*/\n").is_empty());
+    assert!(logic::semantic_spans("/*\n  $ru\n*/\n").is_empty());
     // code resumes after the block comment ends
-    let spans = semantic_spans("/* x */ $rd;\n");
+    let spans = logic::semantic_spans("/* x */ $rd;\n");
     assert_eq!(spans.len(), 1, "{spans:?}");
     assert_eq!((spans[0].line, spans[0].col, spans[0].len), (0, 8, 3));
     // line comments still hide pvars; a pvar BEFORE the '#' stays
-    let spans = semantic_spans("$ru; # $rd\n");
+    let spans = logic::semantic_spans("$ru; # $rd\n");
     assert_eq!(spans.len(), 1, "{spans:?}");
     assert_eq!(spans[0].col, 0);
     // adversarial: NUL, backslashes, unterminated constructs — no panic
@@ -837,14 +838,14 @@ fn semantic_spans_exclude_comments_via_classifier() {
         "/* $ru",
         "\"$ru",
     ] {
-        let _ = semantic_spans(s);
+        let _ = logic::semantic_spans(s);
     }
 }
 
 #[test]
 fn semantic_tokens_delta_encoding() {
     let text = "route[ab] {\n    route(ab);\n}\n";
-    let data = encode_semantic_tokens(text);
+    let data = logic::encode_semantic_tokens(text);
     // LSP quintuples: deltaLine, deltaStart, length, tokenType, mods
     assert_eq!(data.len() % 5, 0);
     assert!(!data.is_empty());
@@ -856,64 +857,65 @@ fn semantic_tokens_delta_encoding() {
 
 #[test]
 fn route_families_are_separate_namespaces_for_navigation() {
-    use opensips_lsp::logic::{RouteNs, ns_occurrences, route_symbol_ns_at};
+    use opensips_lsp::logic;
+    use opensips_lsp::logic::RouteNs;
     // failure_route[x] does NOT define a route() target: route(x)
     // invokes only the main table (route[x]); failure routes are
     // armed via t_on_failure("x")
     let doc = "failure_route[x] {\n    exit;\n}\nroute {\n    route(x);\n}\n";
     assert!(
-        definition_of(doc, 4, 10).is_none(),
+        logic::definition_of(doc, 4, 10).is_none(),
         "route(x) must not resolve to failure_route[x]"
     );
     // occurrences of main-ns "x" exclude the failure_route def
-    let occ = route_occurrences(doc, "x");
+    let occ = logic::route_occurrences(doc, "x");
     assert_eq!(occ.len(), 1, "call site only: {occ:?}");
     assert!(!occ[0].1, "no definition in the main namespace");
     // with a real route[x] present, both resolve within their tables
     let doc2 =
         "failure_route[x] {\n    exit;\n}\nroute[x] {\n    exit;\n}\nroute {\n    route(x);\n}\n";
-    let d = definition_of(doc2, 7, 10).expect("resolves to route[x]");
+    let d = logic::definition_of(doc2, 7, 10).expect("resolves to route[x]");
     assert_eq!(d.line, 3, "route[x], not failure_route[x]");
-    let occ = route_occurrences(doc2, "x");
+    let occ = logic::route_occurrences(doc2, "x");
     assert_eq!(occ.len(), 2, "call + main def only: {occ:?}");
     assert!(occ.iter().all(|(l, _)| l.line != 0), "failure def excluded");
     // the failure_route name is its own namespace
-    let (n, ns) = route_symbol_ns_at(doc2, 0, 14).expect("symbol at failure name");
+    let (n, ns) = logic::route_symbol_ns_at(doc2, 0, 14).expect("symbol at failure name");
     assert_eq!(n, "x");
     assert_eq!(ns, RouteNs::Kind("failure_route".into()));
-    let kocc = ns_occurrences(doc2, "x", &RouteNs::Kind("failure_route".into()));
+    let kocc = logic::ns_occurrences(doc2, "x", &RouteNs::Kind("failure_route".into()));
     assert_eq!(kocc.len(), 1, "just the failure def: {kocc:?}");
     assert!(kocc[0].1);
     assert_eq!(kocc[0].0.line, 0);
     // main ns from a call site
-    let (n, ns) = route_symbol_ns_at(doc2, 7, 10).expect("symbol at call");
+    let (n, ns) = logic::route_symbol_ns_at(doc2, 7, 10).expect("symbol at call");
     assert_eq!((n.as_str(), ns), ("x", RouteNs::Main));
     // adversarial: no panic
     for s in ["", "\0failure_route[x]{", "route("] {
-        let _ = route_symbol_ns_at(s, 0, 0);
-        let _ = ns_occurrences(s, "x", &RouteNs::Main);
+        let _ = logic::route_symbol_ns_at(s, 0, 0);
+        let _ = logic::ns_occurrences(s, "x", &RouteNs::Main);
     }
 }
 
 #[test]
 fn semantic_tokens_range_encoding_edges() {
-    use opensips_lsp::logic::encode_semantic_tokens_range;
+    use opensips_lsp::logic;
     let text = "route[ab] {\n    route(ab);\n}\n";
     // whole-doc range == full encoding
     assert_eq!(
-        encode_semantic_tokens_range(text, 0, 0, 99, 0),
+        logic::encode_semantic_tokens_range(text, 0, 0, 99, 0),
         opensips_lsp::logic::encode_semantic_tokens(text)
     );
     // slice covering only line 1
-    let d = encode_semantic_tokens_range(text, 1, 0, 2, 0);
+    let d = logic::encode_semantic_tokens_range(text, 1, 0, 2, 0);
     assert_eq!(d, vec![1, 10, 2, 0, 0]);
     // inverted / empty ranges yield nothing, no panic
-    assert!(encode_semantic_tokens_range(text, 2, 0, 1, 0).is_empty());
-    assert!(encode_semantic_tokens_range(text, 0, 0, 0, 0).is_empty());
+    assert!(logic::encode_semantic_tokens_range(text, 2, 0, 1, 0).is_empty());
+    assert!(logic::encode_semantic_tokens_range(text, 0, 0, 0, 0).is_empty());
     // boundary: span must lie FULLY inside (cut mid-name → excluded)
-    assert!(encode_semantic_tokens_range(text, 1, 0, 1, 11).is_empty());
+    assert!(logic::encode_semantic_tokens_range(text, 1, 0, 1, 11).is_empty());
     for s in ["", "\0", "route["] {
-        let _ = encode_semantic_tokens_range(s, 0, 0, 9, 9);
+        let _ = logic::encode_semantic_tokens_range(s, 0, 0, 9, 9);
     }
 }
 
@@ -925,14 +927,14 @@ fn per_version_analysis_is_memoized() {
     let a1 = cache.get_or_compute("file:///t.cfg", 1, text);
     let a2 = cache.get_or_compute("file:///t.cfg", 1, text);
     assert!(
-        std::sync::Arc::ptr_eq(&a1, &a2),
+        Arc::ptr_eq(&a1, &a2),
         "same (uri, version) must reuse the computation"
     );
     assert_eq!(a1.blocks.len(), 2);
     assert_eq!(a1.refs.len(), 1);
     // a new version recomputes and evicts the old entry
     let a3 = cache.get_or_compute("file:///t.cfg", 2, "route { exit; }\n");
-    assert!(!std::sync::Arc::ptr_eq(&a1, &a3));
+    assert!(!Arc::ptr_eq(&a1, &a3));
     assert_eq!(a3.blocks.len(), 1);
     assert_eq!(cache.len(), 1, "one entry per document");
     // distinct documents don't collide
@@ -950,7 +952,7 @@ fn per_version_analysis_is_memoized() {
 #[test]
 fn the_check_failure_note_never_invents_a_file_or_a_line() {
     use opensips_lsp::diag::{Diag, Severity};
-    use opensips_lsp::logic::check_failure_note;
+    use opensips_lsp::logic;
     let mk = |file: &str| Diag {
         file: file.into(),
         line: 0,
@@ -960,18 +962,18 @@ fn the_check_failure_note_never_invents_a_file_or_a_line() {
         message: "no transport protocol loaded".into(),
     };
     // positioned: the note says where, so the reader can go there
-    let n = check_failure_note(Some(&mk("/w/root.cfg")), 1);
+    let n = logic::check_failure_note(Some(&mk("/w/root.cfg")), 1);
     assert!(n.contains("/w/root.cfg") && n.contains("line 1"), "{n}");
     // NOT positioned — a missing module, a bad module path.  Naming a
     // file and a line the parser never gave renders as
     // "check failed in , line 1: ..." and sends the reader to a line
     // that has nothing to do with it.
-    let n = check_failure_note(Some(&mk("")), 1);
+    let n = logic::check_failure_note(Some(&mk("")), 1);
     assert!(!n.contains(" in ,"), "invented an empty file: {n}");
     assert!(!n.contains("line 1"), "invented a line: {n}");
     assert!(n.contains("no transport protocol loaded"), "{n}");
     // nothing parsed at all: the exit status is all there is
-    let n = check_failure_note(None, 255);
+    let n = logic::check_failure_note(None, 255);
     assert!(n.contains("255"), "{n}");
     assert!(!n.contains("line"), "{n}");
 }
@@ -1015,7 +1017,7 @@ fn the_include_graph_folds_a_path_that_climbs_out_of_its_directory() {
 
 #[test]
 fn the_closure_visits_a_doubly_named_include_once() {
-    use opensips_lsp::logic::include_closure;
+    use opensips_lsp::logic;
     use std::path::Path;
     // The same file named twice — once directly, once through a
     // round trip — must not appear twice, or every route it defines
@@ -1034,7 +1036,7 @@ fn the_closure_visits_a_doubly_named_include_once() {
         }
     };
     let root_text = loader(Path::new("/w/opensips.cfg")).unwrap();
-    let files = include_closure(Path::new("/w/opensips.cfg"), &root_text, &loader);
+    let files = logic::include_closure(Path::new("/w/opensips.cfg"), &root_text, &loader);
     let paths: Vec<&str> = files.iter().map(|(p, _)| p.to_str().unwrap()).collect();
     assert_eq!(paths.len(), 2, "one root and one include: {paths:?}");
 }
@@ -1111,7 +1113,7 @@ fn include_graph_invariants_hold_over_random_graphs() {
             // parents from the fragment — not merely plausible
             if let Some(r) = root {
                 let mut cur = p.to_path_buf();
-                let mut seen = std::collections::HashSet::new();
+                let mut seen = HashSet::new();
                 let mut reached = false;
                 while seen.insert(cur.clone()) {
                     match g.analysis_root(&cur) {
@@ -1137,7 +1139,7 @@ fn include_graph_invariants_hold_over_random_graphs() {
 /// closure that visits it twice.
 #[test]
 fn resolved_includes_fold_every_spelling_to_one_key() {
-    use opensips_lsp::logic::resolved_includes;
+    use opensips_lsp::logic;
     use std::path::{Component, Path};
     let from = Path::new("/w/sites/site.cfg");
     let spellings = [
@@ -1152,7 +1154,7 @@ fn resolved_includes_fold_every_spelling_to_one_key() {
         .iter()
         .map(|s| format!("include_file \"{s}\"\n"))
         .collect();
-    let got = resolved_includes(from, &text);
+    let got = logic::resolved_includes(from, &text);
     assert_eq!(got.len(), spellings.len(), "one entry per directive");
     for (spelling, path) in spellings.iter().zip(&got) {
         assert_eq!(
@@ -1169,8 +1171,8 @@ fn resolved_includes_fold_every_spelling_to_one_key() {
         );
     }
     // folding what is already folded changes nothing
-    let again = resolved_includes(from, "include_file \"/w/common/r.cfg\"\n");
-    assert_eq!(again, vec![std::path::PathBuf::from("/w/common/r.cfg")]);
+    let again = logic::resolved_includes(from, "include_file \"/w/common/r.cfg\"\n");
+    assert_eq!(again, vec![PathBuf::from("/w/common/r.cfg")]);
 }
 
 /// Model-based: random operation sequences against an independent
@@ -1294,7 +1296,7 @@ fn the_workspace_sweep_reaches_configs_not_named_cfg() {
     std::fs::write(dir.join("include/routes.inc"), "route { exit; }\n").unwrap();
     std::fs::write(dir.join("notes.md"), "not a config\n").unwrap();
 
-    let (found, _) = scan_configs(std::slice::from_ref(&dir), 500);
+    let (found, _) = logic::scan_configs(std::slice::from_ref(&dir), 500);
     let names: Vec<String> = found
         .iter()
         .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
@@ -1310,7 +1312,7 @@ fn the_workspace_sweep_reaches_configs_not_named_cfg() {
         "the sweep must not collect every file: {names:?}"
     );
 
-    let here: Vec<String> = configs_in_dir(&dir)
+    let here: Vec<String> = logic::configs_in_dir(&dir)
         .iter()
         .filter_map(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
         .collect();
@@ -1337,9 +1339,9 @@ fn a_module_documenting_no_parameters_at_all_stays_silent() {
         functions: Vec::new(),
     }];
     let text = "modparam(\"auth_web3\", \"authentication_rpc_url\", \"https://x\")\n";
-    let origin = opensips_lsp::catalog::CatalogOrigin::BuiltIn("4.0.2".to_string());
+    let origin = CatalogOrigin::BuiltIn("4.0.2".to_string());
     assert!(
-        catalog_diagnostics(&cat, &origin, text).is_empty(),
+        logic::catalog_diagnostics(&cat, &origin, text).is_empty(),
         "an unharvested parameter list must not accuse the config"
     );
 
@@ -1351,7 +1353,7 @@ fn a_module_documenting_no_parameters_at_all_stays_silent() {
         doc: String::new(),
     });
     assert_eq!(
-        catalog_diagnostics(&cat, &origin, text).len(),
+        logic::catalog_diagnostics(&cat, &origin, text).len(),
         1,
         "a module that does document parameters is still checked"
     );
@@ -1368,7 +1370,7 @@ fn a_module_documenting_no_parameters_at_all_stays_silent() {
         }],
     }];
     assert_eq!(
-        catalog_diagnostics(
+        logic::catalog_diagnostics(
             &functions_only,
             &origin,
             "modparam(\"sipmsgops\", \"nope\", 1)\n"
@@ -1405,9 +1407,9 @@ fn a_closure_wider_than_64_files_keeps_every_route() {
         let name = p.to_str()?.strip_prefix("/w/inc/c")?.strip_suffix(".cfg")?;
         Some(format!("route[C{name}] {{ exit; }}\n"))
     };
-    let files = include_closure(Path::new("/w/opensips.cfg"), &root, &loader);
+    let files = logic::include_closure(Path::new("/w/opensips.cfg"), &root, &loader);
     assert_eq!(files.len(), N + 1, "the root and every include");
-    let ds = analyzer_diagnostics(Path::new("/w/opensips.cfg"), &root, &loader);
+    let ds = logic::analyzer_diagnostics(Path::new("/w/opensips.cfg"), &root, &loader);
     let msgs: Vec<&str> = ds.iter().map(|d| d.message.as_str()).collect();
     assert_eq!(
         msgs,
@@ -1418,9 +1420,9 @@ fn a_closure_wider_than_64_files_keeps_every_route() {
 
 /// A chain of nested includes, built so that each file includes the
 /// next and the last one defines the route the root calls.
-fn include_chain(below_root: usize) -> (String, impl Fn(&std::path::Path) -> Option<String>) {
+fn include_chain(below_root: usize) -> (String, impl Fn(&Path) -> Option<String>) {
     let root = "include_file \"i1.cfg\"\nroute {\n    route(deep);\n}\n".to_string();
-    let loader = move |p: &std::path::Path| -> Option<String> {
+    let loader = move |p: &Path| -> Option<String> {
         let n: usize = p
             .to_str()?
             .strip_prefix("/w/i")?
@@ -1447,9 +1449,9 @@ fn include_chain(below_root: usize) -> (String, impl Fn(&std::path::Path) -> Opt
 fn includes_nest_as_deep_as_opensips_reads_them() {
     use std::path::Path;
     let (root, loader) = include_chain(19);
-    let files = include_closure(Path::new("/w/opensips.cfg"), &root, &loader);
+    let files = logic::include_closure(Path::new("/w/opensips.cfg"), &root, &loader);
     assert_eq!(files.len(), 20, "the root and 19 nested files");
-    let ds = analyzer_diagnostics(Path::new("/w/opensips.cfg"), &root, &loader);
+    let ds = logic::analyzer_diagnostics(Path::new("/w/opensips.cfg"), &root, &loader);
     assert!(ds.is_empty(), "route[deep] is 19 levels down: {ds:?}");
 }
 
@@ -1460,13 +1462,13 @@ fn includes_nest_as_deep_as_opensips_reads_them() {
 fn an_include_deeper_than_opensips_reads_is_not_followed() {
     use std::path::Path;
     let (root, loader) = include_chain(20);
-    let files = include_closure(Path::new("/w/opensips.cfg"), &root, &loader);
+    let files = logic::include_closure(Path::new("/w/opensips.cfg"), &root, &loader);
     assert_eq!(files.len(), 20, "the root and the 19 levels OpenSIPS reads");
     assert!(
         !files.iter().any(|(p, _)| p == Path::new("/w/i20.cfg")),
         "the 20th nested file is past the limit"
     );
-    let ds = analyzer_diagnostics(Path::new("/w/opensips.cfg"), &root, &loader);
+    let ds = logic::analyzer_diagnostics(Path::new("/w/opensips.cfg"), &root, &loader);
     assert_eq!(ds.len(), 1, "{ds:?}");
     assert!(ds[0].message.contains("'deep'"), "{ds:?}");
 }
@@ -1480,7 +1482,7 @@ fn the_closure_stays_bounded_when_every_include_has_a_new_name() {
     use std::path::Path;
     let text = "include_file \"d/a.cfg\"\ninclude_file \"e/a.cfg\"\ninclude_file \"f/a.cfg\"\n";
     let loader = |_: &Path| -> Option<String> { Some(text.to_string()) };
-    let files = include_closure(Path::new("/w/a.cfg"), text, &loader);
+    let files = logic::include_closure(Path::new("/w/a.cfg"), text, &loader);
     assert_eq!(files.len(), 500);
 }
 
@@ -1490,18 +1492,21 @@ fn the_closure_stays_bounded_when_every_include_has_a_new_name() {
 /// has finished the path.
 #[test]
 fn an_include_path_is_typed_only_inside_the_directives_open_quote() {
-    use opensips_lsp::logic::include_path_context;
+    use opensips_lsp::logic;
     assert_eq!(
-        include_path_context("include_file \"inc/ro"),
+        logic::include_path_context("include_file \"inc/ro"),
         Some("inc/ro")
     );
-    assert_eq!(include_path_context("  import_file 'a"), Some("a"));
-    assert_eq!(include_path_context("\tinclude_file \""), Some(""));
+    assert_eq!(logic::include_path_context("  import_file 'a"), Some("a"));
+    assert_eq!(logic::include_path_context("\tinclude_file \""), Some(""));
     // the negative controls
-    assert_eq!(include_path_context("include_file \"a.cfg\" "), None);
-    assert_eq!(include_path_context("xlog(\"include_file \\\"x"), None);
-    assert_eq!(include_path_context("#include_file \"x"), None);
-    assert_eq!(include_path_context("include_files \"x"), None);
+    assert_eq!(logic::include_path_context("include_file \"a.cfg\" "), None);
+    assert_eq!(
+        logic::include_path_context("xlog(\"include_file \\\"x"),
+        None
+    );
+    assert_eq!(logic::include_path_context("#include_file \"x"), None);
+    assert_eq!(logic::include_path_context("include_files \"x"), None);
 }
 
 /// The candidates are the directory the typed path names so far,
@@ -1510,7 +1515,8 @@ fn an_include_path_is_typed_only_inside_the_directives_open_quote() {
 /// configurations. Hidden names are left out, as the scan leaves them.
 #[test]
 fn include_path_candidates_come_from_the_directory_typed_so_far() {
-    use opensips_lsp::logic::{CompKind, include_path_completions};
+    use opensips_lsp::logic;
+    use opensips_lsp::logic::CompKind;
     use std::path::Path;
     let list = |dir: &Path| -> Vec<(String, bool)> {
         match dir.to_str().unwrap() {
@@ -1532,7 +1538,7 @@ fn include_path_candidates_come_from_the_directory_typed_so_far() {
         }
     };
     let got = |typed: &str| -> Vec<(String, CompKind)> {
-        include_path_completions(Path::new("/etc/opensips/opensips.cfg"), typed, &list)
+        logic::include_path_completions(Path::new("/etc/opensips/opensips.cfg"), typed, &list)
             .into_iter()
             .map(|c| (c.label, c.kind))
             .collect()
@@ -1568,7 +1574,7 @@ fn include_path_candidates_come_from_the_directory_typed_so_far() {
 /// function name into a file path.
 #[test]
 fn nothing_but_paths_completes_inside_an_include_path() {
-    let got = completions_with_core(
+    let got = logic::completions_with_core(
         &catalog(),
         &opensips_lsp::catalog::builtin_core().core,
         "loadmodule \"tm.so\"\nroute[r] { exit; }\n",
@@ -1578,7 +1584,7 @@ fn nothing_but_paths_completes_inside_an_include_path() {
     assert!(labels.is_empty(), "{labels:?}");
     // the negative control: on an ordinary line the same document
     // still completes routes and functions
-    let got = completions_with_core(
+    let got = logic::completions_with_core(
         &catalog(),
         &opensips_lsp::catalog::builtin_core().core,
         "loadmodule \"tm.so\"\nroute[r] { exit; }\n",
@@ -1592,11 +1598,11 @@ fn nothing_but_paths_completes_inside_an_include_path() {
 /// is incomplete.
 #[test]
 fn a_closure_cut_short_by_the_file_bound_says_so() {
-    use opensips_lsp::logic::include_closure_bounded;
+    use opensips_lsp::logic;
     use std::path::Path;
     let text = "include_file \"d/a.cfg\"\ninclude_file \"e/a.cfg\"\ninclude_file \"f/a.cfg\"\n";
     let loader = |_: &Path| -> Option<String> { Some(text.to_string()) };
-    let (files, truncated) = include_closure_bounded(Path::new("/w/a.cfg"), text, &loader);
+    let (files, truncated) = logic::include_closure_bounded(Path::new("/w/a.cfg"), text, &loader);
     assert_eq!(files.len(), 500);
     assert!(truncated, "files were left out and the closure must say so");
 }
@@ -1605,7 +1611,7 @@ fn a_closure_cut_short_by_the_file_bound_says_so() {
 /// is complete, and one more is not.
 #[test]
 fn a_closure_of_exactly_500_files_is_complete_and_501_is_not() {
-    use opensips_lsp::logic::include_closure_bounded;
+    use opensips_lsp::logic;
     use std::path::Path;
     let loader = |p: &Path| -> Option<String> {
         p.to_str()?.strip_prefix("/w/inc/c")?;
@@ -1617,7 +1623,7 @@ fn a_closure_of_exactly_500_files_is_complete_and_501_is_not() {
             root.push_str(&format!("include_file \"inc/c{i}.cfg\"\n"));
         }
         let (files, truncated) =
-            include_closure_bounded(Path::new("/w/opensips.cfg"), &root, &loader);
+            logic::include_closure_bounded(Path::new("/w/opensips.cfg"), &root, &loader);
         assert_eq!(files.len(), want_len, "{includes} includes");
         assert_eq!(truncated, want_cut, "{includes} includes");
     }
@@ -1628,7 +1634,7 @@ fn a_closure_of_exactly_500_files_is_complete_and_501_is_not() {
 /// complete without it.
 #[test]
 fn a_missing_file_past_the_bound_is_not_a_file_left_out() {
-    use opensips_lsp::logic::include_closure_bounded;
+    use opensips_lsp::logic;
     use std::path::Path;
     let loader = |p: &Path| -> Option<String> {
         let n: usize = p
@@ -1643,7 +1649,8 @@ fn a_missing_file_past_the_bound_is_not_a_file_left_out() {
     for i in 0..500 {
         root.push_str(&format!("include_file \"inc/c{i}.cfg\"\n"));
     }
-    let (files, truncated) = include_closure_bounded(Path::new("/w/opensips.cfg"), &root, &loader);
+    let (files, truncated) =
+        logic::include_closure_bounded(Path::new("/w/opensips.cfg"), &root, &loader);
     assert_eq!(files.len(), 500);
     assert!(
         !truncated,

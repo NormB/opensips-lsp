@@ -12,11 +12,14 @@
 //! two in `opensips-lsp` and one in its sibling, all in strings shown to the
 //! user through `show_message` or `log_message`.
 
+use regex::Regex;
+use std::path::PathBuf;
+
 /// String literals in the server sources, minus comment lines.
 fn literals() -> Vec<(String, usize, String)> {
     let mut out = Vec::new();
-    let re = regex::Regex::new(r#""((?:[^"\\]|\\.)*)""#).expect("literal regex");
-    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir("src")
+    let re = Regex::new(r#""((?:[^"\\]|\\.)*)""#).expect("literal regex");
+    let mut files: Vec<PathBuf> = std::fs::read_dir("src")
         .expect("src/ is readable")
         .flatten()
         .map(|e| e.path())

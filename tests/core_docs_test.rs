@@ -3,7 +3,8 @@
 
 mod common;
 
-use opensips_lsp::catalog::{parse_core_functions_md, parse_core_params_md, parse_core_vars_md};
+use opensips_lsp::catalog;
+use std::path::Path;
 
 const FUNCS: &str = r#"# Core functions
 
@@ -61,7 +62,7 @@ Digest response.
 
 #[test]
 fn parses_core_functions() {
-    let items = parse_core_functions_md(FUNCS).expect("parses");
+    let items = catalog::parse_core_functions_md(FUNCS).expect("parses");
     let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, vec!["add_local_rport", "assert", "cache_store"]);
     assert_eq!(items[1].detail, "assert(statement, [description])");
@@ -72,7 +73,7 @@ fn parses_core_functions() {
 
 #[test]
 fn parses_core_params() {
-    let items = parse_core_params_md(PARAMS).expect("parses");
+    let items = catalog::parse_core_params_md(PARAMS).expect("parses");
     let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, vec!["abort_on_assert", "advertised_address"]);
     assert!(items[0].doc.starts_with("Boolean"));
@@ -81,7 +82,7 @@ fn parses_core_params() {
 
 #[test]
 fn parses_core_vars() {
-    let items = parse_core_vars_md(VARS).expect("parses");
+    let items = catalog::parse_core_vars_md(VARS).expect("parses");
     let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, vec!["$ai", "$ru", "$auth.resp"]);
     // description half of the heading becomes the detail
@@ -92,16 +93,16 @@ fn parses_core_vars() {
 #[test]
 fn adversarial_core_docs_do_not_panic() {
     for s in ["", "\0", "## (", "### - $", "## x(\n"] {
-        let _ = parse_core_functions_md(s);
-        let _ = parse_core_params_md(s);
-        let _ = parse_core_vars_md(s);
+        let _ = catalog::parse_core_functions_md(s);
+        let _ = catalog::parse_core_params_md(s);
+        let _ = catalog::parse_core_vars_md(s);
     }
 }
 
 #[test]
 fn harvests_core_docs_from_a_real_4x_tree_when_present() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let core = opensips_lsp::catalog::harvest_core(std::path::Path::new(&tree));
+    let core = opensips_lsp::catalog::harvest_core(Path::new(&tree));
     assert!(
         core.functions.len() > 40,
         "core functions: {}",
@@ -125,7 +126,7 @@ fn harvests_core_docs_from_a_real_4x_tree_when_present() {
 #[test]
 fn the_core_function_heading_is_level_two_and_parenthesised() {
     let names = |md: &str| -> Vec<String> {
-        parse_core_functions_md(md)
+        catalog::parse_core_functions_md(md)
             .expect("parses")
             .into_iter()
             .map(|i| i.name)
@@ -156,11 +157,10 @@ fn the_core_function_heading_is_level_two_and_parenthesised() {
 #[test]
 fn the_real_functions_page_yields_its_functions() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let page = std::fs::read_to_string(
-        std::path::Path::new(&tree).join("docs/manual/Script-CoreFunctions.md"),
-    )
-    .expect("the functions page");
-    let items = parse_core_functions_md(&page).expect("parses");
+    let page =
+        std::fs::read_to_string(Path::new(&tree).join("docs/manual/Script-CoreFunctions.md"))
+            .expect("the functions page");
+    let items = catalog::parse_core_functions_md(&page).expect("parses");
 
     // the page was read, and it is not empty
     assert!(page.len() > 5_000, "the page read as {} bytes", page.len());

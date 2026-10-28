@@ -20,7 +20,8 @@
 
 mod common;
 
-use opensips_lsp::catalog::{parse_socket_modifiers_c, parse_socket_modifiers_md};
+use opensips_lsp::catalog;
+use std::path::PathBuf;
 
 const LEX: &str = r#"
 USE_WORKERS	{EAT_ABLE}("use_workers"|"USE_WORKERS"){EAT_ABLE}
@@ -68,7 +69,7 @@ Global worker count.
 
 #[test]
 fn membership_comes_from_the_grammar() {
-    let got = parse_socket_modifiers_c(Y, LEX);
+    let got = catalog::parse_socket_modifiers_c(Y, LEX);
     assert_eq!(got, vec!["reuse_port", "use_workers", "tag"]);
 }
 
@@ -76,14 +77,14 @@ fn membership_comes_from_the_grammar() {
 fn a_production_that_is_not_the_socket_one_is_not_read() {
     let other = "other_param: REUSE_PORT { x; } ;\n";
     assert!(
-        parse_socket_modifiers_c(other, LEX).is_empty(),
+        catalog::parse_socket_modifiers_c(other, LEX).is_empty(),
         "only the production `socket =` uses is the socket modifier list"
     );
 }
 
 #[test]
 fn the_manual_supplies_the_text() {
-    let got = parse_socket_modifiers_md(PAGE);
+    let got = catalog::parse_socket_modifiers_md(PAGE);
     let uw = got
         .iter()
         .find(|i| i.name == "use_workers")
@@ -102,7 +103,7 @@ fn the_manual_supplies_the_text() {
 
 #[test]
 fn bullets_outside_the_socket_section_are_not_modifiers() {
-    let got = parse_socket_modifiers_md(
+    let got = catalog::parse_socket_modifiers_md(
         "### other\n\nThings:\n* `not_a_modifier`: no.\n\n### socket\n\nS.\n\nopts:\n* `frag`: yes.\n",
     );
     let names: Vec<&str> = got.iter().map(|i| i.name.as_str()).collect();
@@ -112,14 +113,14 @@ fn bullets_outside_the_socket_section_are_not_modifiers() {
 /// The real tree: the grammar and the manual must agree about the set.
 #[test]
 fn the_real_grammar_and_manual_describe_the_same_modifiers() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let y = std::fs::read_to_string(tree.join("cfg.y")).expect("cfg.y");
     let lex = std::fs::read_to_string(tree.join("cfg.lex")).expect("cfg.lex");
     let page = std::fs::read_to_string(tree.join("docs/manual/Script-CoreParameters.md"))
         .expect("the parameters page");
 
-    let from_c = parse_socket_modifiers_c(&y, &lex);
-    let documented: Vec<String> = parse_socket_modifiers_md(&page)
+    let from_c = catalog::parse_socket_modifiers_c(&y, &lex);
+    let documented: Vec<String> = catalog::parse_socket_modifiers_md(&page)
         .into_iter()
         .map(|i| i.name)
         .collect();
@@ -225,7 +226,7 @@ fn a_spelling_written_in_parts_is_read_whole() {
     );
     let y = "socket_def_param: ALLOW_PROXY_PROTOCOL { x; } ;\nsocket_def_params: x;\n";
     assert_eq!(
-        parse_socket_modifiers_c(y, MULTI),
+        catalog::parse_socket_modifiers_c(y, MULTI),
         vec!["allow_proxy_protocol"],
         "the optional trailing group is part of the canonical spelling"
     );
@@ -238,7 +239,7 @@ fn alternatives_within_one_group_are_a_choice_not_a_sequence() {
     const ALTS: &str = "SOME_TOK\t(\"first\"|\"second\"|\"third\")\n%%\n";
     let y = "socket_def_param: SOME_TOK { x; } ;\nsocket_def_params: x;\n";
     assert_eq!(
-        parse_socket_modifiers_c(y, ALTS),
+        catalog::parse_socket_modifiers_c(y, ALTS),
         vec!["first"],
         "not `first_second_third`"
     );
@@ -269,7 +270,7 @@ fn the_older_spelling_of_the_statement_works_too() {
 /// grammar, and the pinned trees are where that is true or not.
 #[test]
 fn both_spellings_take_the_same_production_in_the_pinned_trees() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let y = std::fs::read_to_string(tree.join("cfg.y")).expect("cfg.y");
     // POSITIVE CONTROL: the newer spelling is definitely there
     assert!(

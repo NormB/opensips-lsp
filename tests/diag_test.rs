@@ -1,7 +1,9 @@
 //! `diag::parse_check_output`: diagnostics read from `opensips -C` output
 //! captured verbatim from real runs.
 
-use opensips_lsp::diag::{Severity, parse_check_output};
+use opensips_lsp::diag;
+
+use opensips_lsp::diag::Severity;
 
 // Verbatim opensips -C output captured from a real failure
 // (test_outage_matrix_e2e.sh, 2026-08-19).
@@ -19,7 +21,7 @@ Aug 19 02:08:16 [2345829] CRITICAL:core:yyerror: parse error in /tmp/crud_e2e.Bw
 
 #[test]
 fn parses_positioned_yyerror() {
-    let ds = parse_check_output(REAL, 255);
+    let ds = diag::parse_check_output(REAL, 255);
     assert_eq!(ds.len(), 1);
     let d = &ds[0];
     assert_eq!(d.file, "/tmp/outage_matrix.Vx9OYq/test.cfg");
@@ -33,7 +35,7 @@ fn parses_positioned_yyerror() {
 
 #[test]
 fn load_module_failure_uses_the_positioned_line() {
-    let ds = parse_check_output(REAL_LOAD, 255);
+    let ds = diag::parse_check_output(REAL_LOAD, 255);
     assert_eq!(ds.len(), 1);
     assert_eq!(ds[0].line, 17);
     assert!(ds[0].message.contains("failed to load module mi_fifo.so"));
@@ -42,13 +44,13 @@ fn load_module_failure_uses_the_positioned_line() {
 #[test]
 fn clean_output_zero_rc_is_empty() {
     let out = "Listening on\n  udp: 127.0.0.1 [127.0.0.1]:5060\nAliases:\n";
-    assert!(parse_check_output(out, 0).is_empty());
+    assert!(diag::parse_check_output(out, 0).is_empty());
 }
 
 #[test]
 fn nonzero_rc_with_no_positioned_error_yields_fallback() {
     let out = "Aug 19 [1] ERROR:core:main: something exploded\n";
-    let ds = parse_check_output(out, 255);
+    let ds = diag::parse_check_output(out, 255);
     assert_eq!(ds.len(), 1);
     assert_eq!(ds[0].line, 0);
     assert!(ds[0].message.contains("something exploded"));
@@ -64,13 +66,13 @@ fn adversarial_output_does_not_panic() {
         "parse error in a.cfg:3:9-8: reversed cols",
         "no colons at all",
     ] {
-        let _ = parse_check_output(s, 1);
+        let _ = diag::parse_check_output(s, 1);
     }
 }
 
 #[test]
 fn column_range_never_reversed() {
-    let ds = parse_check_output(
+    let ds = diag::parse_check_output(
         "CRITICAL:core:yyerror: parse error in a.cfg:3:9-8: reversed\n",
         1,
     );
@@ -89,7 +91,7 @@ Aug 19 14:20:53 [2737664] ERROR:core:parse_opensips_cfg: bad config file (2 erro
 
 #[test]
 fn parses_368_output_identically() {
-    let ds = parse_check_output(REAL_368, 255);
+    let ds = diag::parse_check_output(REAL_368, 255);
     assert_eq!(ds.len(), 2);
     assert_eq!(ds[0].line, 1);
     assert!(ds[1].message.contains("no_such_param_xyz"));
@@ -118,7 +120,7 @@ Aug 23 11:22:12 [2299450] NOTICE:core:main: Exiting....
 
 #[test]
 fn parses_401_output_and_ignores_the_4x_context_block() {
-    let ds = parse_check_output(REAL_401, 255);
+    let ds = diag::parse_check_output(REAL_401, 255);
     assert_eq!(
         ds.len(),
         1,
@@ -136,7 +138,7 @@ fn parses_401_output_and_ignores_the_4x_context_block() {
 fn absurdly_long_messages_are_truncated() {
     let long = "x".repeat(50_000);
     let out = format!("CRITICAL:core:yyerror: parse error in a.cfg:1:1-2: {long}\n");
-    let ds = parse_check_output(&out, 255);
+    let ds = diag::parse_check_output(&out, 255);
     assert_eq!(ds.len(), 1);
     assert!(
         ds[0].message.len() <= 600,
@@ -151,7 +153,7 @@ fn end_column_is_exclusive_in_opensips_output() {
     // real binary evidence: the 6-char token `listen` at 1-based
     // columns 1-6 is reported as `1-7` — the end is EXCLUSIVE
     let out = "CRITICAL:core:yyerror: parse error in t.cfg:2:1-7: syntax error\n";
-    let ds = parse_check_output(out, 255);
+    let ds = diag::parse_check_output(out, 255);
     assert_eq!(ds.len(), 1);
     assert_eq!(ds[0].col_start, 0);
     assert_eq!(
@@ -160,7 +162,7 @@ fn end_column_is_exclusive_in_opensips_output() {
     );
     // degenerate zero-width report still yields a visible 1-char range
     let out = "CRITICAL:core:yyerror: parse error in t.cfg:2:5-5: x\n";
-    let ds = parse_check_output(out, 255);
+    let ds = diag::parse_check_output(out, 255);
     assert_eq!((ds[0].col_start, ds[0].col_end), (4, 5));
 }
 
@@ -168,12 +170,12 @@ fn end_column_is_exclusive_in_opensips_output() {
 fn nonzero_rc_with_unparseable_output_still_yields_a_diag() {
     // a crashed/garbled checker must still surface SOMETHING
     for garbage in ["", "segfault\n", "\0\0\0\n", "not a real line"] {
-        let ds = parse_check_output(garbage, 255);
+        let ds = diag::parse_check_output(garbage, 255);
         assert_eq!(ds.len(), 1, "input {garbage:?}");
         assert!(ds[0].message.contains("rc=255") || !ds[0].message.is_empty());
     }
     // rc=0 with garbage stays clean
-    assert!(parse_check_output("noise\n", 0).is_empty());
+    assert!(diag::parse_check_output("noise\n", 0).is_empty());
 }
 
 /// A failed check whose last error line has nothing after its prefix
@@ -183,7 +185,7 @@ fn nonzero_rc_with_unparseable_output_still_yields_a_diag() {
 fn a_failed_check_never_reports_an_empty_message() {
     for tail in ["", " ", "\t"] {
         let output = format!("Oct 26 12:00:00 [100] ERROR:core:main: {tail}\n");
-        let d = parse_check_output(&output, 1);
+        let d = diag::parse_check_output(&output, 1);
         assert_eq!(d.len(), 1, "{output:?}");
         assert!(
             !d[0].message.trim().is_empty(),

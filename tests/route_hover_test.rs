@@ -15,7 +15,9 @@
 
 mod common;
 
-use opensips_lsp::catalog::{harvest_core, parse_core_routes_md};
+use opensips_lsp::catalog;
+use std::collections::BTreeSet;
+use std::path::Path;
 
 const PAGE: &str = r#"# Routes
 
@@ -36,7 +38,7 @@ Executed periodically, at the interval given in its definition.
 
 #[test]
 fn a_routes_page_yields_one_entry_per_heading() {
-    let routes = parse_core_routes_md(PAGE).expect("the page parses");
+    let routes = catalog::parse_core_routes_md(PAGE).expect("the page parses");
     let names: Vec<&str> = routes.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(names, vec!["route", "startup_route", "timer_route"]);
 
@@ -63,7 +65,7 @@ fn a_routes_page_yields_one_entry_per_heading() {
 #[test]
 fn adversarial_pages_do_not_panic() {
     for md in ["", "\0\0", "## \n\n", "## route", "no headings at all\n"] {
-        let _ = parse_core_routes_md(md);
+        let _ = catalog::parse_core_routes_md(md);
     }
 }
 
@@ -72,7 +74,7 @@ fn adversarial_pages_do_not_panic() {
 #[test]
 fn the_real_tree_documents_every_route_kind() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let core = harvest_core(std::path::Path::new(&tree));
+    let core = catalog::harvest_core(Path::new(&tree));
     let names: Vec<&str> = core.routes.iter().map(|r| r.name.as_str()).collect();
 
     // POSITIVE CONTROL: an empty harvest would satisfy nothing below,
@@ -171,7 +173,7 @@ fn bare_route_hovers_as_a_type_where_it_defines_a_block() {
 #[test]
 fn every_route_kind_in_the_lexer_has_documentation() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let lex = std::fs::read_to_string(std::path::Path::new(&tree).join("cfg.lex"))
+    let lex = std::fs::read_to_string(Path::new(&tree).join("cfg.lex"))
         .expect("cfg.lex in the pinned tree");
 
     let mut kinds: Vec<String> = Vec::new();
@@ -247,7 +249,7 @@ fn a_route_type_with_no_rival_meaning_hovers_anywhere() {
 fn names_that_are_both_core_and_module_are_known() {
     let core = &opensips_lsp::catalog::builtin_core().core;
     let modules = opensips_lsp::catalog::builtin_modules();
-    let core_names: std::collections::BTreeSet<&str> = core
+    let core_names: BTreeSet<&str> = core
         .params
         .iter()
         .chain(core.functions.iter())

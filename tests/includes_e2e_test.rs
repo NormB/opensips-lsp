@@ -3,10 +3,13 @@
 //! (no-save, debounced) analyzer diagnostics.
 
 mod common;
-use common::*;
-use std::process::{Command, Stdio};
+use common::Server;
+use std::path::Path;
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::mpsc::Receiver;
+use std::time::Duration;
 
-fn setup(base: &std::path::Path) -> (String, String) {
+fn setup(base: &Path) -> (String, String) {
     std::fs::create_dir_all(base).unwrap();
     std::fs::write(base.join("inc.cfg"), "route[helper] {\n    exit;\n}\n").unwrap();
     let main_text = "include_file \"inc.cfg\"\nroute {\n    route(helper);\n}\n";
@@ -16,13 +19,9 @@ fn setup(base: &std::path::Path) -> (String, String) {
 }
 
 fn start(
-    base: &std::path::Path,
+    base: &Path,
     init_opts: serde_json::Value,
-) -> (
-    Server,
-    std::sync::mpsc::Receiver<serde_json::Value>,
-    std::process::ChildStdin,
-) {
+) -> (Server, Receiver<serde_json::Value>, ChildStdin) {
     let mut child = Server::new(
         Command::new(env!("CARGO_BIN_EXE_opensips-lsp"))
             .env("OPENSIPS_LSP_BIN", "")
@@ -38,15 +37,15 @@ fn start(
             .unwrap(),
         base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
         "capabilities":{}, "initializationOptions": init_opts}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
@@ -59,18 +58,18 @@ fn cross_file_definition_and_route_completion() {
     let base = base_scratch.path().to_path_buf();
     let (uri, text) = setup(&base);
     let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
     // definition of `helper` (line 2, inside the name) → inc.cfg
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{
         "textDocument":{"uri":uri},"position":{"line":2,"character":11}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "definition");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "definition");
     let target = v["result"]["uri"].as_str().expect("cross-file location");
     assert!(
         target.ends_with("inc.cfg"),
@@ -78,12 +77,12 @@ fn cross_file_definition_and_route_completion() {
     );
     assert_eq!(v["result"]["range"]["start"]["line"], 0);
     // route( completion offers the include's route
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{
         "textDocument":{"uri":uri},"position":{"line":2,"character":10}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "completion");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "completion");
     let labels: Vec<&str> = v["result"]
         .as_array()
         .unwrap()
@@ -103,20 +102,20 @@ fn analyzer_diags_appear_on_change_without_save() {
     let base = base_scratch.path().to_path_buf();
     let (uri, text) = setup(&base);
     let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
     // break the ref WITHOUT saving: analyzer diag must arrive
     let broken = "include_file \"inc.cfg\"\nroute {\n    route(gone);\n}\n";
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
         "textDocument":{"uri":uri,"version":2},
         "contentChanges":[{"text":broken}]}}),
     );
-    let diag = wait_for(
+    let diag = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"
@@ -135,13 +134,13 @@ fn analyzer_diags_appear_on_change_without_save() {
     assert_eq!(ds[0]["range"]["start"]["line"], 2);
     assert_eq!(diag["params"]["version"], 2);
     // fix it again: diags must clear
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
         "textDocument":{"uri":uri,"version":3},
         "contentChanges":[{"text":text}]}}),
     );
-    let clear = wait_for(
+    let clear = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["version"] == 3,
         "clear",
@@ -165,12 +164,12 @@ fn analyzer_diags_can_be_disabled() {
         serde_json::json!({"opensipsPath":"", "analyzerDiagnostics": false}),
     );
     let broken = "route {\n    route(gone);\n}\n";
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":broken}}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
         "textDocument":{"uri":uri,"version":2},
@@ -178,14 +177,14 @@ fn analyzer_diags_can_be_disabled() {
     );
     // bounded negative check: a hover round-trip after the debounce
     // window; no non-empty publish may precede its response
-    std::thread::sleep(std::time::Duration::from_millis(150));
-    write_msg(
+    std::thread::sleep(Duration::from_millis(150));
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":9,"method":"textDocument/hover","params":{
         "textDocument":{"uri":uri},"position":{"line":0,"character":1}}}),
     );
     loop {
-        let v = wait_for(
+        let v = common::wait_for(
             &rx,
             |v| v["id"] == 9 || v["method"] == "textDocument/publishDiagnostics",
             "hover or diags",
@@ -208,19 +207,19 @@ fn references_and_rename_cross_include_files() {
     let (uri, text) = setup(&base);
     let inc_path = base.join("inc.cfg");
     let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
     // references from the call site must include the include's def
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/references","params":{
         "textDocument":{"uri":uri},"position":{"line":2,"character":11},
         "context":{"includeDeclaration":true}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "references");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "references");
     let locs = v["result"].as_array().expect("locations");
     assert_eq!(locs.len(), 2, "1 ref in main + 1 def in include: {locs:?}");
     assert!(
@@ -229,12 +228,12 @@ fn references_and_rename_cross_include_files() {
         "the include's definition must be listed: {locs:?}"
     );
     // rename must edit BOTH files
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/rename","params":{
         "textDocument":{"uri":uri},"position":{"line":2,"character":11},"newName":"assist"}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "rename");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "rename");
     let changes = v["result"]["changes"].as_object().expect("changes");
     assert_eq!(
         changes.len(),
@@ -277,12 +276,12 @@ fn include_file_errors_surface_on_the_root_document() {
         &base,
         serde_json::json!({"opensipsPath": stub.display().to_string()}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    let diag = wait_for(
+    let diag = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"
@@ -329,17 +328,17 @@ fn definition_reaches_a_route_in_the_91st_include() {
     std::fs::write(&main, &text).unwrap();
     let uri = format!("file://{}", main.display());
     let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{
         "textDocument":{"uri":uri},"position":{"line":N + 1,"character":11}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "definition");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "definition");
     let target = v["result"]["uri"]
         .as_str()
         .unwrap_or_else(|| panic!("a cross-file location: {v}"));
@@ -361,18 +360,18 @@ fn include_paths_complete_from_the_including_files_directory() {
     std::fs::write(&main, text).unwrap();
     let uri = format!("file://{}", main.display());
     let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
     // the cursor after `inc/gl`
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{
         "textDocument":{"uri":uri},"position":{"line":0,"character":20}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "completion");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "completion");
     let items = v["result"].as_array().unwrap_or_else(|| panic!("{v}"));
     let labels: Vec<&str> = items.iter().filter_map(|i| i["label"].as_str()).collect();
     assert_eq!(labels, vec!["globals.inc", "routes/"], "{v}");
@@ -408,12 +407,12 @@ fn a_root_whose_closure_stops_at_the_bound_is_told_so() {
     std::fs::write(&main, &text).unwrap();
     let uri = format!("file://{}", main.display());
     let (mut child, rx, mut stdin) = start(&base, serde_json::json!({"opensipsPath":""}));
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["uri"] == uri,
         "diagnostics on the root",

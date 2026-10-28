@@ -11,7 +11,7 @@
 //! The setting decides; the default is off.
 
 mod common;
-use common::*;
+use common::Server;
 use std::process::{Command, Stdio};
 
 /// Hover text over `log_level` in a one-line config, with the given
@@ -41,19 +41,19 @@ fn hover_text_at(tag: &str, opts: serde_json::Value, body: &str, line: u32, ch: 
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{}, "initializationOptions": opts}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "initialize");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "initialize");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    wait_for(
+    common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -64,18 +64,18 @@ fn hover_text_at(tag: &str, opts: serde_json::Value, body: &str, line: u32, ch: 
         },
         "harvest-ready",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,
                             "text":body}}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{
             "textDocument":{"uri":uri},"position":{"line":line,"character":ch}}}),
     );
-    let r = wait_for(&rx, |v| v["id"] == 3, "hover");
+    let r = common::wait_for(&rx, |v| v["id"] == 3, "hover");
     let text = r["result"]["contents"]["value"]
         .as_str()
         .unwrap_or("")

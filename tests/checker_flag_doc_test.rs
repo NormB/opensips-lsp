@@ -15,7 +15,8 @@
 //! changing the invocation retargets this gate instead of stranding it
 //! on a rule the code no longer follows.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// The flag the diagnostics subprocess is given, taken from the
 /// `Command` construction in `src/server.rs`.
@@ -48,8 +49,8 @@ fn other_case(c: char) -> char {
 /// Pages that describe CURRENT behaviour.  `client/CHANGELOG.md` is a
 /// historical record and has to be able to name the defect it fixed;
 /// it is the one deliberate exception.
-fn documentation_pages(root: &Path) -> Vec<std::path::PathBuf> {
-    let out = std::process::Command::new("git")
+fn documentation_pages(root: &Path) -> Vec<PathBuf> {
+    let out = Command::new("git")
         .args(["ls-files", "-z", "*.md"])
         .current_dir(root)
         .output()

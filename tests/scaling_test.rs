@@ -7,9 +7,7 @@
 //! that config against a budget the linear version meets with a wide
 //! margin on a loaded host.
 
-use opensips_lsp::analyze::{
-    calls, includes, loaded_modules, modparam_calls, pvars, route_blocks, route_refs,
-};
+use opensips_lsp::analyze;
 use std::time::{Duration, Instant};
 
 /// `n` chained request routes, each with a call, a pvar, a modparam
@@ -47,13 +45,22 @@ fn timed<T>(what: &str, f: impl FnOnce() -> T) -> T {
 #[test]
 fn scanners_are_linear_in_the_text() {
     let cfg = big_cfg(N);
-    assert_eq!(timed("route_blocks", || route_blocks(&cfg)).len(), N);
-    assert_eq!(timed("route_refs", || route_refs(&cfg)).len(), N);
-    assert!(timed("calls", || calls(&cfg)).len() >= 2 * N);
-    assert_eq!(timed("loaded_modules", || loaded_modules(&cfg)).len(), 2);
-    assert_eq!(timed("modparam_calls", || modparam_calls(&cfg)).len(), N);
-    assert_eq!(timed("pvars", || pvars(&cfg)).len(), 2 * N);
-    assert!(timed("includes", || includes(&cfg)).is_empty());
+    assert_eq!(
+        timed("route_blocks", || analyze::route_blocks(&cfg)).len(),
+        N
+    );
+    assert_eq!(timed("route_refs", || analyze::route_refs(&cfg)).len(), N);
+    assert!(timed("calls", || analyze::calls(&cfg)).len() >= 2 * N);
+    assert_eq!(
+        timed("loaded_modules", || analyze::loaded_modules(&cfg)).len(),
+        2
+    );
+    assert_eq!(
+        timed("modparam_calls", || analyze::modparam_calls(&cfg)).len(),
+        N
+    );
+    assert_eq!(timed("pvars", || analyze::pvars(&cfg)).len(), 2 * N);
+    assert!(timed("includes", || analyze::includes(&cfg)).is_empty());
 }
 
 #[test]
@@ -61,11 +68,11 @@ fn positions_at_the_end_of_a_large_config_are_exact() {
     // the fast path must place the LAST match exactly where the slow
     // one did: line 2 + 5 lines per route, `route(` indented 4
     let cfg = big_cfg(N);
-    let last = route_refs(&cfg).pop().unwrap();
+    let last = analyze::route_refs(&cfg).pop().unwrap();
     assert_eq!(last.name, format!("r{N}"));
     assert_eq!(last.line, 2 + 5 * (N as u32 - 1) + 3);
     assert_eq!(last.col, 10);
-    let blk = route_blocks(&cfg).pop().unwrap();
+    let blk = analyze::route_blocks(&cfg).pop().unwrap();
     assert_eq!((blk.line, blk.col), (2 + 5 * (N as u32 - 1) + 1, 0));
     assert_eq!((blk.end_line, blk.end_col), (2 + 5 * (N as u32 - 1) + 4, 1));
 }

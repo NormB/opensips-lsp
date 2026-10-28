@@ -6,7 +6,7 @@
 //! is exactly the case for anyone running a patched or newer OpenSIPS.
 
 use opensips_lsp::catalog::{CatalogOrigin, Item, ModuleDoc};
-use opensips_lsp::logic::catalog_diagnostics;
+use opensips_lsp::logic;
 
 fn one_module() -> Vec<ModuleDoc> {
     vec![ModuleDoc {
@@ -25,7 +25,7 @@ const CFG: &str = "modparam(\"usrloc\", \"sql_reconcile_interval\", 120)\n";
 #[test]
 fn a_built_in_catalogue_names_its_version() {
     let origin = CatalogOrigin::BuiltIn("4.0.2".to_string());
-    let diags = catalog_diagnostics(&one_module(), &origin, CFG);
+    let diags = logic::catalog_diagnostics(&one_module(), &origin, CFG);
     assert_eq!(diags.len(), 1, "one unknown parameter, got {diags:?}");
     let msg = &diags[0].message;
     assert!(
@@ -42,7 +42,7 @@ fn a_built_in_catalogue_names_its_version() {
 /// so naming a version there would be a lie — it says the tree.
 #[test]
 fn a_configured_tree_names_the_tree_not_a_version() {
-    let diags = catalog_diagnostics(&one_module(), &CatalogOrigin::ConfiguredTree, CFG);
+    let diags = logic::catalog_diagnostics(&one_module(), &CatalogOrigin::ConfiguredTree, CFG);
     assert_eq!(diags.len(), 1);
     let msg = &diags[0].message;
     assert!(msg.contains("configured source tree"), "got {msg:?}");
@@ -56,8 +56,8 @@ fn a_configured_tree_names_the_tree_not_a_version() {
 /// origin has bought nothing.
 #[test]
 fn the_two_origins_read_differently() {
-    let a = catalog_diagnostics(&one_module(), &CatalogOrigin::BuiltIn("4.0.2".into()), CFG);
-    let b = catalog_diagnostics(&one_module(), &CatalogOrigin::ConfiguredTree, CFG);
+    let a = logic::catalog_diagnostics(&one_module(), &CatalogOrigin::BuiltIn("4.0.2".into()), CFG);
+    let b = logic::catalog_diagnostics(&one_module(), &CatalogOrigin::ConfiguredTree, CFG);
     assert_ne!(a[0].message, b[0].message);
 }
 
@@ -72,7 +72,7 @@ fn a_known_parameter_is_silent() {
         CatalogOrigin::ConfiguredTree,
     ] {
         assert!(
-            catalog_diagnostics(&one_module(), &origin, cfg).is_empty(),
+            logic::catalog_diagnostics(&one_module(), &origin, cfg).is_empty(),
             "a known parameter must not warn"
         );
     }
@@ -118,7 +118,7 @@ fn a_parameter_from_another_release_says_which() {
 
     let origin = CatalogOrigin::BuiltIn(newest.to_string());
     let cfg = format!("modparam(\"{module}\", \"{param}\", 1)\n");
-    let diags = catalog_diagnostics(&current, &origin, &cfg);
+    let diags = logic::catalog_diagnostics(&current, &origin, &cfg);
     assert_eq!(diags.len(), 1, "{module}::{param}: got {diags:?}");
     let msg = &diags[0].message;
 
@@ -157,7 +157,7 @@ fn a_parameter_from_no_release_says_nothing_extra() {
     let current = versioned.at(newest).expect("newest must resolve");
     let origin = CatalogOrigin::BuiltIn(newest.to_string());
 
-    let diags = catalog_diagnostics(
+    let diags = logic::catalog_diagnostics(
         &current,
         &origin,
         "modparam(\"usrloc\", \"definitely_not_a_parameter\", 1)\n",
@@ -176,7 +176,7 @@ fn a_parameter_from_no_release_says_nothing_extra() {
 fn a_configured_tree_gets_no_cross_version_clause() {
     let versioned = opensips_lsp::catalog::builtin_versioned();
     let current = versioned.at(versioned.newest()).expect("newest resolves");
-    let diags = catalog_diagnostics(
+    let diags = logic::catalog_diagnostics(
         &current,
         &CatalogOrigin::ConfiguredTree,
         "modparam(\"proto_bin\", \"bin_async_local_connect_timeout\", 1)\n",

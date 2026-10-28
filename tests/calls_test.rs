@@ -6,10 +6,13 @@
 //! comment.
 
 mod common;
-use opensips_lsp::analyze::calls;
+use opensips_lsp::analyze;
 
 fn shape(text: &str) -> Vec<(String, Vec<(u32, u32)>)> {
-    calls(text).into_iter().map(|c| (c.name, c.args)).collect()
+    analyze::calls(text)
+        .into_iter()
+        .map(|c| (c.name, c.args))
+        .collect()
 }
 
 #[test]
@@ -83,6 +86,6 @@ fn adversarial_input_does_not_panic() {
         "f(\u{1F600})",
         "route {\n f(1,\n",
     ] {
-        let _ = calls(s);
+        let _ = analyze::calls(s);
     }
 }

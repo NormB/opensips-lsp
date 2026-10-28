@@ -11,7 +11,11 @@
 
 mod common;
 
-use opensips_lsp::outline::{FoldKind, Sym, SymKind, folds, outline, selection_chain};
+use opensips_lsp::outline;
+
+use opensips_lsp::outline::{FoldKind, Span, Sym, SymKind};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 
 const CFG: &str = r#"loadmodule "tm.so"
 modparam("tm", "fr_timeout", 5)
@@ -58,7 +62,7 @@ fn flat(syms: &[Sym], depth: usize, out: &mut Vec<String>) {
 #[test]
 fn the_outline_nests_the_blocks_inside_a_route() {
     let mut got = Vec::new();
-    flat(&outline(CFG), 0, &mut got);
+    flat(&outline::outline(CFG), 0, &mut got);
     assert_eq!(
         got,
         vec![
@@ -76,7 +80,7 @@ fn the_outline_nests_the_blocks_inside_a_route() {
 
 #[test]
 fn a_modparam_keeps_its_module_as_detail() {
-    let syms = outline(CFG);
+    let syms = outline::outline(CFG);
     let p = syms.iter().find(|s| s.name == "fr_timeout").unwrap();
     assert_eq!(p.detail.as_deref(), Some("tm"));
 }
@@ -87,7 +91,7 @@ fn only_top_level_assignments_are_parameters() {
     // line inside a route body that opens with `word =` is not a
     // global parameter whatever else it is
     let t = "debug_mode=yes\nroute {\n    $var(x) = 1;\n    if ($var(x) == 1 &&\n    stray = 2) { exit; }\n}\n";
-    let names: Vec<String> = outline(t)
+    let names: Vec<String> = outline::outline(t)
         .into_iter()
         .filter(|s| s.kind == SymKind::Variable)
         .map(|s| s.name)
@@ -97,7 +101,7 @@ fn only_top_level_assignments_are_parameters() {
 
 #[test]
 fn folds_cover_nested_blocks_and_comments() {
-    let got: Vec<(u32, u32, FoldKind)> = folds(CFG)
+    let got: Vec<(u32, u32, FoldKind)> = outline::folds(CFG)
         .into_iter()
         .map(|f| (f.start_line, f.end_line, f.kind))
         .collect();
@@ -120,7 +124,7 @@ fn folds_cover_nested_blocks_and_comments() {
 #[test]
 fn a_brace_in_a_string_or_comment_opens_no_block() {
     let t = "route {\n    xlog(\"{\");\n    # {\n    exit;\n}\n";
-    let got: Vec<(u32, u32)> = folds(t)
+    let got: Vec<(u32, u32)> = outline::folds(t)
         .into_iter()
         .map(|f| (f.start_line, f.end_line))
         .collect();
@@ -132,7 +136,7 @@ fn selection_grows_from_the_word_to_the_route() {
     // the cursor on `rs` in `switch ($rs)`
     let line5 = CFG.lines().nth(5).unwrap();
     let off = CFG.lines().take(5).map(|l| l.len() + 1).sum::<usize>() + line5.find("rs").unwrap();
-    let got: Vec<String> = selection_chain(CFG, off)
+    let got: Vec<String> = outline::selection_chain(CFG, off)
         .into_iter()
         .map(|s| {
             format!(
@@ -155,7 +159,7 @@ fn selection_grows_from_the_word_to_the_route() {
 
 #[test]
 fn selection_outside_every_block_is_word_then_document() {
-    let got: Vec<String> = selection_chain(CFG, 3)
+    let got: Vec<String> = outline::selection_chain(CFG, 3)
         .into_iter()
         .map(|s| {
             format!(
@@ -170,7 +174,7 @@ fn selection_outside_every_block_is_word_then_document() {
 #[test]
 fn a_closing_brace_in_a_string_closes_nothing() {
     let t = "route {\n    if ($rU) {\n        xlog(\"}\");\n        exit;\n    }\n}\n";
-    let got: Vec<(u32, u32)> = folds(t)
+    let got: Vec<(u32, u32)> = outline::folds(t)
         .into_iter()
         .map(|f| (f.start_line, f.end_line))
         .collect();
@@ -180,7 +184,7 @@ fn a_closing_brace_in_a_string_closes_nothing() {
 #[test]
 fn a_comment_after_a_closing_brace_is_not_more_code() {
     let t = "route {\n    if ($rU) {\n        exit;\n    } # done\n}\n";
-    let got: Vec<(u32, u32)> = folds(t)
+    let got: Vec<(u32, u32)> = outline::folds(t)
         .into_iter()
         .map(|f| (f.start_line, f.end_line))
         .collect();
@@ -190,7 +194,7 @@ fn a_comment_after_a_closing_brace_is_not_more_code() {
 #[test]
 fn a_comment_above_a_block_is_not_part_of_its_name() {
     let t = "route {\n    exit;\n    # only INVITEs\n    if (is_method(\"INVITE\")) {\n        exit;\n    }\n}\n";
-    let route = outline(t).pop().unwrap();
+    let route = outline::outline(t).pop().unwrap();
     let b = &route.children[0];
     assert_eq!(b.name, "if (is_method(\"INVITE\"))");
     assert_eq!((b.span.start_line, b.span.start_col), (3, 4));
@@ -199,7 +203,7 @@ fn a_comment_above_a_block_is_not_part_of_its_name() {
 #[test]
 fn one_fold_per_start_line_and_it_is_the_widest() {
     let t = "route { if ($rU) {\n    exit;\n}\n}\n";
-    let got: Vec<(u32, u32)> = folds(t)
+    let got: Vec<(u32, u32)> = outline::folds(t)
         .into_iter()
         .map(|f| (f.start_line, f.end_line))
         .collect();
@@ -213,7 +217,7 @@ fn one_fold_per_start_line_and_it_is_the_widest() {
 fn a_script_variable_with_braces_and_hashes_is_not_a_block() {
     let t = "route {\n    $ru = $(ru{re.subst,/a#//g});\n}\nroute[next] {\n    exit;\n}\n";
     let mut got = Vec::new();
-    flat(&outline(t), 0, &mut got);
+    flat(&outline::outline(t), 0, &mut got);
     assert_eq!(
         got,
         vec![
@@ -235,7 +239,7 @@ fn a_script_variable_with_braces_and_hashes_is_not_a_block() {
 #[test]
 fn an_assignment_after_a_blank_line_is_listed_once() {
     let mut got = Vec::new();
-    flat(&outline("#c\n\nlog_level=3\nx=1\n"), 0, &mut got);
+    flat(&outline::outline("#c\n\nlog_level=3\nx=1\n"), 0, &mut got);
     assert_eq!(
         got,
         vec![
@@ -274,7 +278,7 @@ fn blank_crlf_and_whitespace_lines_before_an_assignment() {
         ),
     ] {
         let mut got = Vec::new();
-        flat(&outline(text), 0, &mut got);
+        flat(&outline::outline(text), 0, &mut got);
         assert_eq!(got, want, "{text:?}");
     }
 }
@@ -289,28 +293,28 @@ fn blank_crlf_and_whitespace_lines_before_an_assignment() {
 /// `etc/opensips.cfg` has several.
 #[test]
 fn every_outline_entry_of_every_shipped_config_is_well_formed() {
-    let tree = std::path::PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
+    let tree = PathBuf::from(common::required_env("OPENSIPS_LSP_TEST_TREE"));
     let mut files = Vec::new();
     common::cfgs_under(&tree, &mut files);
     common::cfgs_under(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"),
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"),
         &mut files,
     );
     files.sort();
     assert!(files.len() > 30, "too few configs found: {}", files.len());
 
-    fn ordered(s: &opensips_lsp::outline::Span) -> bool {
+    fn ordered(s: &Span) -> bool {
         (s.start_line, s.start_col) <= (s.end_line, s.end_col)
     }
-    fn inside(a: &opensips_lsp::outline::Span, b: &opensips_lsp::outline::Span) -> bool {
+    fn inside(a: &Span, b: &Span) -> bool {
         (a.start_line, a.start_col) >= (b.start_line, b.start_col)
             && (a.end_line, a.end_col) <= (b.end_line, b.end_col)
     }
     fn walk(
-        f: &std::path::Path,
+        f: &Path,
         syms: &[Sym],
         parent: Option<&Sym>,
-        seen: &mut std::collections::HashSet<String>,
+        seen: &mut HashSet<String>,
         bad: &mut Vec<String>,
     ) {
         for s in syms {
@@ -337,9 +341,9 @@ fn every_outline_entry_of_every_shipped_config_is_well_formed() {
         let text = std::fs::read_to_string(f).unwrap_or_default();
         walk(
             f,
-            &outline(&text),
+            &outline::outline(&text),
             None,
-            &mut std::collections::HashSet::new(),
+            &mut HashSet::new(),
             &mut bad,
         );
     }

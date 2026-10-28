@@ -1,8 +1,10 @@
 //! Workspace symbols and codeLens reference counts over stdio.
 
 mod common;
-use common::*;
-use std::process::{Command, Stdio};
+use common::Server;
+use std::path::PathBuf;
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::mpsc::Receiver;
 
 const DOC: &str = "route[helper] {\n    exit;\n}\nroute[other_thing] {\n    exit;\n}\nroute {\n    route(helper);\n    route(helper);\n}\n";
 
@@ -13,10 +15,10 @@ fn boot(
 ) -> (
     common::Scratch,
     Server,
-    std::sync::mpsc::Receiver<serde_json::Value>,
-    std::process::ChildStdin,
+    Receiver<serde_json::Value>,
+    ChildStdin,
     String,
-    std::path::PathBuf,
+    PathBuf,
 ) {
     let base_scratch = common::Scratch::new(&format!("oslsp-nav-{tag}"));
     let base = base_scratch.path().to_path_buf();
@@ -34,14 +36,14 @@ fn boot(
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
         "capabilities":{}, "initializationOptions": opts}}),
     );
-    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    let init = common::wait_for(&rx, |v| v["id"] == 1, "init");
     assert!(
         init["result"]["capabilities"]["workspaceSymbolProvider"]
             .as_bool()
@@ -52,11 +54,11 @@ fn boot(
         !init["result"]["capabilities"]["codeLensProvider"].is_null(),
         "codeLensProvider must be advertised"
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
@@ -68,26 +70,26 @@ fn boot(
 fn workspace_symbols_filter_across_open_docs() {
     let (_scratch, mut child, rx, mut stdin, _uri, _) =
         boot("ws", serde_json::json!({"opensipsPath":""}), DOC);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"workspace/symbol","params":{"query":"help"}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "wsym");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "wsym");
     let syms = v["result"].as_array().expect("symbols");
     assert_eq!(syms.len(), 1, "{syms:?}");
     assert_eq!(syms[0]["name"], "route[helper]");
     // case-insensitive; empty query returns everything named
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"workspace/symbol","params":{"query":"HELP"}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "wsym-ci");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "wsym-ci");
     assert_eq!(v["result"].as_array().unwrap().len(), 1);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"workspace/symbol","params":{"query":""}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 4, "wsym-all");
+    let v = common::wait_for(&rx, |v| v["id"] == 4, "wsym-all");
     assert!(v["result"].as_array().unwrap().len() >= 2);
     child.kill().ok();
 }
@@ -96,12 +98,12 @@ fn workspace_symbols_filter_across_open_docs() {
 fn code_lens_counts_route_references() {
     let (_scratch, mut child, rx, mut stdin, uri, _) =
         boot("cl", serde_json::json!({"opensipsPath":""}), DOC);
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/codeLens","params":{
         "textDocument":{"uri":uri}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "codelens");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "codelens");
     let lenses = v["result"].as_array().expect("lenses");
     // named request routes only (the anonymous main route has no lens)
     assert_eq!(lenses.len(), 2, "{lenses:?}");
@@ -125,12 +127,12 @@ fn code_lens_can_be_disabled() {
         serde_json::json!({"opensipsPath":"", "codeLensReferences": false}),
         DOC,
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/codeLens","params":{
         "textDocument":{"uri":uri}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "codelens-off");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "codelens-off");
     assert!(
         v["result"].is_null() || v["result"].as_array().unwrap().is_empty(),
         "no lenses when disabled: {v}"
@@ -144,7 +146,7 @@ fn quick_fix_creates_a_route_stub() {
     let (_scratch, mut child, rx, mut stdin, uri, _) =
         boot("qf", serde_json::json!({"opensipsPath":""}), broken);
     // ask for actions carrying the analyzer diagnostic in context
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/codeAction","params":{
         "textDocument":{"uri":uri},
@@ -154,7 +156,7 @@ fn quick_fix_creates_a_route_stub() {
             "severity":2,"source":"opensips-lsp",
             "message":"route 'missing' is not defined here or in included files"}]}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "codeAction");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "codeAction");
     let actions = v["result"].as_array().expect("actions");
     assert_eq!(actions.len(), 1, "{actions:?}");
     let a = &actions[0];
@@ -178,12 +180,12 @@ fn semantic_tokens_over_stdio() {
         serde_json::json!({"opensipsPath":""}),
         "route[ab] {\n    route(ab);\n}\n",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/semanticTokens/full","params":{
         "textDocument":{"uri":uri}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "semanticTokens");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "semanticTokens");
     let data = v["result"]["data"].as_array().expect("data");
     assert_eq!(data.len() % 5, 0);
     let first: Vec<u64> = data[..5].iter().map(|x| x.as_u64().unwrap()).collect();
@@ -196,12 +198,12 @@ fn prepare_rename_gates_on_route_symbols() {
     let (_scratch, mut child, rx, mut stdin, uri, _) =
         boot("preprename", serde_json::json!({}), DOC);
     // on the route(helper) call-site name (line 7, "helper" at col 10)
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":10,"method":"textDocument/prepareRename","params":{
         "textDocument":{"uri":uri},"position":{"line":7,"character":11}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 10, "prepareRename on symbol");
+    let v = common::wait_for(&rx, |v| v["id"] == 10, "prepareRename on symbol");
     let r = &v["result"];
     assert!(
         !r.is_null(),
@@ -213,12 +215,12 @@ fn prepare_rename_gates_on_route_symbols() {
     assert_eq!(range["start"]["character"], 10);
     assert_eq!(range["end"]["character"], 16);
     // off-symbol (the 'route' keyword) → null, so editors block F2
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":11,"method":"textDocument/prepareRename","params":{
         "textDocument":{"uri":uri},"position":{"line":7,"character":2}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 11, "prepareRename off symbol");
+    let v = common::wait_for(&rx, |v| v["id"] == 11, "prepareRename off symbol");
     assert!(v["result"].is_null(), "off-symbol must be null: {v}");
     child.kill().ok();
 }
@@ -231,12 +233,12 @@ fn document_links_cover_includes() {
     std::fs::write(base.join("inc.cfg"), "route[a] { exit; }\n").unwrap();
     // opt.cfg deliberately absent: import_file is optional — the link
     // is still produced (targets need not exist)
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":20,"method":"textDocument/documentLink","params":{
         "textDocument":{"uri":uri}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 20, "documentLink");
+    let v = common::wait_for(&rx, |v| v["id"] == 20, "documentLink");
     let links = v["result"].as_array().expect("links array").clone();
     assert_eq!(links.len(), 2, "one link per include: {links:?}");
     let t0 = links[0]["target"].as_str().unwrap();
@@ -256,21 +258,21 @@ fn document_links_cover_includes() {
 fn semantic_tokens_range_covers_only_the_slice() {
     let (_scratch, mut child, rx, mut stdin, uri, _) = boot("semrange", serde_json::json!({}), DOC);
     // whole-doc tokens: 2 named defs + 2 refs (main route is unnamed)
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":30,"method":"textDocument/semanticTokens/full","params":{
         "textDocument":{"uri":uri}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 30, "full tokens");
+    let v = common::wait_for(&rx, |v| v["id"] == 30, "full tokens");
     assert_eq!(v["result"]["data"].as_array().unwrap().len(), 4 * 5);
     // range over lines 6..9 (the main route with the two call sites)
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":31,"method":"textDocument/semanticTokens/range","params":{
         "textDocument":{"uri":uri},
         "range":{"start":{"line":6,"character":0},"end":{"line":9,"character":0}}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 31, "range tokens");
+    let v = common::wait_for(&rx, |v| v["id"] == 31, "range tokens");
     let data = v["result"]["data"].as_array().expect("data").clone();
     assert_eq!(data.len(), 2 * 5, "only the two call sites: {data:?}");
     // first token is delta-encoded from the document origin per LSP
@@ -308,12 +310,12 @@ fn renaming_a_failure_route_rewrites_the_string_that_arms_it() {
     let (_scratch, mut child, rx, mut stdin, uri, _base) =
         boot("rename-armed", serde_json::json!({}), ARMED);
     // on the NAME in failure_route[fr]
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":20,"method":"textDocument/rename","params":{
         "textDocument":{"uri":uri},"position":{"line":4,"character":15},"newName":"on_fail"}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 20, "rename failure route");
+    let v = common::wait_for(&rx, |v| v["id"] == 20, "rename failure route");
     assert_eq!(
         edits_of(&v, &uri),
         vec![
@@ -330,12 +332,12 @@ fn a_rename_onto_an_existing_route_is_refused() {
     let (_scratch, mut child, rx, mut stdin, uri, _base) =
         boot("rename-taken", serde_json::json!({}), DOC);
     // route[other_thing] renamed to `helper`, which already exists
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":21,"method":"textDocument/rename","params":{
         "textDocument":{"uri":uri},"position":{"line":3,"character":8},"newName":"helper"}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 21, "rename onto a taken name");
+    let v = common::wait_for(&rx, |v| v["id"] == 21, "rename onto a taken name");
     assert!(v["result"].is_null(), "no edit may be offered: {v}");
     let msg = v["error"]["message"].as_str().unwrap_or("");
     assert!(

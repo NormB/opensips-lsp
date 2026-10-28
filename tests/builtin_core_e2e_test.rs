@@ -8,8 +8,9 @@
 //! while that path was untested, so the gap is worth a test of its own.
 
 mod common;
-use common::*;
-use std::process::{Command, Stdio};
+use common::Server;
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::mpsc::Receiver;
 
 fn boot(
     tag: &str,
@@ -17,8 +18,8 @@ fn boot(
 ) -> (
     common::Scratch,
     Server,
-    std::sync::mpsc::Receiver<serde_json::Value>,
-    std::process::ChildStdin,
+    Receiver<serde_json::Value>,
+    ChildStdin,
     String,
     String,
 ) {
@@ -41,9 +42,9 @@ fn boot(
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{}}}),
@@ -51,12 +52,12 @@ fn boot(
     // the response has to be read before `initialized` is sent: a
     // notification that arrives mid-handshake is dropped, and the
     // harvest never runs
-    wait_for(&rx, |v| v["id"] == 1, "initialize");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "initialize");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    let ready = wait_for(
+    let ready = common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -70,7 +71,7 @@ fn boot(
         .as_str()
         .unwrap_or("")
         .to_string();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
@@ -79,19 +80,19 @@ fn boot(
 }
 
 fn complete(
-    stdin: &mut std::process::ChildStdin,
-    rx: &std::sync::mpsc::Receiver<serde_json::Value>,
+    stdin: &mut ChildStdin,
+    rx: &Receiver<serde_json::Value>,
     uri: &str,
     id: i64,
     line: u32,
     ch: u32,
 ) -> Vec<String> {
-    write_msg(
+    common::write_msg(
         stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"textDocument/completion","params":{
             "textDocument":{"uri":uri},"position":{"line":line,"character":ch}}}),
     );
-    let r = wait_for(rx, |v| v["id"] == id, "completion");
+    let r = common::wait_for(rx, |v| v["id"] == id, "completion");
     let items = r["result"]
         .as_array()
         .cloned()
@@ -104,19 +105,19 @@ fn complete(
 }
 
 fn hover(
-    stdin: &mut std::process::ChildStdin,
-    rx: &std::sync::mpsc::Receiver<serde_json::Value>,
+    stdin: &mut ChildStdin,
+    rx: &Receiver<serde_json::Value>,
     uri: &str,
     id: i64,
     line: u32,
     ch: u32,
 ) -> String {
-    write_msg(
+    common::write_msg(
         stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"textDocument/hover","params":{
             "textDocument":{"uri":uri},"position":{"line":line,"character":ch}}}),
     );
-    let r = wait_for(rx, |v| v["id"] == id, "hover");
+    let r = common::wait_for(rx, |v| v["id"] == id, "hover");
     r["result"]["contents"]["value"]
         .as_str()
         .unwrap_or("")
@@ -185,12 +186,12 @@ fn core_functions_and_pseudo_variables_complete_too() {
 #[test]
 fn hover_documents_the_entry_without_repeating_the_release() {
     let (_scratch, mut child, rx, mut stdin, uri, _) = boot("hover", "log_level=2\n");
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{
             "textDocument":{"uri":uri},"position":{"line":0,"character":3}}}),
     );
-    let r = wait_for(&rx, |v| v["id"] == 3, "hover");
+    let r = common::wait_for(&rx, |v| v["id"] == 3, "hover");
     let text = r["result"]["contents"]["value"]
         .as_str()
         .unwrap_or("")

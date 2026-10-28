@@ -1,7 +1,13 @@
 //! Editor-feature logic, pure and testable.
 
-use crate::analyze::{self, Located};
-use crate::catalog::{self, ModuleDoc};
+use crate::analyze::{self, Block, Class, Located};
+use crate::catalog::{self, CatalogOrigin, CoreDocs, ModuleDoc};
+use crate::diag::Diag;
+use regex::Regex;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 /// What a completion item is, mapped to an LSP `CompletionItemKind`.
 #[derive(Debug, Clone, PartialEq)]
@@ -72,9 +78,9 @@ const CORE_KEYWORDS: &[&str] = &[
 
 macro_rules! static_regex {
     ($name:ident, $pat:expr) => {
-        fn $name() -> &'static regex::Regex {
-            static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            RE.get_or_init(|| regex::Regex::new($pat).unwrap())
+        fn $name() -> &'static Regex {
+            static RE: OnceLock<Regex> = OnceLock::new();
+            RE.get_or_init(|| Regex::new($pat).unwrap())
         }
     };
 }
@@ -116,17 +122,17 @@ pub fn include_path_context(line_prefix: &str) -> Option<&str> {
 /// filesystem. Names starting with `.` are left out, as the scan leaves
 /// them out.
 pub fn include_path_completions(
-    current: &std::path::Path,
+    current: &Path,
     typed: &str,
-    list: &dyn Fn(&std::path::Path) -> Vec<(String, bool)>,
+    list: &dyn Fn(&Path) -> Vec<(String, bool)>,
 ) -> Vec<Comp> {
     let dir_part = typed.rfind('/').map_or("", |i| &typed[..=i]);
-    let base = if std::path::Path::new(dir_part).is_absolute() {
-        std::path::PathBuf::from(dir_part)
+    let base = if Path::new(dir_part).is_absolute() {
+        PathBuf::from(dir_part)
     } else {
         current
             .parent()
-            .unwrap_or_else(|| std::path::Path::new(""))
+            .unwrap_or_else(|| Path::new(""))
             .join(dir_part)
     };
     let mut out: Vec<Comp> = list(&lexically_normal(&base))
@@ -140,7 +146,7 @@ pub fn include_path_completions(
                     doc: String::new(),
                     kind: CompKind::Folder,
                 })
-            } else if is_config_candidate(std::path::Path::new(&name)) {
+            } else if is_config_candidate(Path::new(&name)) {
                 Some(Comp {
                     label: name,
                     detail: "configuration file".into(),
@@ -165,21 +171,16 @@ fn route_call_context(line_prefix: &str) -> bool {
 /// starts with `line_prefix`: modparam values/modules, loadmodule
 /// targets, or (in code) loaded modules' functions, routes, keywords.
 pub fn completions(catalog: &[ModuleDoc], doc: &str, line_prefix: &str) -> Vec<Comp> {
-    let files = [(std::path::PathBuf::new(), doc.to_string())];
-    complete_files(
-        catalog,
-        &crate::catalog::CoreDocs::default(),
-        &files,
-        line_prefix,
-    )
+    let files = [(PathBuf::new(), doc.to_string())];
+    complete_files(catalog, &CoreDocs::default(), &files, line_prefix)
 }
 
 /// The completion engine over an include closure (`files`: the
 /// current document first, included files after).
 fn complete_files(
     catalog: &[ModuleDoc],
-    core: &crate::catalog::CoreDocs,
-    files: &[(std::path::PathBuf, String)],
+    core: &CoreDocs,
+    files: &[(PathBuf, String)],
     line_prefix: &str,
 ) -> Vec<Comp> {
     // inside an include path only paths complete, and those need the
@@ -329,8 +330,8 @@ fn complete_files(
 /// [`completions_with_core`] over an include closure.
 pub fn completions_with_core_files(
     catalog: &[ModuleDoc],
-    core: &crate::catalog::CoreDocs,
-    files: &[(std::path::PathBuf, String)],
+    core: &CoreDocs,
+    files: &[(PathBuf, String)],
     line_prefix: &str,
 ) -> Vec<Comp> {
     complete_files(catalog, core, files, line_prefix)
@@ -403,7 +404,7 @@ pub fn extract_route(doc: &str, start_line: u32, end_line: u32) -> Option<Extrac
         let bytes = line.as_bytes();
         let mut i = 0;
         while i < bytes.len() {
-            let code = class.get(off + i) == Some(&crate::analyze::Class::Code);
+            let code = class.get(off + i) == Some(&Class::Code);
             if code {
                 match bytes[i] {
                     b'{' => depth += 1,
@@ -431,7 +432,7 @@ pub fn extract_route(doc: &str, start_line: u32, end_line: u32) -> Option<Extrac
     }
 
     // a name nothing else uses
-    let taken: std::collections::HashSet<String> = blocks.iter().map(|b| b.name.clone()).collect();
+    let taken: HashSet<String> = blocks.iter().map(|b| b.name.clone()).collect();
     let mut name = "EXTRACTED".to_string();
     let mut n = 2;
     while taken.contains(&name) {
@@ -465,7 +466,7 @@ pub fn extract_route(doc: &str, start_line: u32, end_line: u32) -> Option<Extrac
 /// parser rejects the second load outright, so these lines are an
 /// error the document can be repaired of.
 pub fn duplicate_loadmodules(doc: &str) -> Vec<u32> {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     analyze::loaded_modules(doc)
         .into_iter()
         .filter(|m| !seen.insert(m.name.clone()))
@@ -505,7 +506,7 @@ fn hint_name(param: &str) -> Option<String> {
 /// same order hover resolves in.
 fn signature_of(
     catalog: &[ModuleDoc],
-    core: &crate::catalog::CoreDocs,
+    core: &CoreDocs,
     loaded: &[String],
     name: &str,
 ) -> Option<String> {
@@ -540,11 +541,7 @@ fn signature_of(
 /// A call with more arguments than the signature documents is hinted
 /// as far as the signature goes and no further — guessing past the
 /// end would be inventing names.
-pub fn parameter_hints(
-    catalog: &[ModuleDoc],
-    core: &crate::catalog::CoreDocs,
-    doc: &str,
-) -> Vec<Hint> {
+pub fn parameter_hints(catalog: &[ModuleDoc], core: &CoreDocs, doc: &str) -> Vec<Hint> {
     let mut out = Vec::new();
     // once per document, not once per call
     let loaded = loaded_names(doc);
@@ -571,10 +568,8 @@ pub fn parameter_hints(
 
 /// How many `route(NAME)` call sites each route name has across
 /// `files`, scanning each file once.
-pub fn route_ref_counts(
-    files: &[(std::path::PathBuf, String)],
-) -> std::collections::HashMap<String, usize> {
-    let mut counts = std::collections::HashMap::new();
+pub fn route_ref_counts(files: &[(PathBuf, String)]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
     for (_, text) in files {
         for r in analyze::route_refs(text) {
             *counts.entry(r.name).or_insert(0) += 1;
@@ -666,7 +661,7 @@ pub fn definition_of(doc: &str, line: u32, col: u32) -> Option<Located> {
 /// Route blocks do not nest in this language, so at most one can
 /// match; the search is over `blocks` rather than the text so a
 /// caller that already has them does not pay to re-scan.
-pub fn enclosing_block(blocks: &[analyze::Block], line: u32) -> Option<&analyze::Block> {
+pub fn enclosing_block(blocks: &[Block], line: u32) -> Option<&Block> {
     blocks.iter().find(|b| line >= b.line && line <= b.end_line)
 }
 
@@ -679,7 +674,7 @@ pub fn enclosing_block(blocks: &[analyze::Block], line: u32) -> Option<&analyze:
 /// `route()`, yet it may call into the main table, and that is a real
 /// edge.  A call outside every block carries `None`; the real parser
 /// rejects such a config, but the analyzer must not assume it.
-pub fn call_edges(doc: &str) -> Vec<(Option<analyze::Block>, Located)> {
+pub fn call_edges(doc: &str) -> Vec<(Option<Block>, Located)> {
     let blocks = analyze::route_blocks(doc);
     analyze::route_refs(doc)
         .into_iter()
@@ -794,10 +789,10 @@ pub fn ns_occurrences(doc: &str, name: &str, ns: &RouteNs) -> Vec<(Located, bool
 /// `opensips -C` rejects (`Script route <x> is redefined`).  A name
 /// that is only called, never defined, is free.
 pub fn rename_conflict(
-    files: &[(std::path::PathBuf, String)],
+    files: &[(PathBuf, String)],
     new_name: &str,
     ns: &RouteNs,
-) -> Option<(std::path::PathBuf, Located)> {
+) -> Option<(PathBuf, Located)> {
     let kind = match ns {
         RouteNs::Main => "route",
         RouteNs::Kind(k) => k.as_str(),
@@ -887,9 +882,9 @@ const INCLUDE_MAX_DEPTH: usize = CFG_MAX_INCLUDE_DEPTH - 1;
 /// cost is the one case where the two differ: if `sites` is itself a
 /// symlink, the OS reads `sites/../common` relative to the LINK's
 /// target and this does not.
-fn lexically_normal(p: &std::path::Path) -> std::path::PathBuf {
+fn lexically_normal(p: &Path) -> PathBuf {
     use std::path::Component;
-    let mut out = std::path::PathBuf::new();
+    let mut out = PathBuf::new();
     for c in p.components() {
         match c {
             Component::CurDir => {}
@@ -912,14 +907,12 @@ fn lexically_normal(p: &std::path::Path) -> std::path::PathBuf {
 /// written, relative paths against the INCLUDING file's directory.
 /// `.` and `..` are folded so one file has one name — see
 /// [`lexically_normal`].
-fn resolve_include(from: &std::path::Path, inc: &str) -> std::path::PathBuf {
-    let p = std::path::Path::new(inc);
+fn resolve_include(from: &Path, inc: &str) -> PathBuf {
+    let p = Path::new(inc);
     let joined = if p.is_absolute() {
         p.to_path_buf()
     } else {
-        from.parent()
-            .unwrap_or_else(|| std::path::Path::new(""))
-            .join(p)
+        from.parent().unwrap_or_else(|| Path::new("")).join(p)
     };
     lexically_normal(&joined)
 }
@@ -943,7 +936,7 @@ pub fn config_watch_glob() -> String {
 }
 
 /// Whether the sweep should treat `path` as a possible configuration.
-fn is_config_candidate(path: &std::path::Path) -> bool {
+fn is_config_candidate(path: &Path) -> bool {
     path.extension()
         .and_then(|x| x.to_str())
         .is_some_and(|x| CONFIG_EXTENSIONS.contains(&x))
@@ -955,7 +948,7 @@ fn is_config_candidate(path: &std::path::Path) -> bool {
 /// by a config in the directory above it, and reading that directory's
 /// own files is cheap, while walking it recursively could be a scan of
 /// `/etc` or worse.
-pub fn configs_in_dir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+pub fn configs_in_dir(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -974,10 +967,10 @@ pub fn configs_in_dir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 /// cannot come to different conclusions about which file is part of
 /// which — the bound is announced by the caller rather than applied
 /// silently.
-pub fn scan_configs(roots: &[std::path::PathBuf], limit: usize) -> (Vec<std::path::PathBuf>, bool) {
+pub fn scan_configs(roots: &[PathBuf], limit: usize) -> (Vec<PathBuf>, bool) {
     let mut out = Vec::new();
-    let mut stack: Vec<std::path::PathBuf> = roots.to_vec();
-    let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+    let mut stack: Vec<PathBuf> = roots.to_vec();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
     while let Some(dir) = stack.pop() {
         // a directory symlink can point back up the tree
         if !seen.insert(std::fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone())) {
@@ -1025,7 +1018,7 @@ pub const MAX_CONFIG_BYTES: u64 = 1_048_576;
 /// Bytes are decoded lossily on purpose.  A comment nobody will parse
 /// is not a reason to lose the file, and the text whose columns are
 /// ever REPORTED comes from the editor's own buffer, never from here.
-pub fn read_config(path: &std::path::Path) -> Option<String> {
+pub fn read_config(path: &Path) -> Option<String> {
     let md = std::fs::metadata(path).ok()?;
     if !md.is_file() || md.len() > MAX_CONFIG_BYTES {
         return None;
@@ -1040,7 +1033,7 @@ pub fn read_config(path: &std::path::Path) -> Option<String> {
 /// include: which file is a fragment of which is the only thing an
 /// edit can change about the graph, and it is far cheaper to compare
 /// two of these than to rebuild it.
-pub fn resolved_includes(path: &std::path::Path, text: &str) -> Vec<std::path::PathBuf> {
+pub fn resolved_includes(path: &Path, text: &str) -> Vec<PathBuf> {
     analyze::includes(text)
         .into_iter()
         .map(|inc| resolve_include(path, &inc.name))
@@ -1056,14 +1049,13 @@ pub fn resolved_includes(path: &std::path::Path, text: &str) -> Vec<std::path::P
 /// [`Self::analysis_root`] climbs one edge at a time.
 #[derive(Debug, Default, Clone)]
 pub struct IncludeGraph {
-    parents: std::collections::BTreeMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
+    parents: BTreeMap<PathBuf, Vec<PathBuf>>,
 }
 
 impl IncludeGraph {
     /// Build from a workspace scan: one `(path, text)` per config.
-    pub fn build(configs: &[(std::path::PathBuf, String)]) -> Self {
-        let mut parents: std::collections::BTreeMap<std::path::PathBuf, Vec<std::path::PathBuf>> =
-            std::collections::BTreeMap::new();
+    pub fn build(configs: &[(PathBuf, String)]) -> Self {
+        let mut parents: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
         for (path, text) in configs {
             // Every include, conditional or not: OpenSIPS 4.0.2 reads
             // an `include_file` inside an unmet `#!ifdef` anyway —
@@ -1088,7 +1080,7 @@ impl IncludeGraph {
 
     /// Whether any scanned config includes `path`: then it is a
     /// fragment, not a program in its own right.
-    pub fn is_included(&self, path: &std::path::Path) -> bool {
+    pub fn is_included(&self, path: &Path) -> bool {
         self.parents.contains_key(&lexically_normal(path))
     }
 
@@ -1102,14 +1094,13 @@ impl IncludeGraph {
     /// step, so the context a fragment is analysed in cannot flicker
     /// as the scan order changes.  A cycle stops the climb at the last
     /// config not already visited.
-    pub fn analysis_root(&self, path: &std::path::Path) -> Option<std::path::PathBuf> {
-        let mut seen: std::collections::HashSet<std::path::PathBuf> =
-            std::collections::HashSet::new();
+    pub fn analysis_root(&self, path: &Path) -> Option<PathBuf> {
+        let mut seen: HashSet<PathBuf> = HashSet::new();
         // the keys were folded when the graph was built; a caller's
         // path has to be folded the same way or it cannot match
         let path = lexically_normal(path);
         seen.insert(path.clone());
-        let mut best: Option<std::path::PathBuf> = None;
+        let mut best: Option<PathBuf> = None;
         let mut cur = path;
         loop {
             let Some(next) = self.parents.get(&cur).and_then(|v| v.first()) else {
@@ -1125,7 +1116,7 @@ impl IncludeGraph {
 }
 
 /// Canonicalise a path when it exists, take it as written otherwise.
-fn norm_path(p: &std::path::Path) -> std::path::PathBuf {
+fn norm_path(p: &Path) -> PathBuf {
     std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
 }
 
@@ -1137,7 +1128,7 @@ fn norm_path(p: &std::path::Path) -> std::path::PathBuf {
 /// carries no file renders as `check failed in , line 1: ...`, which
 /// names an empty file and sends the reader to a line the parser
 /// never mentioned.  Say only what is known.
-pub fn check_failure_note(first: Option<&crate::diag::Diag>, rc: i32) -> String {
+pub fn check_failure_note(first: Option<&Diag>, rc: i32) -> String {
     match first {
         Some(d) if !d.file.is_empty() => format!(
             "check failed in {}, line {}: {}",
@@ -1164,52 +1155,46 @@ pub fn check_failure_note(first: Option<&crate::diag::Diag>, rc: i32) -> String 
 /// The file spelling is resolved as written, against the checked
 /// file's directory (the subprocess runs there), and against our own
 /// cwd.  Empty and NUL-bearing spellings name nothing.
-pub fn fragment_check_diag(
-    checked: &std::path::Path,
-    reported: &std::path::Path,
-    d: &crate::diag::Diag,
-) -> Option<crate::diag::Diag> {
+pub fn fragment_check_diag(checked: &Path, reported: &Path, d: &Diag) -> Option<Diag> {
     if d.file.is_empty() || d.file.contains('\0') {
         return None;
     }
-    let diag_path = std::path::Path::new(&d.file);
-    let mut cands: Vec<std::path::PathBuf> = vec![norm_path(diag_path)];
+    let diag_path = Path::new(&d.file);
+    let mut cands: Vec<PathBuf> = vec![norm_path(diag_path)];
     if diag_path.is_relative() {
-        let dir = checked.parent().unwrap_or_else(|| std::path::Path::new(""));
+        let dir = checked.parent().unwrap_or_else(|| Path::new(""));
         cands.push(norm_path(&dir.join(diag_path)));
         if let Ok(cwd) = std::env::current_dir() {
             cands.push(norm_path(&cwd.join(diag_path)));
         }
     }
-    cands
-        .contains(&norm_path(reported))
-        .then(|| crate::diag::Diag {
-            file: reported.display().to_string(),
-            ..d.clone()
-        })
+    cands.contains(&norm_path(reported)).then(|| Diag {
+        file: reported.display().to_string(),
+        ..d.clone()
+    })
 }
 
 /// The root document plus every transitively included file, loaded via
 /// `loader` (which lets callers prefer open editor buffers over disk).
 /// Cycle-safe, depth- and count-capped; unloadable files are skipped.
 pub fn include_closure(
-    root_path: &std::path::Path,
+    root_path: &Path,
     root_text: &str,
-    loader: &dyn Fn(&std::path::Path) -> Option<String>,
-) -> Vec<(std::path::PathBuf, String)> {
+    loader: &dyn Fn(&Path) -> Option<String>,
+) -> Vec<(PathBuf, String)> {
     include_closure_bounded(root_path, root_text, loader).0
 }
 
 /// [`include_closure`], and whether [`MAX_CONFIG_FILES`] left out a
 /// file it would otherwise have read.
 pub fn include_closure_bounded(
-    root_path: &std::path::Path,
+    root_path: &Path,
     root_text: &str,
-    loader: &dyn Fn(&std::path::Path) -> Option<String>,
-) -> (Vec<(std::path::PathBuf, String)>, bool) {
-    let mut out: Vec<(std::path::PathBuf, String)> = Vec::new();
-    let mut seen: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
-    let mut queue: Vec<(std::path::PathBuf, String, usize)> =
+    loader: &dyn Fn(&Path) -> Option<String>,
+) -> (Vec<(PathBuf, String)>, bool) {
+    let mut out: Vec<(PathBuf, String)> = Vec::new();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
+    let mut queue: Vec<(PathBuf, String, usize)> =
         vec![(root_path.to_path_buf(), root_text.to_string(), 0)];
     seen.insert(root_path.to_path_buf());
     let mut truncated = false;
@@ -1267,7 +1252,7 @@ pub fn closure_bound_diagnostic() -> AnalyzerDiag {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncludeEdit {
     /// The configuration that holds the directive.
-    pub file: std::path::PathBuf,
+    pub file: PathBuf,
     /// 0-based line of the directive.
     pub line: u32,
     /// 0-based byte column where the path starts.
@@ -1287,13 +1272,13 @@ pub struct IncludeEdit {
 /// rewritten too, so that from its new directory they still name the
 /// files they named before.
 pub fn include_rename_edits(
-    configs: &[(std::path::PathBuf, String)],
-    old: &std::path::Path,
-    new: &std::path::Path,
+    configs: &[(PathBuf, String)],
+    old: &Path,
+    new: &Path,
 ) -> Vec<IncludeEdit> {
     let old = lexically_normal(old);
     let new = lexically_normal(new);
-    let root = std::path::Path::new("/");
+    let root = Path::new("/");
     let new_dir = new.parent().unwrap_or(root);
     let mut out = Vec::new();
     for (path, text) in configs {
@@ -1302,7 +1287,7 @@ pub fn include_rename_edits(
         let lines: Vec<&str> = text.split('\n').collect();
         for inc in analyze::includes(text) {
             let target = resolve_include(&here, &inc.name);
-            let absolute = std::path::Path::new(&inc.name).is_absolute();
+            let absolute = Path::new(&inc.name).is_absolute();
             let new_text = if target == old {
                 if absolute {
                     new.display().to_string()
@@ -1343,7 +1328,7 @@ pub fn include_rename_edits(
 
 /// `to` written relative to the directory `from`, both folded already:
 /// `..` for each component of `from` past the part they share.
-fn relative_path(from: &std::path::Path, to: &std::path::Path) -> String {
+fn relative_path(from: &Path, to: &Path) -> String {
     let a: Vec<_> = from.components().collect();
     let b: Vec<_> = to.components().collect();
     let shared = a.iter().zip(&b).take_while(|(x, y)| x == y).count();
@@ -1358,8 +1343,8 @@ fn relative_path(from: &std::path::Path, to: &std::path::Path) -> String {
 }
 
 /// Module names loaded anywhere in the closure, deduplicated.
-pub fn loaded_modules_multi(files: &[(std::path::PathBuf, String)]) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
+pub fn loaded_modules_multi(files: &[(PathBuf, String)]) -> Vec<String> {
+    let mut seen = HashSet::new();
     let mut out = Vec::new();
     for (_, text) in files {
         for m in analyze::loaded_modules(text) {
@@ -1372,9 +1357,7 @@ pub fn loaded_modules_multi(files: &[(std::path::PathBuf, String)]) -> Vec<Strin
 }
 
 /// Route definitions across the closure, tagged with their file.
-pub fn route_defs_multi(
-    files: &[(std::path::PathBuf, String)],
-) -> Vec<(std::path::PathBuf, Located)> {
+pub fn route_defs_multi(files: &[(PathBuf, String)]) -> Vec<(PathBuf, Located)> {
     files
         .iter()
         .flat_map(|(p, text)| {
@@ -1453,8 +1436,8 @@ fn inert_directive_diagnostics(text: &str) -> Vec<AnalyzerDiag> {
             continue;
         };
         // a comment that begins here, not one already open
-        if classes.get(at) != Some(&analyze::Class::Comment)
-            || (at > 0 && classes.get(at - 1) == Some(&analyze::Class::Comment))
+        if classes.get(at) != Some(&Class::Comment)
+            || (at > 0 && classes.get(at - 1) == Some(&Class::Comment))
         {
             continue;
         }
@@ -1494,9 +1477,9 @@ fn byte_line_col(text: &str, at: usize) -> (u32, u32) {
 /// duplicate route definitions (every occurrence after the first is
 /// flagged).  Only positions in the current file are reported.
 pub fn analyzer_diagnostics(
-    path: &std::path::Path,
+    path: &Path,
     text: &str,
-    loader: &dyn Fn(&std::path::Path) -> Option<String>,
+    loader: &dyn Fn(&Path) -> Option<String>,
 ) -> Vec<AnalyzerDiag> {
     let files = include_closure(path, text, loader);
     analyzer_diagnostics_in_closure(&files, path, text)
@@ -1510,12 +1493,12 @@ pub fn analyzer_diagnostics(
 /// defines exist.  Reported positions still come from `text` and
 /// belong to `path` alone.
 pub fn analyzer_diagnostics_in_closure(
-    files: &[(std::path::PathBuf, String)],
-    path: &std::path::Path,
+    files: &[(PathBuf, String)],
+    path: &Path,
     text: &str,
 ) -> Vec<AnalyzerDiag> {
     let mut out = inert_directive_diagnostics(text);
-    let blocks: Vec<(std::path::PathBuf, analyze::Block)> = files
+    let blocks: Vec<(PathBuf, Block)> = files
         .iter()
         .flat_map(|(p, t)| {
             analyze::route_blocks(t)
@@ -1525,7 +1508,7 @@ pub fn analyzer_diagnostics_in_closure(
         .collect();
     // `route(x)` targets REQUEST routes only: failure_route[x] etc.
     // live in separate namespaces and do not satisfy the call
-    let defined: std::collections::HashSet<&str> = blocks
+    let defined: HashSet<&str> = blocks
         .iter()
         .filter(|(_, b)| b.kind == "route" && !b.name.is_empty())
         .map(|(_, b)| b.name.as_str())
@@ -1554,7 +1537,7 @@ pub fn analyzer_diagnostics_in_closure(
     }
     // duplicate definitions across the closure, per (kind, name);
     // flag current-file ones
-    let mut counts: std::collections::HashMap<(&str, &str), u32> = std::collections::HashMap::new();
+    let mut counts: HashMap<(&str, &str), u32> = HashMap::new();
     for (p, b) in &blocks {
         if b.name.is_empty() {
             continue;
@@ -1595,13 +1578,13 @@ pub struct ForeignDiag {
 /// matching include directive when one resolves to `diag_file`, else
 /// at the top of the file.  `diag_line` is 0-based.
 pub fn attribute_foreign_diag(
-    root: &std::path::Path,
+    root: &Path,
     text: &str,
     diag_file: &str,
     diag_line: u32,
     message: &str,
 ) -> ForeignDiag {
-    let short = std::path::Path::new(diag_file)
+    let short = Path::new(diag_file)
         .file_name()
         .map(|f| f.to_string_lossy().to_string())
         .unwrap_or_else(|| diag_file.to_string());
@@ -1609,7 +1592,7 @@ pub fn attribute_foreign_diag(
         "in included file {short}, line {}: {message}",
         diag_line + 1
     );
-    let target = std::path::Path::new(diag_file);
+    let target = Path::new(diag_file);
     for inc in analyze::includes(text) {
         let resolved = resolve_include(root, &inc.name);
         let hit = resolved == target
@@ -1687,8 +1670,8 @@ pub fn split_params(sig: &str) -> Vec<String> {
 /// Only meaningful for the built-in catalogue: a configured source
 /// tree is one release by construction, and this server knows no
 /// others to compare it against.
-fn elsewhere(origin: &catalog::CatalogOrigin, module: &str, param: &str) -> String {
-    let catalog::CatalogOrigin::BuiltIn(current) = origin else {
+fn elsewhere(origin: &CatalogOrigin, module: &str, param: &str) -> String {
+    let CatalogOrigin::BuiltIn(current) = origin else {
         return String::new();
     };
     let others: Vec<String> = catalog::builtin_versioned()
@@ -1711,7 +1694,7 @@ fn elsewhere(origin: &catalog::CatalogOrigin, module: &str, param: &str) -> Stri
 /// [`analyzer_diagnostics`].
 pub fn catalog_diagnostics(
     catalog: &[ModuleDoc],
-    origin: &catalog::CatalogOrigin,
+    origin: &CatalogOrigin,
     text: &str,
 ) -> Vec<AnalyzerDiag> {
     if catalog.is_empty() {
@@ -1956,11 +1939,11 @@ pub fn resolve_bin(option: Option<&str>, env: Option<String>) -> Option<String> 
 /// checked?  Exact path match, or same basename (tolerates symlinked
 /// spellings like /tmp vs /private/tmp); an empty `diag_file` is the
 /// parser's global fallback and always attaches.
-pub fn diag_matches_file(diag_file: &str, checked: &std::path::Path) -> bool {
+pub fn diag_matches_file(diag_file: &str, checked: &Path) -> bool {
     if diag_file.is_empty() {
         return true;
     }
-    let diag_path = std::path::Path::new(diag_file);
+    let diag_path = Path::new(diag_file);
     if diag_path == checked {
         return true;
     }
@@ -1984,11 +1967,11 @@ pub fn diag_matches_file(diag_file: &str, checked: &std::path::Path) -> bool {
 /// Resolve the `opensips -C` run timeout: explicit option (ms) wins,
 /// then `OPENSIPS_LSP_CHECK_TIMEOUT_MS`, then 10 seconds.  Clamped to
 /// at least 1ms.
-pub fn resolve_timeout(option_ms: Option<u64>, env: Option<String>) -> std::time::Duration {
+pub fn resolve_timeout(option_ms: Option<u64>, env: Option<String>) -> Duration {
     let ms = option_ms
         .or_else(|| env.and_then(|v| v.parse::<u64>().ok()))
         .unwrap_or(10_000);
-    std::time::Duration::from_millis(ms.max(1))
+    Duration::from_millis(ms.max(1))
 }
 
 /// [`completions`] plus core-language items: core functions and core
@@ -1996,11 +1979,11 @@ pub fn resolve_timeout(option_ms: Option<u64>, env: Option<String>) -> std::time
 /// follows a `$`.
 pub fn completions_with_core(
     catalog: &[ModuleDoc],
-    core: &crate::catalog::CoreDocs,
+    core: &CoreDocs,
     doc: &str,
     line_prefix: &str,
 ) -> Vec<Comp> {
-    let files = [(std::path::PathBuf::new(), doc.to_string())];
+    let files = [(PathBuf::new(), doc.to_string())];
     complete_files(catalog, core, &files, line_prefix)
 }
 
@@ -2028,7 +2011,7 @@ fn dedup_completions(items: Vec<Comp>) -> Vec<Comp> {
             CompKind::Keyword | CompKind::File | CompKind::Folder => 0,
         }
     }
-    let mut best: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut best: HashMap<String, usize> = HashMap::new();
     let mut out: Vec<Option<Comp>> = Vec::with_capacity(items.len());
     for c in items {
         match best.get(&c.label) {
@@ -2160,7 +2143,7 @@ pub fn call_site(line_prefix: &str) -> Option<CallSite> {
 /// is a syntax error: the quotes belong to the completion. When the
 /// reader has already typed the opening quote, adding another pair
 /// would give `""L_INFO"`, so the bare form is offered there instead.
-fn enumerated_argument(core: &crate::catalog::CoreDocs, line_prefix: &str) -> Option<Vec<Comp>> {
+fn enumerated_argument(core: &CoreDocs, line_prefix: &str) -> Option<Vec<Comp>> {
     let site = call_site(line_prefix)?;
     if !LEVEL_ARGUMENTS
         .iter()
@@ -2198,7 +2181,7 @@ const LEVEL_ARGUMENTS: &[(&str, u32)] = &[("xlog", 0)];
 /// index and a `#` comment ends the scan.
 pub fn signature_at(
     catalog: &[ModuleDoc],
-    core: &crate::catalog::CoreDocs,
+    core: &CoreDocs,
     doc: &str,
     line_prefix: &str,
 ) -> Option<(String, String, u32)> {
@@ -2268,7 +2251,7 @@ fn hover_site(doc: &str, word: &str, line: u32, col: u32) -> HoverSite {
 /// [`hover_markdown_with_core`], with the syntax consulted first.
 pub fn hover_markdown_at(
     catalog: &[ModuleDoc],
-    core: &crate::catalog::CoreDocs,
+    core: &CoreDocs,
     doc: &str,
     word: &str,
     line: u32,
@@ -2326,7 +2309,7 @@ pub fn hover_markdown_at(
 /// pseudo-variables (`word` may be given without the `$`).
 pub fn hover_markdown_with_core(
     catalog: &[ModuleDoc],
-    core: &crate::catalog::CoreDocs,
+    core: &CoreDocs,
     doc: &str,
     word: &str,
 ) -> Option<String> {

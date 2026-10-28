@@ -4,7 +4,7 @@
 //! uses — six declaration spellings, several tables in one file, and
 //! the terminator and comment forms that must not be read as names.
 
-use opensips_lsp::catalog::parse_param_export_tables;
+use opensips_lsp::catalog;
 
 #[test]
 fn reads_the_const_params_spelling() {
@@ -17,7 +17,7 @@ static const param_export_t params[] = {
 };
 "#;
     assert_eq!(
-        parse_param_export_tables(src),
+        catalog::parse_param_export_tables(src),
         vec!["rtpengine_sock", "rtpengine_disable_tout"]
     );
 }
@@ -30,7 +30,7 @@ static param_export_t params[] = {
 	{0, 0, 0}
 };
 "#;
-    assert_eq!(parse_param_export_tables(src), vec!["db_url"]);
+    assert_eq!(catalog::parse_param_export_tables(src), vec!["db_url"]);
 }
 
 /// `mi_xmlrpc` names its table `mi_params` and wires it into the
@@ -44,7 +44,7 @@ fn reads_every_identifier_spelling() {
             "static const param_export_t {ident}[] = {{\n\t{{\"only\", INT_PARAM, &x}},\n\t{{0,0,0}}\n}};\n"
         );
         assert_eq!(
-            parse_param_export_tables(&src),
+            catalog::parse_param_export_tables(&src),
             vec!["only"],
             "identifier {ident} must be read"
         );
@@ -63,7 +63,10 @@ static const param_export_t mod_params[] = {
 	{0, 0, 0}
 };
 "#;
-    assert_eq!(parse_param_export_tables(src), vec!["first", "second"]);
+    assert_eq!(
+        catalog::parse_param_export_tables(src),
+        vec!["first", "second"]
+    );
 }
 
 /// `{0, 0, 0}` and `{NULL, 0, NULL}` close a table. Reading either as
@@ -77,7 +80,7 @@ static const param_export_t params[] = {
 	{NULL, 0, NULL}
 };
 "#;
-    assert_eq!(parse_param_export_tables(src), vec!["real"]);
+    assert_eq!(catalog::parse_param_export_tables(src), vec!["real"]);
 }
 
 /// A commented-out entry is not an export. `modules/` carries several
@@ -93,7 +96,7 @@ static const param_export_t params[] = {
 	{0, 0, 0}
 };
 "#;
-    assert_eq!(parse_param_export_tables(src), vec!["live"]);
+    assert_eq!(catalog::parse_param_export_tables(src), vec!["live"]);
 }
 
 /// Only `param_export_t` tables are parameter tables. A module's
@@ -111,7 +114,10 @@ static const param_export_t params[] = {
 	{0, 0, 0}
 };
 "#;
-    assert_eq!(parse_param_export_tables(src), vec!["the_only_param"]);
+    assert_eq!(
+        catalog::parse_param_export_tables(src),
+        vec!["the_only_param"]
+    );
 }
 
 /// A declaration that is not an array initialiser — a prototype or a
@@ -125,12 +131,12 @@ static const param_export_t params[] = {
 	{0, 0, 0}
 };
 "#;
-    assert_eq!(parse_param_export_tables(src), vec!["actual"]);
+    assert_eq!(catalog::parse_param_export_tables(src), vec!["actual"]);
 }
 
 #[test]
 fn a_file_with_no_table_yields_nothing() {
-    assert!(parse_param_export_tables("int main(void) { return 0; }").is_empty());
+    assert!(catalog::parse_param_export_tables("int main(void) { return 0; }").is_empty());
 }
 
 /// Only the literal that opens an entry is a name. A literal nested
@@ -150,7 +156,7 @@ static const param_export_t params[] = {
 };
 "#;
     assert_eq!(
-        parse_param_export_tables(src),
+        catalog::parse_param_export_tables(src),
         vec!["paren_arg", "brace_arg"]
     );
 }

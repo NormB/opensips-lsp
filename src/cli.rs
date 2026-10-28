@@ -3,9 +3,14 @@
 //! hooks.  Exit codes: 0 clean (warnings allowed), 1 findings
 //! (errors, or warnings under `--strict`), 2 usage/read failures.
 
+use crate::catalog::CatalogOrigin;
+use crate::diag::Severity;
+use crate::logic::IncludeGraph;
 use crate::{catalog, diag, logic};
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
-fn disk_loader(p: &std::path::Path) -> Option<String> {
+fn disk_loader(p: &Path) -> Option<String> {
     logic::read_config(p)
 }
 
@@ -17,15 +22,15 @@ fn disk_loader(p: &std::path::Path) -> Option<String> {
 /// other.  The server scans the workspace folders; here the workspace
 /// is the directory holding the files that were named, so passing a
 /// fragment alone still finds the root sitting beside it.
-fn graph_for(files: &[String]) -> logic::IncludeGraph {
-    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+fn graph_for(files: &[String]) -> IncludeGraph {
+    let mut roots: Vec<PathBuf> = Vec::new();
     for f in files {
-        let p = std::path::Path::new(f);
+        let p = Path::new(f);
         let dir = p
             .parent()
             .filter(|d| !d.as_os_str().is_empty())
             .map(|d| d.to_path_buf())
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
+            .unwrap_or_else(|| PathBuf::from("."));
         if !roots.contains(&dir) {
             roots.push(dir);
         }
@@ -47,11 +52,11 @@ fn graph_for(files: &[String]) -> logic::IncludeGraph {
             up = parent.parent();
         }
     }
-    let scanned: Vec<(std::path::PathBuf, String)> = configs
+    let scanned: Vec<(PathBuf, String)> = configs
         .into_iter()
         .filter_map(|p| logic::read_config(&p).map(|t| (p, t)))
         .collect();
-    logic::IncludeGraph::build(&scanned)
+    IncludeGraph::build(&scanned)
 }
 
 /// Run the `check` subcommand over `args` (everything after `check`).
@@ -95,7 +100,7 @@ pub fn run_check(args: &[String]) -> i32 {
         .filter(|s| !s.trim().is_empty())
     {
         Some(src) => {
-            let harvested = catalog::harvest_tree(std::path::Path::new(&src));
+            let harvested = catalog::harvest_tree(Path::new(&src));
             if harvested.is_empty() {
                 eprintln!(
                     "opensips-lsp: '{src}' yields no module documentation — \
@@ -103,10 +108,10 @@ pub fn run_check(args: &[String]) -> i32 {
                 );
                 (
                     catalog::builtin_modules().modules.clone(),
-                    catalog::CatalogOrigin::BuiltIn(catalog::builtin_modules().version.clone()),
+                    CatalogOrigin::BuiltIn(catalog::builtin_modules().version.clone()),
                 )
             } else {
-                (harvested, catalog::CatalogOrigin::ConfiguredTree)
+                (harvested, CatalogOrigin::ConfiguredTree)
             }
         }
         // no tree: the built-in catalogue, at the release the user
@@ -130,7 +135,7 @@ pub fn run_check(args: &[String]) -> i32 {
                 None => catalog::builtin_modules().clone(),
             };
             let version = chosen.version.clone();
-            (chosen.modules, catalog::CatalogOrigin::BuiltIn(version))
+            (chosen.modules, CatalogOrigin::BuiltIn(version))
         }
     };
     // Findings go to stdout as `file:line:col: sev: msg` and are
@@ -144,7 +149,7 @@ pub fn run_check(args: &[String]) -> i32 {
     let mut errors = 0usize;
     let mut warnings = 0usize;
     for f in &files {
-        let path = std::path::Path::new(f);
+        let path = Path::new(f);
         // the editor's and the include graph's reader, so the three
         // agree about what a file says
         let Some(text) = disk_loader(path) else {
@@ -204,11 +209,11 @@ pub fn run_check(args: &[String]) -> i32 {
             // the checker runs in the config's directory, so it gets a
             // path that is valid from there: a relative one is not
             let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-            let out = std::process::Command::new(bin)
+            let out = Command::new(bin)
                 .arg("-C")
                 .arg("-f")
                 .arg(&abs)
-                .current_dir(abs.parent().unwrap_or(std::path::Path::new("/")))
+                .current_dir(abs.parent().unwrap_or(Path::new("/")))
                 .output();
             match out {
                 Ok(out) => {
@@ -219,7 +224,7 @@ pub fn run_check(args: &[String]) -> i32 {
                         String::from_utf8_lossy(&out.stderr)
                     );
                     for d in diag::parse_check_output(&all, rc) {
-                        let is_err = d.severity == diag::Severity::Error;
+                        let is_err = d.severity == Severity::Error;
                         if logic::diag_matches_file(&d.file, path) {
                             findings.push((d.line, d.col_start, is_err, d.message));
                         } else {

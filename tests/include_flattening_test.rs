@@ -19,7 +19,9 @@
 
 mod common;
 
-use opensips_lsp::analyze::includes;
+use opensips_lsp::analyze;
+use std::path::Path;
+use std::process::Command;
 
 /// The shapes, each with the directive in a different position.
 /// `{}` is replaced by a path that does not exist.
@@ -63,10 +65,10 @@ const SHAPES: &[(&str, &str)] = &[
 ];
 
 /// Whether the real binary tries to open the named file.
-fn the_real_parser_opens_it(bin: &str, dir: &std::path::Path, tag: &str, cfg: &str) -> bool {
+fn the_real_parser_opens_it(bin: &str, dir: &Path, tag: &str, cfg: &str) -> bool {
     let path = dir.join(format!("{tag}.cfg"));
     std::fs::write(&path, cfg).expect("fixture config");
-    let out = std::process::Command::new(bin)
+    let out = Command::new(bin)
         .arg("-C")
         .arg("-f")
         .arg(&path)
@@ -98,7 +100,7 @@ fn the_analyzer_sees_exactly_what_the_flattener_opens() {
             .filter(|c| c.is_ascii_alphanumeric())
             .collect();
         let real = the_real_parser_opens_it(&bin, &dir, &tag, &cfg);
-        let seen = includes(&cfg)
+        let seen = analyze::includes(&cfg)
             .iter()
             .any(|i| i.name.contains("definitely-missing"));
         if real {
@@ -133,14 +135,14 @@ fn the_analyzer_sees_exactly_what_the_flattener_opens() {
 #[test]
 fn a_directive_that_opens_a_line_fires_whatever_encloses_it() {
     // inside a block comment, on its own line
-    let inc = includes("log_level=2\n/*\ninclude_file \"fires.inc\"\n*/\n");
+    let inc = analyze::includes("log_level=2\n/*\ninclude_file \"fires.inc\"\n*/\n");
     assert_eq!(
         inc.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(),
         vec!["fires.inc"],
         "a block comment does not stop the flattener"
     );
     // indented, still the first token on its line
-    let inc = includes("/*\n\timport_file 'also.inc'\n*/\n");
+    let inc = analyze::includes("/*\n\timport_file 'also.inc'\n*/\n");
     assert_eq!(
         inc.iter().map(|i| i.name.as_str()).collect::<Vec<_>>(),
         vec!["also.inc"],
@@ -158,7 +160,7 @@ fn a_directive_that_does_not_open_a_line_never_fires() {
         "$var(x) = 1; include_file \"no.inc\"\n",
     ] {
         assert!(
-            includes(text).is_empty(),
+            analyze::includes(text).is_empty(),
             "must not fire, the directive does not open the line: {text:?}"
         );
     }

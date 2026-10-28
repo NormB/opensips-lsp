@@ -1,5 +1,7 @@
 //! `opensips -C` execution and output parsing.
 
+use regex::Regex;
+
 /// Diagnostic severity, mirroring the LSP levels we emit.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Severity {
@@ -34,7 +36,7 @@ pub struct Diag {
 /// reports start..start+len); everything else is noise except as a
 /// fallback when the check failed without any positioned error.
 pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
-    let positioned = regex::Regex::new(
+    let positioned = Regex::new(
         r"(CRITICAL|ERROR|WARNING):core:yyerror: parse error in (.+?):(\d+):(\d+)-(\d+): ?(.*)",
     )
     .unwrap();
@@ -75,7 +77,7 @@ pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
     }
 
     if out.is_empty() && rc != 0 {
-        let generic = regex::Regex::new(r"(?:ERROR|CRITICAL):[^:]*:[^:]*: (.+)").unwrap();
+        let generic = Regex::new(r"(?:ERROR|CRITICAL):[^:]*:[^:]*: (.+)").unwrap();
         let msg = output
             .lines()
             .rev()

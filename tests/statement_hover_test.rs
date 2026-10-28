@@ -14,7 +14,9 @@
 
 mod common;
 
-use opensips_lsp::catalog::{harvest_core, parse_core_statements_md};
+use opensips_lsp::catalog;
+use opensips_lsp::catalog::Item;
+use std::path::Path;
 
 const PAGE: &str = r#"# Statements
 
@@ -35,7 +37,7 @@ Iterates over an indexed variable.
 
 #[test]
 fn a_statements_page_yields_one_entry_per_heading() {
-    let got = parse_core_statements_md(PAGE).expect("the page parses");
+    let got = catalog::parse_core_statements_md(PAGE).expect("the page parses");
     let names: Vec<&str> = got.iter().map(|s| s.name.as_str()).collect();
     // `for each` is prose, not a keyword: the keyword is `for`, and a
     // parser that took the heading verbatim would document something
@@ -67,7 +69,7 @@ fn a_statements_page_yields_one_entry_per_heading() {
 #[test]
 fn adversarial_pages_do_not_panic() {
     for md in ["", "\0\0", "## \n\n", "## if", "prose with no headings\n"] {
-        let _ = parse_core_statements_md(md);
+        let _ = catalog::parse_core_statements_md(md);
     }
 }
 
@@ -75,7 +77,7 @@ fn adversarial_pages_do_not_panic() {
 #[test]
 fn the_real_tree_documents_the_control_statements() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let core = harvest_core(std::path::Path::new(&tree));
+    let core = catalog::harvest_core(Path::new(&tree));
     let names: Vec<&str> = core.statements.iter().map(|s| s.name.as_str()).collect();
     assert!(
         names.len() >= 4,
@@ -104,7 +106,7 @@ fn the_real_tree_documents_the_control_statements() {
 #[test]
 fn keywords_explained_under_another_section_point_at_it() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let core = harvest_core(std::path::Path::new(&tree));
+    let core = catalog::harvest_core(Path::new(&tree));
     for (alias, parent) in [("else", "if"), ("case", "switch"), ("default", "switch")] {
         let it = core
             .statements
@@ -201,9 +203,8 @@ fn every_offered_keyword_carries_documentation() {
     let silent: Vec<&String> = keywords
         .iter()
         .filter(|k| {
-            let documented = |v: &[opensips_lsp::catalog::Item]| {
-                v.iter().any(|i| &i.name == *k && !i.doc.trim().is_empty())
-            };
+            let documented =
+                |v: &[Item]| v.iter().any(|i| &i.name == *k && !i.doc.trim().is_empty());
             !documented(&core.statements) && !documented(&core.functions)
         })
         .collect();
@@ -225,7 +226,7 @@ fn every_offered_keyword_carries_documentation() {
 #[test]
 fn every_harvested_statement_is_a_writable_keyword() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let core = harvest_core(std::path::Path::new(&tree));
+    let core = catalog::harvest_core(Path::new(&tree));
     assert!(
         core.statements.len() >= 4,
         "control: {} statement(s) harvested",
@@ -268,7 +269,7 @@ fn the_async_page_yields_only_its_two_statements() {
 #[test]
 fn the_real_async_page_documents_async_and_launch() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let core = harvest_core(std::path::Path::new(&tree));
+    let core = catalog::harvest_core(Path::new(&tree));
     for kw in ["async", "launch"] {
         let it = core
             .statements
@@ -354,7 +355,7 @@ fn async_and_launch_come_from_the_async_page() {
 
     // a tree with the statements page but NOT the async page
     std::fs::write(manual.join("Script-Statements.md"), "## if\n\nChooses.\n").unwrap();
-    let without = harvest_core(&dir);
+    let without = catalog::harvest_core(&dir);
     assert!(
         without.statements.iter().any(|s| s.name == "if"),
         "control: the statements page must still be read"
@@ -372,7 +373,7 @@ fn async_and_launch_come_from_the_async_page() {
         "## async() statement\n\nDoes async things.\n\n## launch() statement\n\nDoes launch things.\n",
     )
     .unwrap();
-    let with = harvest_core(&dir);
+    let with = catalog::harvest_core(&dir);
     for kw in ["async", "launch"] {
         let it = with
             .statements

@@ -18,7 +18,9 @@
 
 mod common;
 
-use opensips_lsp::catalog::parse_core_params_md;
+use opensips_lsp::catalog;
+use opensips_lsp::catalog::Item;
+use std::path::Path;
 
 const PAGE: &str = r#"# Core parameters
 
@@ -83,7 +85,7 @@ fenced_heading = 1
 ```
 "#;
 
-fn param<'a>(v: &'a [opensips_lsp::catalog::Item], name: &str) -> &'a opensips_lsp::catalog::Item {
+fn param<'a>(v: &'a [Item], name: &str) -> &'a Item {
     v.iter()
         .find(|i| i.name == name)
         .unwrap_or_else(|| panic!("{name} missing"))
@@ -91,7 +93,7 @@ fn param<'a>(v: &'a [opensips_lsp::catalog::Item], name: &str) -> &'a opensips_l
 
 #[test]
 fn the_hover_carries_the_worked_example() {
-    let got = parse_core_params_md(PAGE).expect("parses");
+    let got = catalog::parse_core_params_md(PAGE).expect("parses");
     let db = param(&got, "db_default_url");
     assert!(
         db.doc
@@ -104,7 +106,7 @@ fn the_hover_carries_the_worked_example() {
 
 #[test]
 fn the_hover_carries_the_default_value() {
-    let got = parse_core_params_md(PAGE).expect("parses");
+    let got = catalog::parse_core_params_md(PAGE).expect("parses");
     let db = param(&got, "db_default_url");
     assert!(
         db.doc.contains("NULL"),
@@ -115,7 +117,7 @@ fn the_hover_carries_the_default_value() {
 
 #[test]
 fn the_description_is_still_first() {
-    let got = parse_core_params_md(PAGE).expect("parses");
+    let got = catalog::parse_core_params_md(PAGE).expect("parses");
     let db = param(&got, "db_default_url");
     assert!(
         db.doc.starts_with("The default DB URL"),
@@ -126,7 +128,7 @@ fn the_description_is_still_first() {
 
 #[test]
 fn a_parameter_with_no_default_still_gets_its_example() {
-    let got = parse_core_params_md(PAGE).expect("parses");
+    let got = catalog::parse_core_params_md(PAGE).expect("parses");
     let ch = param(&got, "children");
     assert!(ch.doc.contains("children = 16"), "{:?}", ch.doc);
     assert!(
@@ -138,14 +140,14 @@ fn a_parameter_with_no_default_still_gets_its_example() {
 
 #[test]
 fn a_parameter_with_neither_is_unchanged() {
-    let got = parse_core_params_md(PAGE).expect("parses");
+    let got = catalog::parse_core_params_md(PAGE).expect("parses");
     let n = param(&got, "no_extras");
     assert_eq!(n.doc.trim(), "Just a description, nothing else.");
 }
 
 #[test]
 fn one_section_does_not_borrow_the_next_ones_example() {
-    let got = parse_core_params_md(PAGE).expect("parses");
+    let got = catalog::parse_core_params_md(PAGE).expect("parses");
     let db = param(&got, "db_default_url");
     assert!(
         !db.doc.contains("children = 16"),
@@ -162,7 +164,7 @@ fn adversarial_sections_do_not_panic() {
         "### x\n\nDefault value is\n",
         "",
     ] {
-        let _ = parse_core_params_md(md);
+        let _ = catalog::parse_core_params_md(md);
     }
 }
 
@@ -170,7 +172,7 @@ fn adversarial_sections_do_not_panic() {
 #[test]
 fn the_real_page_gives_db_default_url_its_format() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let core = opensips_lsp::catalog::harvest_core(std::path::Path::new(&tree));
+    let core = opensips_lsp::catalog::harvest_core(Path::new(&tree));
 
     // POSITIVE CONTROL: an empty harvest must not read as one miss.
     assert!(core.params.len() > 50, "only {} params", core.params.len());
@@ -197,7 +199,7 @@ fn the_real_page_gives_db_default_url_its_format() {
 /// question.
 #[test]
 fn prose_after_the_default_does_not_join_the_description() {
-    let got = parse_core_params_md(PAGE).expect("parses");
+    let got = catalog::parse_core_params_md(PAGE).expect("parses");
     let it = param(&got, "db_max_async_connections");
     assert!(
         it.doc
@@ -217,7 +219,7 @@ fn prose_after_the_default_does_not_join_the_description() {
 /// one code block, which reads as one broken example.
 #[test]
 fn only_the_first_fenced_block_is_taken() {
-    let got = parse_core_params_md(PAGE).expect("parses");
+    let got = catalog::parse_core_params_md(PAGE).expect("parses");
     let it = param(&got, "db_max_async_connections");
     assert!(
         it.doc.contains("[ scheme, user, pass"),
@@ -238,7 +240,7 @@ fn only_the_first_fenced_block_is_taken() {
 /// hovers it for.
 #[test]
 fn a_comment_at_column_zero_inside_an_example_does_not_end_the_section() {
-    let got = parse_core_params_md(PAGE).expect("parses");
+    let got = catalog::parse_core_params_md(PAGE).expect("parses");
     let it = param(&got, "fenced_heading");
     assert!(
         it.doc.contains("# a comment"),
@@ -276,7 +278,7 @@ Example of usage:
 
 ```
 "#;
-    let got = parse_core_params_md(LIST).expect("parses");
+    let got = catalog::parse_core_params_md(LIST).expect("parses");
     let it = param(&got, "socket");
     assert!(
         it.doc.contains("\n* `use_workers n`"),

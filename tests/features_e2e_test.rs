@@ -2,11 +2,12 @@
 //! stdio LSP against a SYNTHETIC OpenSIPS tree — hermetic, no gating.
 
 mod common;
-use common::*;
+use common::Server;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-fn mk_tree(root: &std::path::Path) {
-    let w = |p: std::path::PathBuf, c: &str| {
+fn mk_tree(root: &Path) {
+    let w = |p: PathBuf, c: &str| {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, c).unwrap();
     };
@@ -69,10 +70,10 @@ fn all_features_over_stdio_against_a_synthetic_tree() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
         "capabilities":{},
@@ -82,12 +83,12 @@ fn all_features_over_stdio_against_a_synthetic_tree() {
             "checkTimeoutMs": 1234
         }}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "initialize");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "initialize");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    let ready = wait_for(
+    let ready = common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -102,19 +103,19 @@ fn all_features_over_stdio_against_a_synthetic_tree() {
     assert!(msg.contains("2 documented modules"), "harvest count: {msg}");
     assert!(msg.contains("1 core functions"), "core count: {msg}");
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":DOC}}}),
     );
 
     // completion in code offers loaded-module + core functions + core params
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{
             "textDocument":{"uri":uri},"position":{"line":2,"character":6}}}),
     );
-    let l = labels(&wait_for(&rx, |v| v["id"] == 2, "code completion"));
+    let l = labels(&common::wait_for(&rx, |v| v["id"] == 2, "code completion"));
     assert!(l.contains(&"my_func".to_string()), "{l:?}");
     assert!(l.contains(&"core_fn".to_string()));
     assert!(l.contains(&"core_param".to_string()));
@@ -124,12 +125,12 @@ fn all_features_over_stdio_against_a_synthetic_tree() {
     );
 
     // hover over a module function
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{
             "textDocument":{"uri":uri},"position":{"line":2,"character":5}}}),
     );
-    let h = wait_for(&rx, |v| v["id"] == 4, "hover");
+    let h = common::wait_for(&rx, |v| v["id"] == 4, "hover");
     assert!(
         h["result"]["contents"]["value"]
             .as_str()
@@ -139,54 +140,58 @@ fn all_features_over_stdio_against_a_synthetic_tree() {
     );
 
     // goto definition: route(helper) on line 5, cursor on 'helper' (col 11)
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":5,"method":"textDocument/definition","params":{
             "textDocument":{"uri":uri},"position":{"line":5,"character":11}}}),
     );
-    let d = wait_for(&rx, |v| v["id"] == 5, "definition");
+    let d = common::wait_for(&rx, |v| v["id"] == 5, "definition");
     assert_eq!(d["result"]["range"]["start"]["line"], 1, "definition: {d}");
 
     // didChange: load othermod too and reference $ru; completion follows the LIVE buffer
     let doc2 = format!("loadmodule \"othermod.so\"\n{DOC}route {{ xlog(\"$\"); }}\n");
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
             "textDocument":{"uri":uri,"version":2},
             "contentChanges":[{"text": doc2}]}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":6,"method":"textDocument/completion","params":{
             "textDocument":{"uri":uri},"position":{"line":3,"character":6}}}),
     );
-    let l = labels(&wait_for(&rx, |v| v["id"] == 6, "post-change completion"));
+    let l = labels(&common::wait_for(
+        &rx,
+        |v| v["id"] == 6,
+        "post-change completion",
+    ));
     assert!(
         l.contains(&"other_func".to_string()),
         "didChange must update the live buffer: {l:?}"
     );
 
     // pvar completion right after the '$' in the appended route (line 8)
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":7,"method":"textDocument/completion","params":{
             "textDocument":{"uri":uri},"position":{"line":8,"character":15}}}),
     );
-    let l = labels(&wait_for(&rx, |v| v["id"] == 7, "pvar completion"));
+    let l = labels(&common::wait_for(&rx, |v| v["id"] == 7, "pvar completion"));
     assert_eq!(l, vec!["$ru".to_string()], "pvar completion: {l:?}");
 
     // didClose: the document store forgets the file → hover yields null
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didClose","params":{
             "textDocument":{"uri":uri}}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":8,"method":"textDocument/hover","params":{
             "textDocument":{"uri":uri},"position":{"line":2,"character":5}}}),
     );
-    let h = wait_for(&rx, |v| v["id"] == 8, "post-close hover");
+    let h = common::wait_for(&rx, |v| v["id"] == 8, "post-close hover");
     assert!(h["result"].is_null(), "closed docs must be forgotten: {h}");
 
     // second server against the same tree must hit the cache
@@ -203,20 +208,20 @@ fn all_features_over_stdio_against_a_synthetic_tree() {
             .unwrap(),
         &base,
     );
-    let rx2 = spawn_reader(&mut child2);
+    let rx2 = common::spawn_reader(&mut child2);
     let mut stdin2 = child2.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin2,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{},
             "initializationOptions":{"opensipsPath":"","opensipsSrc": tree.display().to_string()}}}),
     );
-    wait_for(&rx2, |v| v["id"] == 1, "init 2");
-    write_msg(
+    common::wait_for(&rx2, |v| v["id"] == 1, "init 2");
+    common::write_msg(
         &mut stdin2,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    let ready2 = wait_for(
+    let ready2 = common::wait_for(
         &rx2,
         |v| {
             v["method"] == "window/logMessage"
@@ -263,15 +268,15 @@ fn signature_help_and_pvar_text_edits() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
         "capabilities":{},
         "initializationOptions":{"opensipsPath":"","opensipsSrc": tree.display().to_string()}}}),
     );
-    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    let init = common::wait_for(&rx, |v| v["id"] == 1, "init");
     let sig_caps = &init["result"]["capabilities"]["signatureHelpProvider"];
     assert!(
         sig_caps["triggerCharacters"]
@@ -296,11 +301,11 @@ fn signature_help_and_pvar_text_edits() {
             .unwrap_or(false),
         "completion must trigger on / inside an include path: {comp_triggers}"
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    wait_for(
+    common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -311,27 +316,27 @@ fn signature_help_and_pvar_text_edits() {
         },
         "ready log",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":doc}}}),
     );
     // signature help just after `my_func(`
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/signatureHelp","params":{
         "textDocument":{"uri":uri},"position":{"line":2,"character":12}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "signatureHelp");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "signatureHelp");
     assert_eq!(v["result"]["signatures"][0]["label"], "my_func(arg)");
     assert_eq!(v["result"]["activeParameter"], 0);
     // pvar completion replaces the typed `$r`, not appends to it
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{
         "textDocument":{"uri":uri},"position":{"line":3,"character":6}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "completion");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "completion");
     let items = v["result"].as_array().expect("items");
     let ru = items
         .iter()
@@ -374,20 +379,20 @@ fn undocumented_modparam_warns_between_saves() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
         "capabilities":{},
         "initializationOptions":{"opensipsPath":"","opensipsSrc": tree.display().to_string()}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    wait_for(
+    common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -398,7 +403,7 @@ fn undocumented_modparam_warns_between_saves() {
         },
         "ready",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":doc}}}),
@@ -406,13 +411,13 @@ fn undocumented_modparam_warns_between_saves() {
     // type an undocumented param: warning must arrive without a save
     let broken =
         "loadmodule \"mymod.so\"\nmodparam(\"mymod\", \"bad_param\", 1)\nroute {\n    exit;\n}\n";
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
         "textDocument":{"uri":uri,"version":2},
         "contentChanges":[{"text":broken}]}}),
     );
-    let diag = wait_for(
+    let diag = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"
@@ -429,13 +434,13 @@ fn undocumented_modparam_warns_between_saves() {
     assert_eq!(ds[0]["severity"], 2);
     assert_eq!(ds[0]["range"]["start"]["line"], 1);
     // a DOCUMENTED param clears it
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
         "textDocument":{"uri":uri,"version":3},
         "contentChanges":[{"text": broken.replace("bad_param", "my_param")}]}}),
     );
-    let clear = wait_for(
+    let clear = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics" && v["params"]["version"] == 3,
         "clear",
@@ -474,18 +479,18 @@ fn completion_offers_nothing_inside_a_comment() {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "initialize");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "initialize");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    wait_for(
+    common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -496,7 +501,7 @@ fn completion_offers_nothing_inside_a_comment() {
         },
         "readiness",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":doc}}}),
@@ -513,12 +518,12 @@ fn completion_offers_nothing_inside_a_comment() {
     .enumerate()
     {
         let id = 10 + id as i64;
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"textDocument/completion","params":{
                 "textDocument":{"uri":uri},"position":{"line":line,"character":ch}}}),
         );
-        let l = labels(&wait_for(&rx, |v| v["id"] == id, "completion"));
+        let l = labels(&common::wait_for(&rx, |v| v["id"] == id, "completion"));
         assert_eq!(
             l.contains(&"my_func".to_string()),
             offered,

@@ -15,7 +15,7 @@
 //! silent, because that release really does export it.
 
 mod common;
-use common::*;
+use common::Server;
 use std::cell::RefCell;
 
 thread_local! {
@@ -23,6 +23,7 @@ thread_local! {
     static ANNOUNCED: RefCell<serde_json::Value> = const { RefCell::new(serde_json::Value::Null) };
 }
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 const CFG: &str = "route {\n    xlog(\"x\");\n}\nmodparam(\"proto_bin\", \"bin_async_local_connect_timeout\", 5)\n";
 
@@ -57,23 +58,23 @@ fn diagnostics_for(tag: &str, version: Option<&str>) -> Vec<String> {
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{}, "initializationOptions": opts}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "initialize");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "initialize");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
     // The server announces what it is judging against before it is
     // ready; the editor shows this so the reader never has to guess.
-    // `wait_for` discards what it passes over, so this must be taken
+    // `common::wait_for` discards what it passes over, so this must be taken
     // before the ready message it precedes.
-    let announced = wait_for(
+    let announced = common::wait_for(
         &rx,
         |v| v["method"] == "opensipsLsp/catalogue",
         "catalogue announcement",
@@ -83,7 +84,7 @@ fn diagnostics_for(tag: &str, version: Option<&str>) -> Vec<String> {
     // Wait for the catalogue to be in place first. Without this the
     // "no diagnostics" case below would be satisfied by a server that
     // simply had not got there yet — an empty result meaning nothing.
-    wait_for(
+    common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -94,7 +95,7 @@ fn diagnostics_for(tag: &str, version: Option<&str>) -> Vec<String> {
         },
         "ready",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":CFG}}}),
@@ -102,8 +103,8 @@ fn diagnostics_for(tag: &str, version: Option<&str>) -> Vec<String> {
     // Drain rather than block: a clean file may publish an empty list
     // or nothing at all, and "nothing" is a real answer here.
     let mut msgs: Vec<String> = Vec::new();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(6);
-    while let Some(left) = deadline.checked_duration_since(std::time::Instant::now()) {
+    let deadline = Instant::now() + Duration::from_secs(6);
+    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
         let Ok(v) = rx.recv_timeout(left) else {
             break;
         };

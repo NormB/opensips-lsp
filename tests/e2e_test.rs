@@ -2,9 +2,9 @@
 //! A stub `opensips` binary supplies deterministic -C output.
 
 mod common;
-use common::*;
+use common::Server;
 use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[test]
 fn diagnostics_flow_over_stdio() {
@@ -39,33 +39,33 @@ fn diagnostics_flow_over_stdio() {
             .expect("server binary must spawn"),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize",
             "params":{"capabilities":{}}}),
     );
-    let init = wait_for(&rx, |v| v["id"] == 1, "initialize result");
+    let init = common::wait_for(&rx, |v| v["id"] == 1, "initialize result");
     assert!(
         init["result"]["capabilities"]["hoverProvider"]
             .as_bool()
             .unwrap_or(false)
     );
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,
                 "text":"loadmodule \"nope.so\"\nbroken here\n"}}}),
     );
 
-    let diag = wait_for(
+    let diag = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics",
         "publishDiagnostics",
@@ -77,12 +77,12 @@ fn diagnostics_flow_over_stdio() {
     assert_eq!(ds[0]["range"]["start"]["character"], 4);
     assert_eq!(ds[0]["range"]["end"]["character"], 6);
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":9,"method":"shutdown"}),
     );
-    wait_for(&rx, |v| v["id"] == 9, "shutdown result");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 9, "shutdown result");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"exit"}),
     );
@@ -91,12 +91,12 @@ fn diagnostics_flow_over_stdio() {
     drop(stdin);
     // bounded wait: a server that ignores `exit` must fail the test,
     // not hang it
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(10);
     let status = loop {
         if let Some(st) = child.try_wait().expect("try_wait") {
             break st;
         }
-        if std::time::Instant::now() > deadline {
+        if Instant::now() > deadline {
             child.kill().ok();
             panic!("server did not exit within 10s of the exit notification");
         }
@@ -130,26 +130,26 @@ fn hanging_opensips_check_is_bounded_and_reported() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "initialize result");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "initialize result");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":format!("file://{}", cfg.display()),"languageId":"opensips-cfg","version":1,"text":"route{}\n"}}}),
     );
 
     // within a couple seconds (NOT 60) we must hear the timeout warning
-    let log = wait_for(
+    let log = common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -187,33 +187,33 @@ fn empty_opensips_bin_disables_checks_entirely() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "initialize result");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "initialize result");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":format!("file://{}", cfg.display()),"languageId":"opensips-cfg","version":1,"text":"route{}\n"}}}),
     );
     // request hover to force a full round-trip; NO publishDiagnostics
     // may arrive before its response
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/hover","params":{
         "textDocument":{"uri":format!("file://{}", cfg.display())},"position":{"line":0,"character":1}}}),
     );
     let mut saw_diags = false;
     loop {
-        let v = wait_for(&rx, |_| true, "hover response");
+        let v = common::wait_for(&rx, |_| true, "hover response");
         if v["method"] == "textDocument/publishDiagnostics" {
             saw_diags = true;
         }
@@ -248,28 +248,28 @@ fn symbol_columns_are_utf16_on_multibyte_lines() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol","params":{
         "textDocument":{"uri":uri}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "symbols");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "symbols");
     let sym = &v["result"][0];
     assert_eq!(
         sym["range"]["start"]["character"], 10,
@@ -303,34 +303,34 @@ fn folding_and_nested_symbols_over_stdio() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    let init = common::wait_for(&rx, |v| v["id"] == 1, "init");
     assert!(
         init["result"]["capabilities"]["foldingRangeProvider"]
             .as_bool()
             .unwrap_or(false),
         "foldingRangeProvider must be advertised"
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/foldingRange","params":{
         "textDocument":{"uri":uri}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "folding");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "folding");
     let folds = v["result"].as_array().expect("folding array");
     let got: Vec<(u64, u64)> = folds
         .iter()
@@ -345,12 +345,12 @@ fn folding_and_nested_symbols_over_stdio() {
     // string closes nothing
     assert_eq!(got, vec![(1, 5), (2, 4), (6, 8)], "{folds:?}");
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/documentSymbol","params":{
         "textDocument":{"uri":uri}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "symbols");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "symbols");
     let syms = v["result"].as_array().expect("symbol array");
     let names: Vec<&str> = syms.iter().map(|s| s["name"].as_str().unwrap()).collect();
     assert_eq!(names, vec!["tm", "route (main)", "failure_route[fr]"]);
@@ -392,13 +392,13 @@ fn references_rename_highlight_over_stdio() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    let init = common::wait_for(&rx, |v| v["id"] == 1, "init");
     for cap in ["referencesProvider", "documentHighlightProvider"] {
         assert!(
             init["result"]["capabilities"][cap]
@@ -411,41 +411,41 @@ fn references_rename_highlight_over_stdio() {
         !init["result"]["capabilities"]["renameProvider"].is_null(),
         "renameProvider must be advertised"
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
     // references from a call site, declaration included → 2 refs + def
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/references","params":{
         "textDocument":{"uri":uri},"position":{"line":1,"character":11},
         "context":{"includeDeclaration":true}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "references");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "references");
     let locs = v["result"].as_array().expect("locations");
     assert_eq!(locs.len(), 3, "2 refs + 1 def: {locs:?}");
     // declaration excluded → 2
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/references","params":{
         "textDocument":{"uri":uri},"position":{"line":1,"character":11},
         "context":{"includeDeclaration":false}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 3, "references-nodecl");
+    let v = common::wait_for(&rx, |v| v["id"] == 3, "references-nodecl");
     assert_eq!(v["result"].as_array().unwrap().len(), 2);
     // highlights at the def name: 3 occurrences, def is Write(3)
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"textDocument/documentHighlight","params":{
         "textDocument":{"uri":uri},"position":{"line":4,"character":7}}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 4, "highlight");
+    let v = common::wait_for(&rx, |v| v["id"] == 4, "highlight");
     let hls = v["result"].as_array().expect("highlights");
     assert_eq!(hls.len(), 3);
     assert!(
@@ -453,12 +453,12 @@ fn references_rename_highlight_over_stdio() {
         "def highlighted as Write"
     );
     // rename to a valid name rewrites every occurrence
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":5,"method":"textDocument/rename","params":{
         "textDocument":{"uri":uri},"position":{"line":1,"character":11},"newName":"fwd_1"}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 5, "rename");
+    let v = common::wait_for(&rx, |v| v["id"] == 5, "rename");
     let edits = v["result"]["changes"][&uri].as_array().expect("edits");
     assert_eq!(edits.len(), 3);
     assert!(edits.iter().all(|e| e["newText"] == "fwd_1"));
@@ -470,12 +470,12 @@ fn references_rename_highlight_over_stdio() {
     assert_eq!(quoted["range"]["start"]["character"], 11);
     assert_eq!(quoted["range"]["end"]["character"], 16);
     // rename to an ILLEGAL name is rejected with an error
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":6,"method":"textDocument/rename","params":{
         "textDocument":{"uri":uri},"position":{"line":1,"character":11},"newName":"has space"}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 6, "rename-bad");
+    let v = common::wait_for(&rx, |v| v["id"] == 6, "rename-bad");
     assert!(
         !v["error"].is_null(),
         "illegal new name must be a jsonrpc error: {v}"
@@ -517,24 +517,24 @@ fn check_invocation_carries_the_opensips_flags() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":"route { exit; }\n"}}}),
     );
     // rc=0 with clean output publishes empty diagnostics; wait for it
-    wait_for(
+    common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics",
         "publish after check",
@@ -583,23 +583,23 @@ fn check_runs_in_the_configs_own_directory() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":"route { exit; }\n"}}}),
     );
-    wait_for(
+    common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics",
         "publish after check",
@@ -648,26 +648,26 @@ fn a_newer_save_supersedes_a_slow_running_check() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    let t0 = std::time::Instant::now();
-    write_msg(
+    let t0 = Instant::now();
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":v1}}}),
     );
     // give the slow check time to actually spawn and hold the gate
-    std::thread::sleep(std::time::Duration::from_millis(400));
-    write_msg(
+    std::thread::sleep(Duration::from_millis(400));
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
         "textDocument":{"uri":uri,"version":2},
@@ -675,14 +675,14 @@ fn a_newer_save_supersedes_a_slow_running_check() {
     );
     // the editor saves the new content to disk, then notifies
     std::fs::write(&cfg, v2).unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didSave","params":{
         "textDocument":{"uri":uri}}}),
     );
     // the -C result specifically (the debounced analyzer also
     // publishes version 2, but with no checker diagnostics)
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"
@@ -692,7 +692,7 @@ fn a_newer_save_supersedes_a_slow_running_check() {
         "fresh -C result",
     );
     assert!(
-        t0.elapsed() < std::time::Duration::from_secs(10),
+        t0.elapsed() < Duration::from_secs(10),
         "the superseded run must be killed, not awaited"
     );
     let msgs = v["params"]["diagnostics"].to_string();
@@ -722,34 +722,34 @@ fn selection_range_grows_outward_over_stdio() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    let init = wait_for(&rx, |v| v["id"] == 1, "init");
+    let init = common::wait_for(&rx, |v| v["id"] == 1, "init");
     assert_eq!(
         init["result"]["capabilities"]["selectionRangeProvider"],
         serde_json::json!(true)
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
     );
     // `xlog` is UTF-16 columns 22..26 and bytes 23..27; the cursor
     // sits inside it
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/selectionRange","params":{
         "textDocument":{"uri":uri},"positions":[{"line":1,"character":24}]}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "selectionRange");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "selectionRange");
     let mut chain = Vec::new();
     let mut cur = &v["result"][0];
     while !cur.is_null() {

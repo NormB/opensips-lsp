@@ -28,7 +28,8 @@
 //!   though it runs unconditionally.  So a line is only re-indented
 //!   when the previous code line actually ENDED a statement.
 
-use crate::analyze::{Class, classify};
+use crate::analyze;
+use crate::analyze::Class;
 
 /// Formatting options, as an LSP client supplies them in
 /// `FormattingOptions`.
@@ -144,7 +145,7 @@ fn level(labelled: &[bool], label: bool) -> usize {
 /// The rewritten text of every line, in order.  Lines the formatter
 /// leaves alone come back byte-identical.
 fn formatted_lines(text: &str, opts: &Options) -> Vec<String> {
-    let class = classify(text);
+    let class = analyze::classify(text);
     let lines = lines_with_offsets(text);
     let mut out = Vec::with_capacity(lines.len());
     // one entry per open brace: has a label stood in its body yet

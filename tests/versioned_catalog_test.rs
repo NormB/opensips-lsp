@@ -9,17 +9,18 @@
 
 mod common;
 
-use opensips_lsp::catalog::{
-    BuiltinModules, ModuleDoc, VersionedModules, canonicalize, diff_catalogues, harvest_tree,
-};
+use opensips_lsp::catalog;
+
+use opensips_lsp::catalog::{BuiltinModules, ModuleDoc, VersionedModules};
+use std::path::PathBuf;
 
 /// `<version>=<path>` pairs, oldest first, from `proof-env.sh`.
-fn trees() -> Vec<(String, std::path::PathBuf)> {
+fn trees() -> Vec<(String, PathBuf)> {
     let raw = common::required_env("OPENSIPS_LSP_TEST_TREES");
     raw.split(',')
         .filter_map(|entry| {
             let (v, p) = entry.split_once('=')?;
-            Some((v.to_string(), std::path::PathBuf::from(p)))
+            Some((v.to_string(), PathBuf::from(p)))
         })
         .collect()
 }
@@ -28,11 +29,11 @@ fn harvests() -> Vec<(String, Vec<ModuleDoc>)> {
     trees()
         .into_iter()
         .map(|(v, p)| {
-            let mut mods = harvest_tree(&p);
+            let mut mods = catalog::harvest_tree(&p);
             // the versioned catalogue is stored canonically, so a
             // harvest must be put in the same order before the two
             // can be compared for equality at all
-            canonicalize(&mut mods);
+            catalog::canonicalize(&mut mods);
             (v, mods)
         })
         .collect()
@@ -42,7 +43,7 @@ fn build(harvests: &[(String, Vec<ModuleDoc>)]) -> VersionedModules {
     let (base_v, base_m) = &harvests[0];
     let mut deltas = Vec::new();
     for pair in harvests.windows(2) {
-        deltas.push(diff_catalogues(&pair[0].1, &pair[1].1, &pair[1].0));
+        deltas.push(catalog::diff_catalogues(&pair[0].1, &pair[1].1, &pair[1].0));
     }
     VersionedModules {
         base: BuiltinModules {

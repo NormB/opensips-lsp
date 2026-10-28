@@ -9,6 +9,8 @@
 
 mod common;
 use opensips_lsp::catalog;
+use opensips_lsp::catalog::ModuleDoc;
+use std::path::PathBuf;
 
 #[test]
 fn the_vendored_catalogue_has_the_modules_a_config_actually_loads() {
@@ -98,11 +100,11 @@ fn the_provenance_note_names_its_catalogue_and_release() {
 #[test]
 fn the_vendored_module_catalogue_matches_a_fresh_harvest_of_every_pinned_tree() {
     let raw = common::required_env("OPENSIPS_LSP_TEST_TREES");
-    let trees: Vec<(String, std::path::PathBuf)> = raw
+    let trees: Vec<(String, PathBuf)> = raw
         .split(',')
         .filter_map(|e| {
             let (v, p) = e.split_once('=')?;
-            Some((v.to_string(), std::path::PathBuf::from(p)))
+            Some((v.to_string(), PathBuf::from(p)))
         })
         .collect();
     let vendored = catalog::builtin_versioned();
@@ -125,9 +127,7 @@ fn the_vendored_module_catalogue_matches_a_fresh_harvest_of_every_pinned_tree() 
             .at(version)
             .unwrap_or_else(|| panic!("{version} must resolve from the vendored file"));
 
-        let names = |v: &[catalog::ModuleDoc]| -> Vec<String> {
-            v.iter().map(|m| m.name.clone()).collect()
-        };
+        let names = |v: &[ModuleDoc]| -> Vec<String> { v.iter().map(|m| m.name.clone()).collect() };
         assert_eq!(
             names(&got),
             names(&fresh),

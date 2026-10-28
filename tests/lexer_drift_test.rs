@@ -13,7 +13,8 @@
 
 mod common;
 
-use opensips_lsp::analyze::route_defs;
+use opensips_lsp::analyze;
+use std::path::Path;
 
 /// The route-kind keywords `cfg.lex` declares, from lines of the form
 /// `ROUTE_FAILURE failure_route`.
@@ -47,7 +48,7 @@ fn kinds_from_the_lexer(lex: &str) -> Vec<String> {
 #[test]
 fn every_route_kind_in_the_real_lexer_is_recognised() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let lex = std::fs::read_to_string(std::path::Path::new(&tree).join("cfg.lex"))
+    let lex = std::fs::read_to_string(Path::new(&tree).join("cfg.lex"))
         .expect("cfg.lex in the pinned tree");
     let kinds = kinds_from_the_lexer(&lex);
 
@@ -71,8 +72,10 @@ fn every_route_kind_in_the_real_lexer_is_recognised() {
         // one. A kind it does not know matches neither.
         let named = format!("{kind}[DRIFT_GATE] {{\n    exit;\n}}\n");
         let bare = format!("{kind} {{\n    exit;\n}}\n");
-        let found_named = route_defs(&named).iter().any(|d| d.name == "DRIFT_GATE");
-        let found_bare = !route_defs(&bare).is_empty();
+        let found_named = analyze::route_defs(&named)
+            .iter()
+            .any(|d| d.name == "DRIFT_GATE");
+        let found_bare = !analyze::route_defs(&bare).is_empty();
         if !found_named && !found_bare {
             unseen.push(kind.clone());
         }
@@ -93,7 +96,7 @@ fn every_route_kind_in_the_real_lexer_is_recognised() {
 #[test]
 fn the_analyzer_recognises_no_route_kind_the_lexer_lacks() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let lex = std::fs::read_to_string(std::path::Path::new(&tree).join("cfg.lex"))
+    let lex = std::fs::read_to_string(Path::new(&tree).join("cfg.lex"))
         .expect("cfg.lex in the pinned tree");
     let kinds = kinds_from_the_lexer(&lex);
     assert!(kinds.len() >= 9, "positive control: {kinds:?}");
@@ -113,7 +116,9 @@ fn the_analyzer_recognises_no_route_kind_the_lexer_lacks() {
         }
         let named = format!("{foreign}[DRIFT_GATE] {{\n    exit;\n}}\n");
         assert!(
-            !route_defs(&named).iter().any(|d| d.name == "DRIFT_GATE"),
+            !analyze::route_defs(&named)
+                .iter()
+                .any(|d| d.name == "DRIFT_GATE"),
             "'{foreign}' is not in cfg.lex but the analyzer reads it as a route definition"
         );
     }

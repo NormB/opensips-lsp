@@ -1,7 +1,11 @@
 //! Module documentation catalog, harvested from the OpenSIPS docbook
 //! sources (`modules/<name>/doc/<name>_admin.xml`).
 
-use std::path::Path;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// Where a module catalogue came from.
 ///
@@ -29,7 +33,7 @@ impl CatalogOrigin {
 }
 
 /// One documented module symbol: a parameter or a function.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     /// Bare name (`kv_bucket`, `nats_kv_get`).
     pub name: String,
@@ -40,7 +44,7 @@ pub struct Item {
 }
 
 /// The harvested documentation of one OpenSIPS module.
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModuleDoc {
     /// Module name (directory name under `modules/`).
     pub name: String,
@@ -54,12 +58,11 @@ pub struct ModuleDoc {
 /// editor popups: strip raw HTML and neutralize links whose scheme is
 /// not http(s) (`command:`, `javascript:`, ...) — the label survives.
 fn sanitize_doc(text: &str) -> String {
-    static HTML: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    static LINK: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let html = HTML.get_or_init(|| regex::Regex::new(r"</?[A-Za-z][^>]*>").unwrap());
-    let link = LINK.get_or_init(|| {
-        regex::Regex::new(r"\[([^\]]*)\]\(([A-Za-z][A-Za-z0-9+.-]*):[^)]*\)").unwrap()
-    });
+    static HTML: OnceLock<Regex> = OnceLock::new();
+    static LINK: OnceLock<Regex> = OnceLock::new();
+    let html = HTML.get_or_init(|| Regex::new(r"</?[A-Za-z][^>]*>").unwrap());
+    let link = LINK
+        .get_or_init(|| Regex::new(r"\[([^\]]*)\]\(([A-Za-z][A-Za-z0-9+.-]*):[^)]*\)").unwrap());
     let no_html = html.replace_all(text, "");
     link.replace_all(&no_html, |c: &regex::Captures| {
         let scheme = c[2].to_ascii_lowercase();
@@ -76,7 +79,7 @@ fn sanitize_doc(text: &str) -> String {
 /// whose definitions live in files we do not load; neutralize every
 /// non-predefined entity so the XML still parses standalone.
 fn neutralize_entities(xml: &str) -> String {
-    let re = regex::Regex::new(r"&([a-zA-Z][a-zA-Z0-9._-]*);").unwrap();
+    let re = Regex::new(r"&([a-zA-Z][a-zA-Z0-9._-]*);").unwrap();
     re.replace_all(xml, |c: &regex::Captures| {
         let name = &c[1];
         match name {
@@ -311,12 +314,7 @@ pub struct ModuleCParams {
 pub fn parse_param_export_tables(src: &str) -> Vec<String> {
     let mut names = Vec::new();
     let mut complete = true;
-    scan_param_tables(
-        src,
-        &std::collections::BTreeMap::new(),
-        &mut names,
-        &mut complete,
-    );
+    scan_param_tables(src, &BTreeMap::new(), &mut names, &mut complete);
     names
 }
 
@@ -324,7 +322,7 @@ pub fn parse_param_export_tables(src: &str) -> Vec<String> {
 /// collect the names it declares.
 fn scan_param_tables(
     src: &str,
-    macros: &std::collections::BTreeMap<String, String>,
+    macros: &BTreeMap<String, String>,
     out: &mut Vec<String>,
     complete: &mut bool,
 ) {
@@ -381,7 +379,7 @@ fn scan_param_tables(
 fn collect_table_entries(
     src: &str,
     start: usize,
-    macros: &std::collections::BTreeMap<String, String>,
+    macros: &BTreeMap<String, String>,
     out: &mut Vec<String>,
     complete: &mut bool,
     budget: u8,
@@ -464,10 +462,8 @@ fn collect_table_entries(
 ///
 /// Only the ones containing a `{"` are kept: those are the ones a
 /// parameter table can splice in.
-fn collect_entry_macros(
-    files: &[std::path::PathBuf],
-) -> std::collections::BTreeMap<String, String> {
-    let mut out = std::collections::BTreeMap::new();
+fn collect_entry_macros(files: &[PathBuf]) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
     for f in files {
         let Ok(text) = std::fs::read_to_string(f) else {
             continue;
@@ -502,7 +498,7 @@ fn collect_entry_macros(
 }
 
 /// Every C source under `root`, plus its headers when asked.
-fn c_sources(root: &Path, headers: bool) -> Vec<std::path::PathBuf> {
+fn c_sources(root: &Path, headers: bool) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -626,9 +622,9 @@ pub fn harvest_tree(tree_root: &Path) -> Vec<ModuleDoc> {
 /// entry of a `cmd_export_t` table whose handler is the handler of a
 /// documented function, under a name the documentation does not use.
 pub fn function_aliases_from_c(c_src: &str, documented: &[Item]) -> Vec<Item> {
-    static ENTRY: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static ENTRY: OnceLock<Regex> = OnceLock::new();
     let entry = ENTRY.get_or_init(|| {
-        regex::Regex::new(
+        Regex::new(
             r#"\{\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*,\s*\(\s*cmd_function\s*\)\s*&?\s*([A-Za-z_][A-Za-z0-9_]*)"#,
         )
         .unwrap()
@@ -1362,8 +1358,8 @@ fn is_spelling(w: &str) -> bool {
 /// is `allow_proxy`, and reading it as aliases invents two settings
 /// nobody can write.
 pub fn lexer_spellings(pattern: &str) -> Vec<String> {
-    static GROUP: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let group = GROUP.get_or_init(|| regex::Regex::new(r"\(([^()]*)\)").unwrap());
+    static GROUP: OnceLock<Regex> = OnceLock::new();
+    let group = GROUP.get_or_init(|| Regex::new(r"\(([^()]*)\)").unwrap());
     let words = |t: &str| -> Vec<String> {
         t.split('"')
             .filter(|w| is_spelling(w))
@@ -1439,8 +1435,8 @@ fn reconcile_core_with_grammar(core: &mut CoreDocs, cfg_y: &str, cfg_lex: &str) 
         .find("\nassign_stm:")
         .map(|i| {
             let rest = &cfg_y[i + 1..];
-            static NEXT: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let next = NEXT.get_or_init(|| regex::Regex::new(r"\n[a-z_]+:").unwrap());
+            static NEXT: OnceLock<Regex> = OnceLock::new();
+            let next = NEXT.get_or_init(|| Regex::new(r"\n[a-z_]+:").unwrap());
             match next.find(&rest["assign_stm:".len()..]) {
                 Some(m) => &rest[.."assign_stm:".len() + m.start()],
                 None => rest,
@@ -1694,10 +1690,9 @@ pub fn harvest_socket_modifiers(tree_root: &Path) -> Vec<Item> {
 /// is what distinguishes this switch from every other `case 'X':` in
 /// a source tree.
 pub fn parse_log_levels_c(src: &str) -> Vec<String> {
-    static CASE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let case = CASE.get_or_init(|| {
-        regex::Regex::new(r"case\s*'([A-Z])'\s*:[^;{}]*?(L_[A-Z][A-Z0-9_]*)").unwrap()
-    });
+    static CASE: OnceLock<Regex> = OnceLock::new();
+    let case = CASE
+        .get_or_init(|| Regex::new(r"case\s*'([A-Z])'\s*:[^;{}]*?(L_[A-Z][A-Z0-9_]*)").unwrap());
     let Some(end) = src.find("unknown log level") else {
         return Vec::new();
     };
@@ -1834,7 +1829,7 @@ pub fn parse_core_vars_md(md: &str) -> Result<Vec<Item>, String> {
 }
 
 /// Core-language documentation harvested from `docs/manual/` (4.x).
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CoreDocs {
     /// Core script functions (`Script-CoreFunctions.md`).
     pub functions: Vec<Item>,
@@ -1864,7 +1859,7 @@ pub struct CoreDocs {
 
 /// The vendored core catalogue: what the core language looks like in
 /// the version this release pins.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BuiltinCore {
     /// The OpenSIPS version the docs were harvested from.
     pub version: String,
@@ -1881,7 +1876,7 @@ pub struct BuiltinCore {
 /// user configures still wins, because only that is exact for their
 /// build — so every built-in entry says which version it came from.
 pub fn builtin_core() -> &'static BuiltinCore {
-    static B: std::sync::OnceLock<BuiltinCore> = std::sync::OnceLock::new();
+    static B: OnceLock<BuiltinCore> = OnceLock::new();
     B.get_or_init(|| {
         let b: BuiltinCore = serde_json::from_str(include_str!("core_builtin.json"))
             .expect("the vendored core catalogue must parse");
@@ -1896,7 +1891,7 @@ pub fn builtin_core() -> &'static BuiltinCore {
 /// if absent — and whether a given upsert is an addition or an edit is
 /// a question about the previous release, not a fact worth storing
 /// twice.
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModuleDelta {
     /// The release this delta produces.
     pub version: String,
@@ -1910,7 +1905,7 @@ pub struct ModuleDelta {
 
 /// How one surface — a module's parameters, or its functions —
 /// changed between two releases.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SurfaceChange {
     /// Item-level edits, keyed by name.
     Edits {
@@ -1931,7 +1926,7 @@ pub enum SurfaceChange {
 }
 
 /// What one release changed inside one surviving module.
-#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ModuleChange {
     /// The module these changes apply to.
     pub module: String,
@@ -1949,7 +1944,7 @@ pub struct ModuleChange {
 /// shipping each release whole would be mostly duplicated bytes, and
 /// the duplication would grow with every release added rather than
 /// shrink.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VersionedModules {
     /// The oldest supported release, in full.
     pub base: BuiltinModules,
@@ -2131,7 +2126,7 @@ impl VersionedModules {
 
 /// The vendored module catalogue: every module the pinned release
 /// documents, with its exported functions and parameters.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BuiltinModules {
     /// The OpenSIPS version the docs were harvested from.
     pub version: String,
@@ -2150,7 +2145,7 @@ pub struct BuiltinModules {
 /// blended together would be wrong in a way neither is on its own.
 /// Every built-in entry says which version it came from.
 pub fn builtin_modules() -> &'static BuiltinModules {
-    static B: std::sync::OnceLock<BuiltinModules> = std::sync::OnceLock::new();
+    static B: OnceLock<BuiltinModules> = OnceLock::new();
     B.get_or_init(|| {
         let newest = builtin_versioned().newest();
         builtin_modules_at(newest).expect("the newest supported release must resolve")
@@ -2159,7 +2154,7 @@ pub fn builtin_modules() -> &'static BuiltinModules {
 
 /// The vendored catalogue in full: the base release and every delta.
 pub fn builtin_versioned() -> &'static VersionedModules {
-    static V: std::sync::OnceLock<VersionedModules> = std::sync::OnceLock::new();
+    static V: OnceLock<VersionedModules> = OnceLock::new();
     V.get_or_init(|| {
         serde_json::from_str(include_str!("modules_builtin.json"))
             .expect("the vendored module catalogue must parse")
@@ -2292,7 +2287,7 @@ pub fn tree_fingerprint(tree_root: &Path) -> String {
         Some((m.len(), t))
     };
     let canon = std::fs::canonicalize(tree_root).unwrap_or_else(|_| tree_root.to_path_buf());
-    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    let mut files: Vec<PathBuf> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(canon.join("modules")) {
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
@@ -2327,7 +2322,7 @@ pub fn tree_fingerprint(tree_root: &Path) -> String {
     format!("{h:016x}")
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Serialize, Deserialize)]
 struct CacheFile {
     modules: Vec<ModuleDoc>,
     core: CoreDocs,

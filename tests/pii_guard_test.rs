@@ -3,7 +3,10 @@
 //! domains, or real home-directory paths. Runs in CI, so a leak is a
 //! red build, not a post-hoc scrub.
 
-use std::path::Path;
+use regex::Regex;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::OnceLock;
 
 /// Patterns that must never appear in the repository. Documentation
 /// address space (192.0.2.0/24, example.com) and generic placeholders
@@ -31,15 +34,15 @@ fn find_pii(text: &str) -> Vec<String> {
         // fancy_regex for the lookahead in the home-path pattern is
         // overkill; emulate it: match /home/<name> and allow "user".
         if pat.starts_with("/home/") {
-            static HOME_RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-            let re = HOME_RE.get_or_init(|| regex::Regex::new(r"/home/([a-z][a-z0-9]*)").unwrap());
+            static HOME_RE: OnceLock<Regex> = OnceLock::new();
+            let re = HOME_RE.get_or_init(|| Regex::new(r"/home/([a-z][a-z0-9]*)").unwrap());
             for c in re.captures_iter(text) {
                 if &c[1] != "user" {
                     hits.push(format!("{} ({})", &c[0], why));
                 }
             }
         } else {
-            let re = regex::Regex::new(pat).unwrap();
+            let re = Regex::new(pat).unwrap();
             if let Some(m) = re.find(text) {
                 hits.push(format!("{} ({})", m.as_str(), why));
             }
@@ -69,8 +72,8 @@ fn detector_allows_documentation_placeholders() {
 /// The guard protects what SHIPS: scan exactly the git-tracked files
 /// (local generated artifacts and excluded tooling never ship, and
 /// scanning them produces false positives about the checkout path).
-fn tracked_files(root: &Path) -> Vec<std::path::PathBuf> {
-    let out = std::process::Command::new("git")
+fn tracked_files(root: &Path) -> Vec<PathBuf> {
+    let out = Command::new("git")
         .args(["ls-files", "-z"])
         .current_dir(root)
         .output()

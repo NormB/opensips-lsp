@@ -8,6 +8,8 @@
 //! specifically, so the failure arrives as "personal infrastructure
 //! leaked" rather than "use a neutral example".
 
+use std::process::Command;
+
 fn docs() -> Vec<(String, String)> {
     let root = env!("CARGO_MANIFEST_DIR");
     let mut out = Vec::new();
@@ -62,7 +64,7 @@ fn no_documentation_example_uses_a_home_directory() {
 #[test]
 fn the_personal_infrastructure_guard_sees_the_documentation() {
     let root = env!("CARGO_MANIFEST_DIR");
-    let out = std::process::Command::new("git")
+    let out = Command::new("git")
         .args(["ls-files"])
         .current_dir(root)
         .output()
@@ -209,7 +211,7 @@ fn every_settings_example_names_a_real_setting() {
 #[test]
 fn the_guard_scans_the_tests_as_well_as_the_sources() {
     let root = env!("CARGO_MANIFEST_DIR");
-    let out = std::process::Command::new("git")
+    let out = Command::new("git")
         .args(["ls-files"])
         .current_dir(root)
         .output()

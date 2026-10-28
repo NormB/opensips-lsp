@@ -12,10 +12,11 @@
 
 mod common;
 
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn grammar_dir() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tree-sitter-opensips")
+fn grammar_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tree-sitter-opensips")
 }
 
 #[test]

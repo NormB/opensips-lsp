@@ -3,6 +3,8 @@
 //! and Open VSX only — the Microsoft VS Code Marketplace is not a
 //! target and no publish logic for it may be added here.
 
+use regex::Regex;
+
 fn workflow(name: &str) -> Option<String> {
     std::fs::read_to_string(format!(
         "{}/.github/workflows/{}",
@@ -131,7 +133,7 @@ fn all_workflows() -> Vec<(String, String)> {
 /// reader can see what it is.
 #[test]
 fn every_action_is_pinned_to_a_full_commit_sha() {
-    let pinned = regex::Regex::new(r"^[^@\s]+@[0-9a-f]{40} # v[0-9][0-9.]*$").unwrap();
+    let pinned = Regex::new(r"^[^@\s]+@[0-9a-f]{40} # v[0-9][0-9.]*$").unwrap();
     let mut bad = Vec::new();
     let mut seen = 0usize;
     for (f, y) in all_workflows() {
@@ -413,7 +415,7 @@ fn ci_runs_a_pinned_actionlint_over_every_workflow() {
         job.contains("actionlint_1.7.12_linux_amd64.tar.gz"),
         "actionlint is pinned to a release artefact"
     );
-    let sha = regex::Regex::new(r"[0-9a-f]{64}  actionlint_1\.7\.12_linux_amd64\.tar\.gz").unwrap();
+    let sha = Regex::new(r"[0-9a-f]{64}  actionlint_1\.7\.12_linux_amd64\.tar\.gz").unwrap();
     assert!(
         sha.is_match(job) && job.contains("sha256sum -c"),
         "the artefact's sha256 is pinned and checked"

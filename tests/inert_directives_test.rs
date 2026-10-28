@@ -9,12 +9,14 @@
 
 mod common;
 use opensips_lsp::logic;
+use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// The tests here run in parallel and each calls this several times,
 /// so every call gets its own directory.
 fn messages(text: &str) -> Vec<String> {
-    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    static CALLS: AtomicUsize = AtomicUsize::new(0);
+    let n = CALLS.fetch_add(1, Ordering::Relaxed);
     let dir = common::Scratch::new(&format!("oslsp-inert-{n}"));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("t.cfg");
@@ -95,7 +97,7 @@ fn a_directive_inside_a_block_comment_is_not_flagged() {
 #[test]
 fn the_real_opensips_lexer_still_has_no_preprocessor() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let lex = std::fs::read_to_string(std::path::Path::new(&tree).join("cfg.lex"))
+    let lex = std::fs::read_to_string(Path::new(&tree).join("cfg.lex"))
         .expect("cfg.lex in the pinned tree");
     assert!(
         lex.contains("COM_LINE"),

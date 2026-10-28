@@ -8,13 +8,15 @@
 //! The lint name is spelled in two pieces below so this file does not
 //! match its own scan.
 
+use std::path::PathBuf;
+
 #[test]
 fn no_source_silences_the_argument_count_lint() {
     let lint = format!("clippy::{}", "too_many_arguments");
     let root = env!("CARGO_MANIFEST_DIR");
     let mut stack = vec![
-        std::path::PathBuf::from(root).join("src"),
-        std::path::PathBuf::from(root).join("tests"),
+        PathBuf::from(root).join("src"),
+        PathBuf::from(root).join("tests"),
     ];
     let mut scanned = 0;
     let mut offenders = Vec::new();

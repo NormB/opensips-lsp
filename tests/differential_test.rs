@@ -11,9 +11,13 @@
 mod common;
 
 use opensips_lsp::logic;
+use regex::Regex;
+use std::cmp::Reverse;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Same enumeration as the corpus sweep: shipped example configs.
-fn corpus(tree: &std::path::Path) -> Vec<std::path::PathBuf> {
+fn corpus(tree: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for dir in [tree.join("etc"), tree.join("examples")] {
         let Ok(rd) = std::fs::read_dir(&dir) else {
@@ -46,7 +50,7 @@ fn corpus(tree: &std::path::Path) -> Vec<std::path::PathBuf> {
     out
 }
 
-fn disk_loader(p: &std::path::Path) -> Option<String> {
+fn disk_loader(p: &Path) -> Option<String> {
     let md = std::fs::metadata(p).ok()?;
     if !md.is_file() || md.len() > 1_048_576 {
         return None;
@@ -60,7 +64,7 @@ fn analyzer_is_silent_on_binary_accepted_configs() {
         common::required_env("OPENSIPS_LSP_TEST_TREE"),
         common::required_env("OPENSIPS_LSP_TEST_BIN"),
     );
-    let mut files = corpus(std::path::Path::new(&tree));
+    let mut files = corpus(Path::new(&tree));
     assert!(!files.is_empty(), "no corpus configs under {tree}");
     // the shipped examples may all be rejected on a box with a partial
     // module install; a synthetic baseline (verified-accepted
@@ -91,7 +95,7 @@ fn analyzer_is_silent_on_binary_accepted_configs() {
     }
     let mut accepted = 0usize;
     for f in &files {
-        let Ok(out) = std::process::Command::new(&bin)
+        let Ok(out) = Command::new(&bin)
             .arg("-C")
             .arg("-f")
             .arg(f)
@@ -129,8 +133,8 @@ fn rename_round_trip_survives_the_real_parser() {
     let cfg = dir.join("rt.cfg");
     let original = "socket=udp:127.0.0.1:15999\nloadmodule \"proto_udp.so\"\nroute[old_target] {\n    exit;\n}\nroute {\n    route(old_target);\n    exit;\n}\n";
     std::fs::write(&cfg, original).unwrap();
-    let check = |p: &std::path::Path| {
-        std::process::Command::new(&bin)
+    let check = |p: &Path| {
+        Command::new(&bin)
             .arg("-C")
             .arg("-f")
             .arg(p)
@@ -153,7 +157,7 @@ fn rename_round_trip_survives_the_real_parser() {
     let mut occ = logic::route_occurrences(original, "old_target");
     assert_eq!(occ.len(), 2, "def + one call site");
     // splice right-to-left so earlier columns stay valid
-    occ.sort_by_key(|(l, _)| (l.line, std::cmp::Reverse(l.col)));
+    occ.sort_by_key(|(l, _)| (l.line, Reverse(l.col)));
     for (l, _) in &occ {
         let line = &mut lines[l.line as usize];
         let (s, e) = (l.col as usize, l.col as usize + l.name.len());
@@ -191,16 +195,15 @@ fn rename_round_trip_survives_the_real_parser() {
 #[test]
 fn the_catalogue_contains_every_parameter_the_readmes_set() {
     let tree = common::required_env("OPENSIPS_LSP_TEST_TREE");
-    let root = std::path::Path::new(&tree);
-    let re =
-        regex::Regex::new(r#"modparam\(\s*"([A-Za-z0-9_]+)"\s*,\s*"([A-Za-z0-9_]+)""#).unwrap();
+    let root = Path::new(&tree);
+    let re = Regex::new(r#"modparam\(\s*"([A-Za-z0-9_]+)"\s*,\s*"([A-Za-z0-9_]+)""#).unwrap();
     let catalogue = opensips_lsp::catalog::builtin_modules();
 
     let mut checked = 0usize;
     let mut missing: Vec<String> = Vec::new();
     let mut not_exported: Vec<String> = Vec::new();
     let mut with_tables = 0usize;
-    let mut dirs: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("modules"))
+    let mut dirs: Vec<PathBuf> = std::fs::read_dir(root.join("modules"))
         .expect("an OpenSIPS source tree has modules/")
         .flatten()
         .map(|e| e.path())
@@ -301,7 +304,7 @@ fn signature_names(heading: &str) -> Vec<String> {
 /// The functions a module's "Exported Functions" chapter names, read
 /// from the source `harvest_tree` reads: `README.md` when it has the
 /// chapter, the docbook admin guide otherwise.
-fn documented_functions(dir: &std::path::Path, module: &str) -> Vec<String> {
+fn documented_functions(dir: &Path, module: &str) -> Vec<String> {
     let mut out = Vec::new();
     if let Ok(md) = std::fs::read_to_string(dir.join("README.md")) {
         let (mut inside, mut fence) = (false, false);
@@ -333,10 +336,10 @@ fn documented_functions(dir: &std::path::Path, module: &str) -> Vec<String> {
         return out;
     };
     // entities are external to the file; their text is irrelevant here
-    let xml = regex::Regex::new(r"&[A-Za-z0-9_.-]+;")
+    let xml = Regex::new(r"&[A-Za-z0-9_.-]+;")
         .unwrap()
         .replace_all(&xml, "X");
-    let xml = regex::Regex::new(r"(?s)<!DOCTYPE.*?\]>|<!DOCTYPE[^>]*>")
+    let xml = Regex::new(r"(?s)<!DOCTYPE.*?\]>|<!DOCTYPE[^>]*>")
         .unwrap()
         .replace_all(&xml, "");
     let Ok(doc) = roxmltree::Document::parse(&xml) else {
@@ -384,11 +387,11 @@ fn the_catalogue_contains_every_function_the_docs_document() {
     let mut checked = 0usize;
     for pair in raw.split(',') {
         let (version, tree) = pair.split_once('=').expect("<version>=<tree>");
-        let root = std::path::Path::new(tree);
+        let root = Path::new(tree);
         let catalogue = opensips_lsp::catalog::builtin_modules_at(version)
             .unwrap_or_else(|| panic!("{version} is a pinned release"));
         let harvested = opensips_lsp::catalog::harvest_tree(root);
-        let mut dirs: Vec<std::path::PathBuf> = std::fs::read_dir(root.join("modules"))
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(root.join("modules"))
             .expect("an OpenSIPS source tree has modules/")
             .flatten()
             .map(|e| e.path())
@@ -486,7 +489,7 @@ fn no_catalogue_function_is_absent_from_its_modules_c_sources() {
     let mut checked = 0usize;
     for pair in raw.split(',') {
         let (version, tree) = pair.split_once('=').expect("<version>=<tree>");
-        let root = std::path::Path::new(tree);
+        let root = Path::new(tree);
         let catalogue = opensips_lsp::catalog::builtin_modules_at(version)
             .unwrap_or_else(|| panic!("{version} is a pinned release"));
         // the vendored catalogue, and what a configured tree yields at
@@ -551,7 +554,7 @@ fn the_catalogue_carries_exactly_the_aliases_the_c_sources_define() {
         let (version, tree) = pair.split_once('=').expect("<version>=<tree>");
         let vendored = opensips_lsp::catalog::builtin_modules_at(version)
             .unwrap_or_else(|| panic!("{version} is a pinned release"));
-        let harvested = opensips_lsp::catalog::harvest_tree(std::path::Path::new(tree));
+        let harvested = opensips_lsp::catalog::harvest_tree(Path::new(tree));
         for (what, mods) in [("vendored", &vendored.modules), ("harvest", &harvested)] {
             let aliases: Vec<String> = mods
                 .iter()

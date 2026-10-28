@@ -9,7 +9,8 @@
 //! the diagnostics leg.
 
 mod common;
-use common::*;
+use common::Server;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 // `proto_udp` has not existed as a module since 3.x — UDP is core —
@@ -53,20 +54,20 @@ fn full_stack_against_a_real_4x_tree() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "initialize");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "initialize");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
     // the harvest is asynchronous: wait for the readiness log line
-    wait_for(
+    common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -77,16 +78,16 @@ fn full_stack_against_a_real_4x_tree() {
         },
         "harvest-ready logMessage",
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":bad}}}),
     );
 
-    // diagnostics leg first: wait_for discards non-matching traffic,
+    // diagnostics leg first: common::wait_for discards non-matching traffic,
     // so this must be consumed before the request/response waits below
     if !bin.is_empty() {
-        let d = wait_for(
+        let d = common::wait_for(
             &rx,
             |v| {
                 v["method"] == "textDocument/publishDiagnostics"
@@ -110,21 +111,25 @@ fn full_stack_against_a_real_4x_tree() {
     }
 
     // 1. module-param completion inside modparam("tm", "...
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/completion","params":{
             "textDocument":{"uri":uri},"position":{"line":2,"character":16}}}),
     );
-    let l = labels(&wait_for(&rx, |v| v["id"] == 2, "tm param completion"));
+    let l = labels(&common::wait_for(
+        &rx,
+        |v| v["id"] == 2,
+        "tm param completion",
+    ));
     assert!(l.contains(&"fr_timeout".to_string()), "tm params: {l:?}");
 
     // 2. code position offers module functions AND core functions
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":3,"method":"textDocument/completion","params":{
             "textDocument":{"uri":uri},"position":{"line":3,"character":8}}}),
     );
-    let l = labels(&wait_for(&rx, |v| v["id"] == 3, "code completion"));
+    let l = labels(&common::wait_for(&rx, |v| v["id"] == 3, "code completion"));
     assert!(l.contains(&"t_relay".to_string()), "module fn: {l:?}");
     assert!(l.contains(&"cache_store".to_string()), "core fn missing");
     assert!(
@@ -134,12 +139,12 @@ fn full_stack_against_a_real_4x_tree() {
 
     // 3. hover on a core function documents it
     // (line 4 col: "route { exit; }" — hover the tm modparam name instead)
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"textDocument/hover","params":{
             "textDocument":{"uri":uri},"position":{"line":2,"character":18}}}),
     );
-    let h = wait_for(&rx, |v| v["id"] == 4, "hover");
+    let h = common::wait_for(&rx, |v| v["id"] == 4, "hover");
     let hover = h["result"]["contents"]["value"].as_str().unwrap_or("");
     assert!(hover.contains("fr_timeout"), "hover: {hover}");
 
@@ -292,39 +297,39 @@ fn a_fragment_is_checked_through_its_root_by_the_real_parser() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{},
             "initializationOptions":{"opensipsPath": bin},
             "workspaceFolders":[{"uri": format!("file://{}", dir.display()), "name":"w"}]}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"opensips/analysisRoot",
             "params":{"uri": frag_uri}}),
     );
-    let v = wait_for(&rx, |v| v["id"] == 2, "analysisRoot");
+    let v = common::wait_for(&rx, |v| v["id"] == 2, "analysisRoot");
     assert!(
         v["result"]
             .as_str()
             .is_some_and(|s| s.ends_with("opensips.cfg")),
         "the real workspace's root must be found: {v}"
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":frag_uri,"languageId":"opensips-cfg","version":1,
                             "text":frag_text}}}),
     );
-    let v = wait_for(
+    let v = common::wait_for(
         &rx,
         |v| {
             v["method"] == "textDocument/publishDiagnostics"
@@ -396,7 +401,7 @@ fn the_real_parser_sees_the_same_program_whole_or_split() {
     // from a flag; passing one the binary does not know makes it exit
     // before it parses anything, and the comparison below would then
     // be between two empty lists
-    let run = |cfg: &std::path::Path| -> Vec<String> {
+    let run = |cfg: &Path| -> Vec<String> {
         let mut cmd = Command::new(&bin);
         cmd.arg("-C");
         let out = cmd

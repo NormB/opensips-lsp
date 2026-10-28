@@ -17,16 +17,18 @@
 //! is already a separate switch for them.
 
 mod common;
-use common::*;
-use std::process::{Command, Stdio};
+use common::Server;
+use std::path::Path;
+use std::process::{ChildStdin, Command, Stdio};
+use std::sync::mpsc::Receiver;
 
 fn manifest() -> serde_json::Value {
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("client/package.json");
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("client/package.json");
     serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
 }
 
 fn extension_ts() -> String {
-    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("client/src/extension.ts");
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("client/src/extension.ts");
     std::fs::read_to_string(p).unwrap()
 }
 
@@ -123,8 +125,8 @@ fn boot(
 ) -> (
     common::Scratch,
     Server,
-    std::sync::mpsc::Receiver<serde_json::Value>,
-    std::process::ChildStdin,
+    Receiver<serde_json::Value>,
+    ChildStdin,
     String,
 ) {
     let base_scratch = common::Scratch::new(&format!("oslsp-assist-{tag}"));
@@ -151,19 +153,19 @@ fn boot(
             .unwrap(),
         &base,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
             "capabilities":{}, "initializationOptions": opts}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
             "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
@@ -172,31 +174,31 @@ fn boot(
 }
 
 fn hover(
-    stdin: &mut std::process::ChildStdin,
-    rx: &std::sync::mpsc::Receiver<serde_json::Value>,
+    stdin: &mut ChildStdin,
+    rx: &Receiver<serde_json::Value>,
     uri: &str,
     id: i64,
 ) -> serde_json::Value {
-    write_msg(
+    common::write_msg(
         stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"textDocument/hover","params":{
             "textDocument":{"uri":uri},"position":{"line":1,"character":5}}}),
     );
-    wait_for(rx, |v| v["id"] == id, "hover")["result"].clone()
+    common::wait_for(rx, |v| v["id"] == id, "hover")["result"].clone()
 }
 
 fn completion(
-    stdin: &mut std::process::ChildStdin,
-    rx: &std::sync::mpsc::Receiver<serde_json::Value>,
+    stdin: &mut ChildStdin,
+    rx: &Receiver<serde_json::Value>,
     uri: &str,
     id: i64,
 ) -> Vec<String> {
-    write_msg(
+    common::write_msg(
         stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":id,"method":"textDocument/completion","params":{
             "textDocument":{"uri":uri},"position":{"line":1,"character":8}}}),
     );
-    let v = wait_for(rx, |v| v["id"] == id, "completion");
+    let v = common::wait_for(rx, |v| v["id"] == id, "completion");
     v["result"]
         .as_array()
         .map(|a| {
@@ -243,7 +245,7 @@ fn the_toggle_takes_effect_without_a_restart() {
         "on to begin with"
     );
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{
             "settings":{"assistance": false}}}),
@@ -265,7 +267,7 @@ fn the_toggle_takes_effect_without_a_restart() {
     assert!(off, "the same server, no restart, must stop answering");
     assert!(completion(&mut stdin, &rx, &uri, 20).is_empty());
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{
             "settings":{"assistance": true}}}),
@@ -306,7 +308,7 @@ fn a_payload_that_omits_the_toggle_leaves_it_alone() {
         "off to begin with"
     );
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{
             "settings":{"maxDiagnostics": 42}}}),
@@ -340,7 +342,7 @@ fn the_namespaced_payload_shape_toggles_too() {
         "on to begin with"
     );
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{
             "settings":{"opensipsLsp":{"assistance": false}}}}),

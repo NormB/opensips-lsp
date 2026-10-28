@@ -6,8 +6,10 @@
 //!  - a check whose buffer changed mid-flight publishes nothing
 
 mod common;
-use common::*;
+use common::Server;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// Stub opensips: behavior keyed by a mode file next to the cfg.
 ///   error -> one positioned error;  hang -> sleep past the timeout;
@@ -21,14 +23,7 @@ echo "CRITICAL:core:yyerror: parse error in $cfg:1:2-3: planted" >&2
 exit 255
 "#;
 
-fn setup(
-    tag: &str,
-) -> (
-    common::Scratch,
-    std::path::PathBuf,
-    std::path::PathBuf,
-    String,
-) {
+fn setup(tag: &str) -> (common::Scratch, PathBuf, PathBuf, String) {
     let dir_scratch = common::Scratch::new(&format!("oslsp-cur-{tag}"));
     let dir = dir_scratch.path().to_path_buf();
     std::fs::create_dir_all(&dir).unwrap();
@@ -62,24 +57,24 @@ fn failed_checks_clear_stale_diagnostics_and_publishes_carry_versions() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":7,"text":"route{}\n"}}}),
     );
-    let d = wait_for(
+    let d = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics",
         "first publish",
@@ -94,12 +89,12 @@ fn failed_checks_clear_stale_diagnostics_and_publishes_carry_versions() {
 
     // now the checker hangs: the timeout must CLEAR the old diagnostic
     std::fs::write(dir.join("mode"), "hang").unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didSave","params":{
         "textDocument":{"uri":uri}}}),
     );
-    let d2 = wait_for(
+    let d2 = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics",
         "clearing publish",
@@ -131,26 +126,26 @@ fn midflight_buffer_change_suppresses_the_stale_result() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
 
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":"route{}\n"}}}),
     );
     // edit while the check sleeps: its result must be suppressed
-    std::thread::sleep(std::time::Duration::from_millis(150));
-    write_msg(
+    std::thread::sleep(Duration::from_millis(150));
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{
         "textDocument":{"uri":uri,"version":2},
@@ -158,15 +153,15 @@ fn midflight_buffer_change_suppresses_the_stale_result() {
     );
 
     // drain: give the delayed check time to finish, then fence with a request
-    std::thread::sleep(std::time::Duration::from_millis(1500));
-    write_msg(
+    std::thread::sleep(Duration::from_millis(1500));
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":9,"method":"textDocument/hover","params":{
         "textDocument":{"uri":uri},"position":{"line":0,"character":1}}}),
     );
     let mut saw_v1_publish = false;
     loop {
-        let v = wait_for(&rx, |_| true, "fence");
+        let v = common::wait_for(&rx, |_| true, "fence");
         if v["method"] == "textDocument/publishDiagnostics" && v["params"]["version"] == 1 {
             saw_v1_publish = true;
         }
@@ -213,25 +208,25 @@ fn output_flood_is_capped_and_clears_diagnostics() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
         "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":"route{}\n"}}}),
     );
 
     // the flood must be reported via logMessage and the publish must be EMPTY
-    let log = wait_for(
+    let log = common::wait_for(
         &rx,
         |v| {
             v["method"] == "window/logMessage"
@@ -248,7 +243,7 @@ fn output_flood_is_capped_and_clears_diagnostics() {
             .unwrap()
             .contains("output cap")
     );
-    let d = wait_for(
+    let d = common::wait_for(
         &rx,
         |v| v["method"] == "textDocument/publishDiagnostics",
         "publish",
@@ -283,14 +278,14 @@ fn requests_are_answered_while_checks_run() {
             .unwrap(),
         &dir,
     );
-    let rx = spawn_reader(&mut child);
+    let rx = common::spawn_reader(&mut child);
     let mut stdin = child.stdin.take().unwrap();
-    write_msg(
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}}),
     );
-    wait_for(&rx, |v| v["id"] == 1, "init");
-    write_msg(
+    common::wait_for(&rx, |v| v["id"] == 1, "init");
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
     );
@@ -300,30 +295,30 @@ fn requests_are_answered_while_checks_run() {
         let text = "route[r] {\n    exit;\n}\n";
         std::fs::write(&cfg, text).unwrap();
         let uri = format!("file://{}", cfg.display());
-        write_msg(
+        common::write_msg(
             &mut stdin,
             &serde_json::json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{
                 "textDocument":{"uri":uri,"languageId":"opensips-cfg","version":1,"text":text}}}),
         );
         uris.push(uri);
     }
-    let t = std::time::Instant::now();
-    write_msg(
+    let t = Instant::now();
+    common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","id":2,"method":"textDocument/documentSymbol",
             "params":{"textDocument":{"uri":uris[0]}}}),
     );
-    let r = wait_for(&rx, |v| v["id"] == 2, "documentSymbol");
+    let r = common::wait_for(&rx, |v| v["id"] == 2, "documentSymbol");
     let took = t.elapsed();
     assert_eq!(r["result"].as_array().map(|a| a.len()), Some(1), "{r}");
     assert!(
         // a request queued behind a check waits its six seconds
-        took < std::time::Duration::from_secs(5),
+        took < Duration::from_secs(5),
         "documentSymbol waited {took:?} behind the checks"
     );
     // the checks still run and still publish
     for _ in 0..5 {
-        wait_for(
+        common::wait_for(
             &rx,
             |v| v["method"] == "textDocument/publishDiagnostics",
             "a check result",

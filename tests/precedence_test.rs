@@ -4,9 +4,10 @@
 
 mod common;
 
-use opensips_lsp::catalog::harvest_tree;
+use opensips_lsp::catalog;
+use std::path::Path;
 
-fn write(path: &std::path::Path, content: &str) {
+fn write(path: &Path, content: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, content).unwrap();
 }
@@ -26,7 +27,7 @@ fn readme_md_wins_over_docbook_when_both_exist() {
              <title><varname>from_docbook</varname> (string)</title>
              <para>Stale doc.</para></section></chapter>"#,
     );
-    let mods = harvest_tree(&root);
+    let mods = catalog::harvest_tree(&root);
     let both = mods
         .iter()
         .find(|x| x.name == "both")
@@ -50,7 +51,7 @@ fn docbook_is_the_fallback_when_no_readme() {
              <title><varname>old_param</varname> (string)</title>
              <para>Docbook-only doc.</para></section></chapter>"#,
     );
-    let mods = harvest_tree(&root);
+    let mods = catalog::harvest_tree(&root);
     let legacy = mods
         .iter()
         .find(|x| x.name == "legacy")
@@ -74,7 +75,7 @@ fn empty_readme_falls_back_to_docbook() {
              <title><varname>real_param</varname> (int)</title>
              <para>Real doc.</para></section></chapter>"#,
     );
-    let mods = harvest_tree(&root);
+    let mods = catalog::harvest_tree(&root);
     let mixed = mods.iter().find(|x| x.name == "mixed").expect("harvested");
     assert_eq!(mixed.params[0].name, "real_param");
 }
@@ -108,7 +109,7 @@ fn a_module_that_exports_nothing_is_still_in_the_catalogue() {
              <para>Docbook-only doc.</para></section></chapter>"#,
     );
 
-    let mods = harvest_tree(&root);
+    let mods = catalog::harvest_tree(&root);
     let names: Vec<&str> = mods.iter().map(|m| m.name.as_str()).collect();
     assert_eq!(names, vec!["legacy", "xml"], "{names:?}");
     let x = mods.iter().find(|m| m.name == "xml").unwrap();
