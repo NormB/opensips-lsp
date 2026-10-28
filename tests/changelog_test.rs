@@ -122,3 +122,30 @@ fn the_version_dropdown_offers_exactly_the_shipped_releases() {
         .len();
     assert_eq!(described, offered.len(), "one description per choice");
 }
+
+/// fuzz/Cargo.lock records the server's own version, because the fuzz
+/// package depends on it by path. A release bump that leaves the lock
+/// behind ships a fuzz workspace whose lock file disagrees with its
+/// manifest; `cargo fuzz` rewrites it on the next run, and nothing in
+/// the release checked it.
+#[test]
+fn the_fuzz_lockfile_records_the_server_version() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    let lock = std::fs::read_to_string(format!("{root}/fuzz/Cargo.lock"))
+        .expect("fuzz/Cargo.lock must exist");
+    let entry = lock
+        .split("[[package]]")
+        .find(|p| p.contains("\nname = \"opensips-lsp\"\n"))
+        .expect("fuzz/Cargo.lock has an opensips-lsp package");
+    let recorded = entry
+        .lines()
+        .find_map(|l| l.strip_prefix("version = \""))
+        .and_then(|v| v.strip_suffix('"'))
+        .expect("the opensips-lsp entry has a version");
+    assert_eq!(
+        recorded,
+        env!("CARGO_PKG_VERSION"),
+        "fuzz/Cargo.lock records opensips-lsp {recorded}, Cargo.toml says {}",
+        env!("CARGO_PKG_VERSION")
+    );
+}

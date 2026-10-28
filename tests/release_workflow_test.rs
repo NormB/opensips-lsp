@@ -435,3 +435,22 @@ fn ci_runs_a_pinned_actionlint_over_every_workflow() {
         "CI success waits for actionlint: {needs}"
     );
 }
+
+/// The tag is checked against every file that records the release:
+/// Cargo.toml, client/package.json, the changelog and fuzz/Cargo.lock,
+/// which records the server's version because the fuzz package depends
+/// on it by path.
+#[test]
+fn the_release_tag_is_checked_against_the_fuzz_lockfile() {
+    let y = workflow("release.yml").expect("release.yml must exist");
+    let (_, verify) = y.split_once("\n  verify:").expect("a `verify` job");
+    let verify = verify.split("\n  server:").next().unwrap_or(verify);
+    assert!(
+        verify.contains("fuzz/Cargo.lock"),
+        "the verify job does not read fuzz/Cargo.lock"
+    );
+    assert!(
+        verify.contains("[ \"$tag\" = \"$fuzz\" ]"),
+        "the verify job does not compare the tag with fuzz/Cargo.lock"
+    );
+}

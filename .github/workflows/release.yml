@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: The tag, Cargo.toml, package.json and the changelog agree
+      - name: The tag, Cargo.toml, package.json, fuzz/Cargo.lock and the changelog agree
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
@@ -35,9 +35,13 @@ jobs:
           EOF
           )
           ext=$(python3 -c "import json;print(json.load(open('client/package.json'))['version'])")
-          echo "tag=$tag crate=$crate extension=$ext"
+          # the fuzz package depends on the server by path, so its lock
+          # file records the server's version too
+          fuzz=$(python3 -I -c "import re;print(re.search(r'name = \"opensips-lsp\"\nversion = \"([^\"]+)\"', open('fuzz/Cargo.lock').read()).group(1))")
+          echo "tag=$tag crate=$crate extension=$ext fuzz-lock=$fuzz"
           [ "$tag" = "$crate" ] || { echo "::error::tag $tag != Cargo.toml $crate"; exit 1; }
           [ "$tag" = "$ext" ]   || { echo "::error::tag $tag != package.json $ext"; exit 1; }
+          [ "$tag" = "$fuzz" ]  || { echo "::error::tag $tag != fuzz/Cargo.lock $fuzz"; exit 1; }
           grep -q "^## \[$tag\]" client/CHANGELOG.md || {
             echo "::error::client/CHANGELOG.md has no '## [$tag]' entry — the marketplace Changes tab would be stale"
             exit 1
