@@ -2,6 +2,40 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.28.0] — 2026-10-27
+
+**Renaming an included file rewrites the includes that name it, a
+configuration whose include closure stops at 500 files says so, and
+`has_body` completes.**
+
+- **Renaming or moving a file in the editor rewrites every
+  `include_file`/`import_file` path that names it**, across the
+  workspace, before the rename happens. Relative paths stay relative to
+  the file that holds them and absolute paths stay absolute; a moved
+  file's own relative includes are rewritten so they still name the
+  same files.
+- **A file whose include closure stopped at the 500-file bound carries
+  a warning on its first line**, in the editor and in
+  `opensips-lsp check`, because a route defined only in a file that was
+  not read is reported as undefined. A closure that left nothing out
+  carries no warning.
+- **`has_body` completes, hovers and shows signature help** as an alias
+  of `has_body_part`: the sipmsgops C sources export both names with
+  the same handler, and the documentation names only `has_body_part`.
+- **A failed `opensips -C` check always reports a message.** When the
+  last error line had nothing after its prefix, the diagnostic's text
+  was empty and the editor showed nothing; the nearest earlier line
+  with a reason is used, or the fixed fallback text.
+- **A documentation heading or DocBook id that names nothing documents
+  nothing.** `#### (integer)` or an id of `param_` made a parameter
+  with an empty name, which was offered as a completion and checked
+  against every `modparam`.
+- **The release job waits until every Open VSX platform build is
+  served**, for up to 90 minutes, instead of the universal build alone
+  for 30 minutes.
+- **CI lints every workflow with actionlint**, and the workflow scripts
+  quote the expansions it flagged.
+
 ## [0.27.0] — 2026-10-26
 
 **Routes defined in a configuration's 65th and later include files are
