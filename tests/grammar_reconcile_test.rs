@@ -59,8 +59,14 @@ fn upper_case_alternatives_are_not_spellings_of_their_own() {
 
 #[test]
 fn a_pattern_with_no_word_at_all_yields_nothing() {
-    assert!(catalog::lexer_spellings("{EAT_ABLE}").is_empty());
-    assert!(catalog::lexer_spellings("").is_empty());
+    assert!(
+        catalog::lexer_spellings("{EAT_ABLE}").is_empty(),
+        "a pattern made only of the {{EAT_ABLE}} macro has no word to spell"
+    );
+    assert!(
+        catalog::lexer_spellings("").is_empty(),
+        "an empty pattern has no word to spell"
+    );
 }
 
 /// The reported class: a spelling the manual skips still hovers.

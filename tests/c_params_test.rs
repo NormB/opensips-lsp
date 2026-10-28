@@ -136,7 +136,10 @@ static const param_export_t params[] = {
 
 #[test]
 fn a_file_with_no_table_yields_nothing() {
-    assert!(catalog::parse_param_export_tables("int main(void) { return 0; }").is_empty());
+    assert!(
+        catalog::parse_param_export_tables("int main(void) { return 0; }").is_empty(),
+        "a C file with no param_export_t table has no param names"
+    );
 }
 
 /// Only the literal that opens an entry is a name. A literal nested

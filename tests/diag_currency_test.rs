@@ -241,7 +241,8 @@ fn output_flood_is_capped_and_clears_diagnostics() {
         log["params"]["message"]
             .as_str()
             .unwrap()
-            .contains("output cap")
+            .contains("output cap"),
+        "the flood must be reported via logMessage: {log}"
     );
     let d = common::wait_for(
         &rx,

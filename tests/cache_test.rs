@@ -50,7 +50,11 @@ fn cache_roundtrips_and_invalidates_on_tree_change() {
     let (mods, core) = sample();
 
     // nothing cached yet
-    assert!(catalog::load_cached(&tree, &cache).is_none());
+    assert!(
+        catalog::load_cached(&tree, &cache).is_none(),
+        "nothing was saved yet, so the cache must miss: {}",
+        cache.display()
+    );
 
     catalog::save_cache(&tree, &cache, &mods, &core).expect("save");
     let (m2, c2) = catalog::load_cached(&tree, &cache).expect("hit");
@@ -83,7 +87,11 @@ fn corrupt_cache_is_a_miss_not_a_panic() {
     std::fs::create_dir_all(&cache).unwrap();
     let fp = catalog::tree_fingerprint(&tree);
     std::fs::write(cache.join(format!("{fp}.json")), b"{not json").unwrap();
-    assert!(catalog::load_cached(&tree, &cache).is_none());
+    assert!(
+        catalog::load_cached(&tree, &cache).is_none(),
+        "a corrupt {fp}.json must read as a cache miss: {}",
+        cache.display()
+    );
 }
 
 #[test]
@@ -128,7 +136,11 @@ fn cache_writes_are_atomic_and_leave_no_temp_files() {
 
     // a stray temp file from a crashed writer must be ignored by load
     std::fs::write(cache.join("deadbeef.json.tmp"), b"{torn").unwrap();
-    assert!(catalog::load_cached(&tree, &cache).is_some());
+    assert!(
+        catalog::load_cached(&tree, &cache).is_some(),
+        "a stray deadbeef.json.tmp from a crashed writer must not hide the final artifact: {}",
+        cache.display()
+    );
 }
 
 #[test]
@@ -161,7 +173,11 @@ fn editing_a_harvested_files_content_invalidates_the_cache() {
 
     // creating a previously-absent doc file invalidates too
     catalog::save_cache(&tree, &cache, &mods, &core).expect("resave");
-    assert!(catalog::load_cached(&tree, &cache).is_some());
+    assert!(
+        catalog::load_cached(&tree, &cache).is_some(),
+        "a cache saved after the edit must hit before the doc file is created: {}",
+        cache.display()
+    );
     std::fs::create_dir_all(tree.join("modules").join("m").join("doc")).unwrap();
     std::fs::write(
         tree.join("modules")

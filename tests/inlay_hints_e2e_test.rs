@@ -186,7 +186,10 @@ fn the_setting_applies_live() {
         "live",
         serde_json::json!({"inlayHintParameterNames": false}),
     );
-    assert!(hints(&mut stdin, &rx, &uri, 2, 0, 20).is_empty());
+    assert!(
+        hints(&mut stdin, &rx, &uri, 2, 0, 20).is_empty(),
+        "inlayHintParameterNames starts false, so no hints before the change for {uri}"
+    );
     common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration","params":{

@@ -90,7 +90,10 @@ fn workspace_symbols_filter_across_open_docs() {
         &serde_json::json!({"jsonrpc":"2.0","id":4,"method":"workspace/symbol","params":{"query":""}}),
     );
     let v = common::wait_for(&rx, |v| v["id"] == 4, "wsym-all");
-    assert!(v["result"].as_array().unwrap().len() >= 2);
+    assert!(
+        v["result"].as_array().unwrap().len() >= 2,
+        "an empty query must return every named symbol: {v}"
+    );
     child.kill().ok();
 }
 
@@ -168,7 +171,8 @@ fn quick_fix_creates_a_route_stub() {
         edits[0]["newText"]
             .as_str()
             .unwrap()
-            .contains("route[missing]")
+            .contains("route[missing]"),
+        "the quickfix must append a route[missing] definition: {edits:?}"
     );
     child.kill().ok();
 }

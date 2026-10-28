@@ -204,7 +204,11 @@ fn every_setting_the_server_reads_is_documented() {
         .cloned()
         .collect();
 
-    assert!(!opts.is_empty() && !envs.is_empty() && !vscode.is_empty());
+    assert!(
+        !opts.is_empty() && !envs.is_empty() && !vscode.is_empty(),
+        "each source scan must find settings, or the drift check proves nothing: \
+         opts {opts:?}, envs {envs:?}, vscode {vscode:?}"
+    );
 
     let mut missing = Vec::new();
     for o in &opts {

@@ -1503,7 +1503,10 @@ fn repeated_questions_do_not_drift() {
         1,
         "the answer drifted across 20 asks: {answers:?}"
     );
-    assert!(answers.iter().next().unwrap().contains("opensips.cfg"));
+    assert!(
+        answers.iter().next().unwrap().contains("opensips.cfg"),
+        "the fragment's analysis root must be opensips.cfg: {answers:?}"
+    );
 
     // opening and closing documents must not move it either
     for _ in 0..5 {
@@ -2172,7 +2175,10 @@ fn every_setting_behaves_the_same_for_a_fragment() {
         },
         "the fragment cleared when the analyzer went off",
     );
-    assert!(v["params"]["diagnostics"].as_array().unwrap().is_empty());
+    assert!(
+        v["params"]["diagnostics"].as_array().unwrap().is_empty(),
+        "turning analyzerDiagnostics off must clear the fragment's diagnostics: {v}"
+    );
     common::write_msg(
         &mut stdin,
         &serde_json::json!({"jsonrpc":"2.0","method":"workspace/didChangeConfiguration",

@@ -113,7 +113,10 @@ fn a_module_that_exports_nothing_is_still_in_the_catalogue() {
     let names: Vec<&str> = mods.iter().map(|m| m.name.as_str()).collect();
     assert_eq!(names, vec!["legacy", "xml"], "{names:?}");
     let x = mods.iter().find(|m| m.name == "xml").unwrap();
-    assert!(x.params.is_empty() && x.functions.is_empty());
+    assert!(
+        x.params.is_empty() && x.functions.is_empty(),
+        "the xml module documents no params or functions: {x:?}"
+    );
     let l = mods.iter().find(|m| m.name == "legacy").unwrap();
     assert_eq!(l.params[0].name, "old_param", "docbook must still win here");
 }

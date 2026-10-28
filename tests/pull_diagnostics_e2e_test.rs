@@ -98,7 +98,8 @@ fn a_document_report_carries_the_analyzer_findings() {
         items[0]["message"]
             .as_str()
             .unwrap_or("")
-            .contains("MISSING")
+            .contains("MISSING"),
+        "the finding must name the undefined route MISSING: {items:?}"
     );
     assert!(
         r["result"]["resultId"].as_str().is_some(),
@@ -203,7 +204,8 @@ fn a_pushing_client_still_gets_pushed_diagnostics() {
         !d["params"]["diagnostics"]
             .as_array()
             .unwrap_or(&vec![])
-            .is_empty()
+            .is_empty(),
+        "a client without pull support must still be pushed the findings: {d}"
     );
     let _ = child.kill();
 }

@@ -37,8 +37,16 @@ fn a_selection_becomes_a_new_route_and_a_call_in_its_place() {
         "{:?}",
         plan.block
     );
-    assert!(plan.block.contains("xlog(\"one\");"));
-    assert!(plan.block.contains("xlog(\"two\");"));
+    assert!(
+        plan.block.contains("xlog(\"one\");"),
+        "selected line 2 moves into the new route block: {:?}",
+        plan.block
+    );
+    assert!(
+        plan.block.contains("xlog(\"two\");"),
+        "selected line 3 moves into the new route block: {:?}",
+        plan.block
+    );
     // the new block goes after the enclosing one, never inside it
     assert_eq!(plan.insert_line, 6);
 }
@@ -65,9 +73,15 @@ fn a_selection_covering_the_blocks_own_braces_is_refused() {
 fn an_unbalanced_selection_is_refused() {
     let text = "route {\n    if (1) {\n        exit;\n    }\n}\n";
     // just the `if (1) {` line: taking it alone would strand its brace
-    assert!(logic::extract_route(text, 1, 1).is_none());
+    assert!(
+        logic::extract_route(text, 1, 1).is_none(),
+        "the if (1) {{ line alone would leave its closing brace behind: {text:?}"
+    );
     // the whole balanced if-block is fine
-    assert!(logic::extract_route(text, 1, 3).is_some());
+    assert!(
+        logic::extract_route(text, 1, 3).is_some(),
+        "lines 1..3 hold the whole if-block with both braces, so it can move: {text:?}"
+    );
 }
 
 /// `return` leaves the route it is written in.  Move it into a new
@@ -96,7 +110,10 @@ fn a_selection_containing_return_is_refused() {
 #[test]
 fn a_blank_selection_is_refused() {
     let text = "route {\n\n\n    exit;\n}\n";
-    assert!(logic::extract_route(text, 1, 2).is_none());
+    assert!(
+        logic::extract_route(text, 1, 2).is_none(),
+        "lines 1..2 are blank, so there is nothing to move into a new route: {text:?}"
+    );
 }
 
 #[test]
@@ -112,7 +129,10 @@ fn duplicate_loadmodules_are_found_after_the_first() {
 
 #[test]
 fn a_document_without_duplicates_reports_none() {
-    assert!(logic::duplicate_loadmodules(CFG).is_empty());
+    assert!(
+        logic::duplicate_loadmodules(CFG).is_empty(),
+        "the fixture loads tm.so once, so no loadmodule line is a duplicate"
+    );
 }
 
 #[test]

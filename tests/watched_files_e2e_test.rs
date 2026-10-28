@@ -223,7 +223,10 @@ fn a_changed_documentation_tree_is_reharvested() {
         .map(|i| i["label"].as_str().unwrap_or("").to_string())
         .collect();
     assert!(labels.contains(&"first_fn".to_string()), "{labels:?}");
-    assert!(!labels.contains(&"second_fn".to_string()));
+    assert!(
+        !labels.contains(&"second_fn".to_string()),
+        "second_fn is not in the module README yet: {labels:?}"
+    );
 
     // the module gains a function on disk
     std::fs::write(

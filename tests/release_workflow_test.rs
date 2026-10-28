@@ -254,7 +254,10 @@ fn checkouts_keeping_the_token_reads_each_step() {
     let next = "      - run: make\n";
     // off
     let y = format!("{co}        with:\n          persist-credentials: false\n{next}");
-    assert!(checkouts_keeping_the_token("a.yml", &y).is_empty());
+    assert!(
+        checkouts_keeping_the_token("a.yml", &y).is_empty(),
+        "persist-credentials: false on the checkout drops the token, so it is not reported:\n{y}"
+    );
     // not said: the default keeps the token
     let y = format!("{co}{next}");
     assert_eq!(checkouts_keeping_the_token("a.yml", &y), ["a.yml:1"]);
@@ -271,14 +274,20 @@ fn checkouts_keeping_the_token_reads_each_step() {
     // the `- name:` then `uses:` form, with `with:` beside `uses:`
     let named = "      - name: Checkout\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\n";
     let y = format!("{named}        with:\n          persist-credentials: false\n{next}");
-    assert!(checkouts_keeping_the_token("a.yml", &y).is_empty());
+    assert!(
+        checkouts_keeping_the_token("a.yml", &y).is_empty(),
+        "persist-credentials: false in the with: beside the named step's uses: applies to that checkout:\n{y}"
+    );
     let y = format!("{named}{next}        with:\n          persist-credentials: false\n");
     assert_eq!(checkouts_keeping_the_token("a.yml", &y), ["a.yml:2"]);
     // kept, with its reason
     let y = format!(
         "{co}        # keeps the token: pushes the tag\n        with:\n          persist-credentials: true\n{next}"
     );
-    assert!(checkouts_keeping_the_token("a.yml", &y).is_empty());
+    assert!(
+        checkouts_keeping_the_token("a.yml", &y).is_empty(),
+        "a checkout that keeps the token with a non-empty recorded reason is allowed:\n{y}"
+    );
 }
 
 /// Code scanning analyses all three languages in the repository, and
@@ -293,12 +302,27 @@ fn code_scanning_covers_rust_typescript_and_actions() {
             "CodeQL does not analyse {lang}"
         );
     }
-    assert!(codeql.contains("github/codeql-action/analyze@"));
-    assert!(codeql.contains("security-events: write"));
+    assert!(
+        codeql.contains("github/codeql-action/analyze@"),
+        "codeql.yml must run the CodeQL analyze action to produce code scanning results"
+    );
+    assert!(
+        codeql.contains("security-events: write"),
+        "codeql.yml needs security-events: write to upload its results to the Security tab"
+    );
     let scorecard = workflow("scorecard.yml").expect("scorecard.yml must exist");
-    assert!(scorecard.contains("ossf/scorecard-action@"));
-    assert!(scorecard.contains("github/codeql-action/upload-sarif@"));
-    assert!(scorecard.contains("publish_results: true"));
+    assert!(
+        scorecard.contains("ossf/scorecard-action@"),
+        "scorecard.yml must run the OpenSSF Scorecard action"
+    );
+    assert!(
+        scorecard.contains("github/codeql-action/upload-sarif@"),
+        "scorecard.yml must upload its SARIF so Scorecard findings reach the Security tab"
+    );
+    assert!(
+        scorecard.contains("publish_results: true"),
+        "scorecard.yml must set publish_results: true so the Scorecard results are published"
+    );
 }
 
 /// The `publish` job creates the GitHub release and uploads its

@@ -66,9 +66,21 @@ fn parses_core_functions() {
     let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, vec!["add_local_rport", "assert", "cache_store"]);
     assert_eq!(items[1].detail, "assert(statement, [description])");
-    assert!(items[1].doc.starts_with("Aborts when"));
-    assert!(items[1].doc.contains("Second line"));
-    assert!(!items[1].doc.contains("Second paragraph excluded"));
+    assert!(
+        items[1].doc.starts_with("Aborts when"),
+        "the assert doc starts with the first line of its first paragraph: {:?}",
+        items[1].doc
+    );
+    assert!(
+        items[1].doc.contains("Second line"),
+        "a first paragraph that wraps onto a second line is kept whole: {:?}",
+        items[1].doc
+    );
+    assert!(
+        !items[1].doc.contains("Second paragraph excluded"),
+        "only the first paragraph is kept as the function doc: {:?}",
+        items[1].doc
+    );
 }
 
 #[test]
@@ -76,8 +88,16 @@ fn parses_core_params() {
     let items = catalog::parse_core_params_md(PARAMS).expect("parses");
     let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
     assert_eq!(names, vec!["abort_on_assert", "advertised_address"]);
-    assert!(items[0].doc.starts_with("Boolean"));
-    assert!(items[1].doc.contains(r"C:\x"));
+    assert!(
+        items[0].doc.starts_with("Boolean"),
+        "the abort_on_assert doc is the paragraph under its heading: {:?}",
+        items[0].doc
+    );
+    assert!(
+        items[1].doc.contains(r"C:\x"),
+        "the Windows path in the advertised_address doc must keep its backslash: {:?}",
+        items[1].doc
+    );
 }
 
 #[test]
@@ -110,9 +130,21 @@ fn harvests_core_docs_from_a_real_4x_tree_when_present() {
     );
     assert!(core.params.len() > 80, "core params: {}", core.params.len());
     assert!(core.pvars.len() > 50, "pvars: {}", core.pvars.len());
-    assert!(core.functions.iter().any(|f| f.name == "cache_store"));
-    assert!(core.params.iter().any(|p| p.name == "advertised_address"));
-    assert!(core.pvars.iter().any(|v| v.name == "$ru"));
+    assert!(
+        core.functions.iter().any(|f| f.name == "cache_store"),
+        "the 4.x core function docs document cache_store, so the harvest must find it among {} functions",
+        core.functions.len()
+    );
+    assert!(
+        core.params.iter().any(|p| p.name == "advertised_address"),
+        "the 4.x core parameter docs document advertised_address, so the harvest must find it among {} params",
+        core.params.len()
+    );
+    assert!(
+        core.pvars.iter().any(|v| v.name == "$ru"),
+        "the 4.x core variable docs document $ru, so the harvest must find it among {} pvars",
+        core.pvars.len()
+    );
 }
 
 /// Owed 1/2: the core-function heading contract, stated.

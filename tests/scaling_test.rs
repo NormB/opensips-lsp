@@ -50,7 +50,10 @@ fn scanners_are_linear_in_the_text() {
         N
     );
     assert_eq!(timed("route_refs", || analyze::route_refs(&cfg)).len(), N);
-    assert!(timed("calls", || analyze::calls(&cfg)).len() >= 2 * N);
+    assert!(
+        timed("calls", || analyze::calls(&cfg)).len() >= 2 * N,
+        "each of the {N} routes has an xlog call and a route call"
+    );
     assert_eq!(
         timed("loaded_modules", || analyze::loaded_modules(&cfg)).len(),
         2
@@ -60,7 +63,10 @@ fn scanners_are_linear_in_the_text() {
         N
     );
     assert_eq!(timed("pvars", || analyze::pvars(&cfg)).len(), 2 * N);
-    assert!(timed("includes", || analyze::includes(&cfg)).is_empty());
+    assert!(
+        timed("includes", || analyze::includes(&cfg)).is_empty(),
+        "the {N}-route config has no include_file directives"
+    );
 }
 
 #[test]

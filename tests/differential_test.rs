@@ -152,7 +152,10 @@ fn rename_round_trip_survives_the_real_parser() {
     );
     // rename through the REAL logic path: gate + occurrences
     let new_name = "relay_v2";
-    assert!(logic::valid_route_name(new_name));
+    assert!(
+        logic::valid_route_name(new_name),
+        "the rename gate must accept the new route name {new_name}"
+    );
     let mut lines: Vec<String> = original.lines().map(str::to_string).collect();
     let mut occ = logic::route_occurrences(original, "old_target");
     assert_eq!(occ.len(), 2, "def + one call site");
@@ -164,8 +167,14 @@ fn rename_round_trip_survives_the_real_parser() {
         line.replace_range(s..e, new_name);
     }
     let renamed = lines.join("\n") + "\n";
-    assert!(!renamed.contains("old_target"));
-    assert!(renamed.matches(new_name).count() == 2);
+    assert!(
+        !renamed.contains("old_target"),
+        "every occurrence of old_target must be rewritten: {renamed}"
+    );
+    assert!(
+        renamed.matches(new_name).count() == 2,
+        "the def and the one call site must both carry {new_name}: {renamed}"
+    );
     let out_cfg = dir.join("rt-renamed.cfg");
     std::fs::write(&out_cfg, &renamed).unwrap();
     assert!(

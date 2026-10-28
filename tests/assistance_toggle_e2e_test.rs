@@ -265,7 +265,10 @@ fn the_toggle_takes_effect_without_a_restart() {
         }
     };
     assert!(off, "the same server, no restart, must stop answering");
-    assert!(completion(&mut stdin, &rx, &uri, 20).is_empty());
+    assert!(
+        completion(&mut stdin, &rx, &uri, 20).is_empty(),
+        "with assistance off, completion must offer nothing for {uri}"
+    );
 
     common::write_msg(
         &mut stdin,
@@ -276,7 +279,10 @@ fn the_toggle_takes_effect_without_a_restart() {
         !hover(&mut stdin, &rx, &uri, 21).is_null(),
         "and it must come back the same way"
     );
-    assert!(!completion(&mut stdin, &rx, &uri, 22).is_empty());
+    assert!(
+        !completion(&mut stdin, &rx, &uri, 22).is_empty(),
+        "with assistance back on, completion must answer again for {uri}"
+    );
     let _ = child.kill();
 }
 

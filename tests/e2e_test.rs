@@ -51,7 +51,8 @@ fn diagnostics_flow_over_stdio() {
     assert!(
         init["result"]["capabilities"]["hoverProvider"]
             .as_bool()
-            .unwrap_or(false)
+            .unwrap_or(false),
+        "the server must advertise hoverProvider: {init}"
     );
 
     common::write_msg(
@@ -164,7 +165,8 @@ fn hanging_opensips_check_is_bounded_and_reported() {
         log["params"]["message"]
             .as_str()
             .unwrap()
-            .contains("timed out")
+            .contains("timed out"),
+        "the check must report its timeout via logMessage: {log}"
     );
     child.kill().ok();
 }
@@ -461,7 +463,10 @@ fn references_rename_highlight_over_stdio() {
     let v = common::wait_for(&rx, |v| v["id"] == 5, "rename");
     let edits = v["result"]["changes"][&uri].as_array().expect("edits");
     assert_eq!(edits.len(), 3);
-    assert!(edits.iter().all(|e| e["newText"] == "fwd_1"));
+    assert!(
+        edits.iter().all(|e| e["newText"] == "fwd_1"),
+        "every rename edit must write the new name fwd_1: {edits:?}"
+    );
     // the quoted ref's edit replaces only the name inside the quotes
     let quoted = edits
         .iter()

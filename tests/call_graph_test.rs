@@ -84,7 +84,10 @@ fn a_line_outside_every_block_has_no_enclosing_block() {
         logic::enclosing_block(&blocks, 0).is_none(),
         "line 0 is top level"
     );
-    assert!(logic::enclosing_block(&blocks, 2).is_some());
+    assert!(
+        logic::enclosing_block(&blocks, 2).is_some(),
+        "line 2 (`exit;`) is inside the route block, so it has an enclosing block"
+    );
 }
 
 #[test]

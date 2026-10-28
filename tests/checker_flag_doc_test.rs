@@ -78,14 +78,18 @@ fn the_gate_fires_on_a_planted_wrong_flag() {
     // caught and that the correct flag is left alone
     let (bin, real) = (binary(), checker_flag());
     let wrong = other_case(real);
-    assert!(!hits(&format!("run `-{wrong}` to check it"), bin, wrong).is_empty());
+    assert!(
+        !hits(&format!("run `-{wrong}` to check it"), bin, wrong).is_empty(),
+        "the gate must catch the backticked wrong flag -{wrong}"
+    );
     assert!(
         !hits(
             &format!("the server runs {bin} -{wrong} for you"),
             bin,
             wrong
         )
-        .is_empty()
+        .is_empty(),
+        "the gate must catch the wrong flag -{wrong} written after {bin}"
     );
     assert!(
         hits(
@@ -93,7 +97,8 @@ fn the_gate_fires_on_a_planted_wrong_flag() {
             bin,
             wrong
         )
-        .is_empty()
+        .is_empty(),
+        "the gate must leave the correct flag -{real} alone (wrong flag is -{wrong})"
     );
 }
 

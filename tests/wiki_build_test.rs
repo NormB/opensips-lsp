@@ -36,7 +36,10 @@ fn wiki_tree_is_generated_from_docs() {
     // the wiki renders the page title itself: leading H1 must be stripped
     assert!(!admin.starts_with("# "), "leading H1 must be stripped");
     // content survived
-    assert!(admin.contains("opensipsPath"));
+    assert!(
+        admin.contains("opensipsPath"),
+        "the Admin-Guide body must survive the H1 strip: {admin}"
+    );
 
     let home = std::fs::read_to_string(out.join("Home.md")).unwrap();
     // inter-doc links must point at wiki pages, not repo-relative .md files
@@ -44,10 +47,19 @@ fn wiki_tree_is_generated_from_docs() {
         !home.contains("docs/ADMIN.md"),
         "raw doc link leaked into wiki"
     );
-    assert!(!home.contains("docs/EDITORS.md"));
+    assert!(
+        !home.contains("docs/EDITORS.md"),
+        "raw docs/EDITORS.md link leaked into the wiki Home page: {home}"
+    );
     assert!(home.contains("Admin-Guide"), "rewritten wiki link missing");
 
     let sidebar = std::fs::read_to_string(out.join("_Sidebar.md")).unwrap();
-    assert!(sidebar.contains("Admin-Guide") && sidebar.contains("Editor-Setup"));
-    assert!(sidebar.contains("Getting-Started"));
+    assert!(
+        sidebar.contains("Admin-Guide") && sidebar.contains("Editor-Setup"),
+        "the sidebar must link the Admin-Guide and Editor-Setup pages: {sidebar}"
+    );
+    assert!(
+        sidebar.contains("Getting-Started"),
+        "the sidebar must link the Getting-Started page: {sidebar}"
+    );
 }

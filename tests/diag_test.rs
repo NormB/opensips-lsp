@@ -29,8 +29,16 @@ fn parses_positioned_yyerror() {
     assert_eq!(d.col_start, 18); // 1-based 19 -> 18
     assert_eq!(d.col_end, 19); // exclusive: the token occupies col 19 only
     assert_eq!(d.severity, Severity::Error);
-    assert!(d.message.contains("enable_search_index"));
-    assert!(!d.message.contains("yyerror")); // internal tag stripped
+    assert!(
+        d.message.contains("enable_search_index"),
+        "the message must name the parameter the yyerror line reports: {:?}",
+        d.message
+    );
+    assert!(
+        !d.message.contains("yyerror"),
+        "the internal core:yyerror tag is stripped from the user-facing message: {:?}",
+        d.message
+    ); // internal tag stripped
 }
 
 #[test]
@@ -38,13 +46,20 @@ fn load_module_failure_uses_the_positioned_line() {
     let ds = diag::parse_check_output(REAL_LOAD, 255);
     assert_eq!(ds.len(), 1);
     assert_eq!(ds[0].line, 17);
-    assert!(ds[0].message.contains("failed to load module mi_fifo.so"));
+    assert!(
+        ds[0].message.contains("failed to load module mi_fifo.so"),
+        "the message must come from the positioned yyerror line, not the unpositioned load_module line: {:?}",
+        ds[0].message
+    );
 }
 
 #[test]
 fn clean_output_zero_rc_is_empty() {
     let out = "Listening on\n  udp: 127.0.0.1 [127.0.0.1]:5060\nAliases:\n";
-    assert!(diag::parse_check_output(out, 0).is_empty());
+    assert!(
+        diag::parse_check_output(out, 0).is_empty(),
+        "a check with rc 0 and no error lines has nothing to report: {out:?}"
+    );
 }
 
 #[test]
@@ -53,7 +68,11 @@ fn nonzero_rc_with_no_positioned_error_yields_fallback() {
     let ds = diag::parse_check_output(out, 255);
     assert_eq!(ds.len(), 1);
     assert_eq!(ds[0].line, 0);
-    assert!(ds[0].message.contains("something exploded"));
+    assert!(
+        ds[0].message.contains("something exploded"),
+        "the fallback diagnostic must carry the last error text from the output: {:?}",
+        ds[0].message
+    );
 }
 
 #[test]
@@ -77,7 +96,10 @@ fn column_range_never_reversed() {
         1,
     );
     if let Some(d) = ds.first() {
-        assert!(d.col_end >= d.col_start);
+        assert!(
+            d.col_end >= d.col_start,
+            "the reported 9-8 range is reversed, and the parser must not produce a negative-width range: {d:?}"
+        );
     }
 }
 
@@ -94,7 +116,11 @@ fn parses_368_output_identically() {
     let ds = diag::parse_check_output(REAL_368, 255);
     assert_eq!(ds.len(), 2);
     assert_eq!(ds[0].line, 1);
-    assert!(ds[1].message.contains("no_such_param_xyz"));
+    assert!(
+        ds[1].message.contains("no_such_param_xyz"),
+        "the second 3.6.8 diagnostic is the unknown modparam and must name it: {:?}",
+        ds[1].message
+    );
 }
 
 // Verbatim opensips 4.0.1 -C output (captured 2026-08-23), with the
@@ -131,7 +157,11 @@ fn parses_401_output_and_ignores_the_4x_context_block() {
     assert_eq!(d.line, 3); // 1-based 4 -> 0-based 3
     assert_eq!(d.col_start, 18); // 1-based 19 -> 18
     assert_eq!(d.col_end, 19); // end is EXCLUSIVE, as in 3.6
-    assert!(d.message.contains("no_such_param_xyz"));
+    assert!(
+        d.message.contains("no_such_param_xyz"),
+        "the one 4.0.1 diagnostic is the unknown modparam and must name it: {:?}",
+        d.message
+    );
 }
 
 #[test]
@@ -172,10 +202,17 @@ fn nonzero_rc_with_unparseable_output_still_yields_a_diag() {
     for garbage in ["", "segfault\n", "\0\0\0\n", "not a real line"] {
         let ds = diag::parse_check_output(garbage, 255);
         assert_eq!(ds.len(), 1, "input {garbage:?}");
-        assert!(ds[0].message.contains("rc=255") || !ds[0].message.is_empty());
+        assert!(
+            ds[0].message.contains("rc=255") || !ds[0].message.is_empty(),
+            "a failed check with unparseable output must still show a non-empty message for {garbage:?}: {:?}",
+            ds[0].message
+        );
     }
     // rc=0 with garbage stays clean
-    assert!(diag::parse_check_output("noise\n", 0).is_empty());
+    assert!(
+        diag::parse_check_output("noise\n", 0).is_empty(),
+        "with rc 0 the check passed, so unparseable output alone is not a diagnostic"
+    );
 }
 
 /// A failed check whose last error line has nothing after its prefix

@@ -128,7 +128,10 @@ fn analyzer_diags_appear_on_change_without_save() {
     );
     let ds = diag["params"]["diagnostics"].as_array().unwrap();
     assert_eq!(ds.len(), 1, "{ds:?}");
-    assert!(ds[0]["message"].as_str().unwrap().contains("gone"));
+    assert!(
+        ds[0]["message"].as_str().unwrap().contains("gone"),
+        "the analyzer diagnostic must name the undefined route gone: {ds:?}"
+    );
     assert_eq!(ds[0]["source"], "opensips-lsp");
     assert_eq!(ds[0]["severity"], 2, "warning");
     assert_eq!(ds[0]["range"]["start"]["line"], 2);
@@ -149,7 +152,8 @@ fn analyzer_diags_appear_on_change_without_save() {
         clear["params"]["diagnostics"]
             .as_array()
             .unwrap()
-            .is_empty()
+            .is_empty(),
+        "restoring the route ref must clear the diagnostics: {clear}"
     );
     child.kill().ok();
 }

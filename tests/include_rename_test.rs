@@ -130,8 +130,14 @@ fn nothing_else_is_rewritten() {
         ),
         ("/w/other/opensips.cfg", "include_file \"a.cfg\"\n"),
     ];
-    assert!(edits(&files, "/w/unrelated.cfg", "/w/renamed.cfg").is_empty());
-    assert!(edits(&files, "/w/inc/z.cfg", "/w/inc/y.cfg").is_empty());
+    assert!(
+        edits(&files, "/w/unrelated.cfg", "/w/renamed.cfg").is_empty(),
+        "no file includes /w/unrelated.cfg, so nothing is rewritten: {files:?}"
+    );
+    assert!(
+        edits(&files, "/w/inc/z.cfg", "/w/inc/y.cfg").is_empty(),
+        "inc/z.cfg appears only inside an xlog string, not an include_file directive: {files:?}"
+    );
     assert_eq!(
         edits(&files, "/w/other/a.cfg", "/w/other/b.cfg"),
         vec![("/w/other/opensips.cfg".into(), 0, 14, 19, "b.cfg".into())]

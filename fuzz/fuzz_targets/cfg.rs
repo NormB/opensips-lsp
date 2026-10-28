@@ -24,15 +24,39 @@ fuzz_target!(|text: &str| {
         }
     }
     for (at, _) in analyze::armed_route_refs(text) {
-        assert!(inside(at.line));
+        assert!(
+            inside(at.line),
+            "an armed route ref must lie inside the document: line {} of {lines}",
+            at.line
+        );
     }
     for block in analyze::route_blocks(text) {
-        assert!(inside(block.end_line));
-        assert!((block.end_line, block.end_col) >= (block.line, block.col));
+        assert!(
+            inside(block.end_line),
+            "a route block must end inside the document: end line {} of {lines}",
+            block.end_line
+        );
+        assert!(
+            (block.end_line, block.end_col) >= (block.line, block.col),
+            "a route block must not end before it starts: start {}:{}, end {}:{}",
+            block.line,
+            block.col,
+            block.end_line,
+            block.end_col
+        );
     }
     for fold in outline::folds(text) {
-        assert!(inside(fold.end_line));
-        assert!(fold.end_line >= fold.start_line);
+        assert!(
+            inside(fold.end_line),
+            "a fold must end inside the document: end line {} of {lines}",
+            fold.end_line
+        );
+        assert!(
+            fold.end_line >= fold.start_line,
+            "a fold must not end before it starts: start line {}, end line {}",
+            fold.start_line,
+            fold.end_line
+        );
     }
     let _ = analyze::calls(text);
     let _ = analyze::modparam_calls(text);

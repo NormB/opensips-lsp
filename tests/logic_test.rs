@@ -56,16 +56,28 @@ fn modparam_value_position_offers_params_of_that_module() {
 fn modparam_module_position_offers_module_names() {
     let items = logic::completions(&catalog(), DOC, r#"modparam(""#);
     let names: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-    assert!(names.contains(&"tm") && names.contains(&"cachedb_nats"));
-    assert!(items.iter().all(|i| i.kind == CompKind::Module));
+    assert!(
+        names.contains(&"tm") && names.contains(&"cachedb_nats"),
+        "the modparam module position offers every catalog module: {names:?}"
+    );
+    assert!(
+        items.iter().all(|i| i.kind == CompKind::Module),
+        "the modparam module position offers module names only: {items:?}"
+    );
 }
 
 #[test]
 fn loadmodule_position_offers_so_names() {
     let items = logic::completions(&catalog(), DOC, r#"loadmodule ""#);
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-    assert!(labels.contains(&"tm.so"));
-    assert!(labels.contains(&"cachedb_nats.so"));
+    assert!(
+        labels.contains(&"tm.so"),
+        "loadmodule offers the tm catalog module as a .so name: {labels:?}"
+    );
+    assert!(
+        labels.contains(&"cachedb_nats.so"),
+        "loadmodule offers the cachedb_nats catalog module as a .so name: {labels:?}"
+    );
 }
 
 #[test]
@@ -80,11 +92,23 @@ fn argument_completions_follow_a_single_quote_too() {
     };
     assert_eq!(labels("modparam('cachedb_nats', '"), vec!["kv_bucket"]);
     assert_eq!(labels("modparam('cachedb_nats', "), vec!["kv_bucket"]);
-    assert!(labels("modparam('").contains(&"cachedb_nats".to_string()));
-    assert!(labels("loadmodule 'ca").contains(&"cachedb_nats.so".to_string()));
+    assert!(
+        labels("modparam('").contains(&"cachedb_nats".to_string()),
+        "a single-quoted modparam module position offers module names: {:?}",
+        labels("modparam('")
+    );
+    assert!(
+        labels("loadmodule 'ca").contains(&"cachedb_nats.so".to_string()),
+        "a single-quoted loadmodule argument offers .so names: {:?}",
+        labels("loadmodule 'ca")
+    );
     assert_eq!(labels("    route('"), vec!["check"]);
     // a closed single-quoted argument leaves that context
-    assert!(!labels("loadmodule 'tm.so' ").contains(&"tm.so".to_string()));
+    assert!(
+        !labels("loadmodule 'tm.so' ").contains(&"tm.so".to_string()),
+        "after the closing quote the loadmodule argument context has ended: {:?}",
+        labels("loadmodule 'tm.so' ")
+    );
 }
 
 #[test]
@@ -92,25 +116,46 @@ fn code_position_offers_loaded_module_functions_and_routes() {
     let items = logic::completions(&catalog(), DOC, "    t_re");
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     // tm is loaded → t_relay offered; cachedb_nats is NOT loaded → not offered
-    assert!(labels.contains(&"t_relay"));
-    assert!(!labels.contains(&"nats_kv_get"));
+    assert!(
+        labels.contains(&"t_relay"),
+        "tm is loaded, so its functions are offered: {labels:?}"
+    );
+    assert!(
+        !labels.contains(&"nats_kv_get"),
+        "cachedb_nats is not loaded, so its functions are not offered: {labels:?}"
+    );
     // route names as targets
-    assert!(labels.contains(&"check"));
+    assert!(
+        labels.contains(&"check"),
+        "route names in the document are offered as targets: {labels:?}"
+    );
 }
 
 #[test]
 fn hover_finds_function_param_and_module() {
     let h = logic::hover_markdown(&catalog(), DOC, "t_relay").expect("function hover");
-    assert!(h.contains("t_relay([flags],[outbound_proxy])"));
-    assert!(h.contains("Relay statefully."));
+    assert!(
+        h.contains("t_relay([flags],[outbound_proxy])"),
+        "function hover shows the catalog signature: {h:?}"
+    );
+    assert!(
+        h.contains("Relay statefully."),
+        "function hover shows the catalog doc text: {h:?}"
+    );
 
     let h = logic::hover_markdown(&catalog(), DOC, "kv_bucket").expect("param hover");
-    assert!(h.contains("string") && h.contains("Bucket name."));
+    assert!(
+        h.contains("string") && h.contains("Bucket name."),
+        "param hover shows the catalog type and doc text: {h:?}"
+    );
 
     let h = logic::hover_markdown(&catalog(), DOC, "tm").expect("module hover");
-    assert!(h.contains("tm"));
+    assert!(h.contains("tm"), "module hover names the module: {h:?}");
 
-    assert!(logic::hover_markdown(&catalog(), DOC, "no_such_thing").is_none());
+    assert!(
+        logic::hover_markdown(&catalog(), DOC, "no_such_thing").is_none(),
+        "a word that is in no catalog has no hover"
+    );
 }
 
 #[test]
@@ -119,9 +164,15 @@ fn definition_resolves_route_reference() {
     let d = logic::definition_of(DOC, 6, 11).expect("definition");
     assert_eq!(d.line, 2); // route[check] { on line 2
     // cursor elsewhere → none
-    assert!(logic::definition_of(DOC, 0, 0).is_none());
+    assert!(
+        logic::definition_of(DOC, 0, 0).is_none(),
+        "the loadmodule keyword at 0:0 is not a route reference"
+    );
     // out of range must not panic
-    assert!(logic::definition_of(DOC, 999, 999).is_none());
+    assert!(
+        logic::definition_of(DOC, 999, 999).is_none(),
+        "a position past the end of the document has no definition"
+    );
 }
 
 #[test]
@@ -174,9 +225,18 @@ fn code_position_offers_core_functions() {
     use opensips_lsp::logic;
     let items = logic::completions_with_core(&catalog(), &core(), DOC, "    cache_");
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-    assert!(labels.contains(&"cache_store"));
-    assert!(labels.contains(&"t_relay")); // module functions still there
-    assert!(labels.contains(&"advertised_address")); // core params too
+    assert!(
+        labels.contains(&"cache_store"),
+        "core functions are offered in code position: {labels:?}"
+    );
+    assert!(
+        labels.contains(&"t_relay"),
+        "functions of the loaded tm module are still offered next to core ones: {labels:?}"
+    ); // module functions still there
+    assert!(
+        labels.contains(&"advertised_address"),
+        "core params are offered in code position too: {labels:?}"
+    ); // core params too
 }
 
 #[test]
@@ -191,15 +251,27 @@ fn dollar_prefix_offers_pseudo_variables_only() {
 fn hover_covers_core_items() {
     use opensips_lsp::logic;
     let h = logic::hover_markdown_with_core(&catalog(), &core(), DOC, "cache_store").unwrap();
-    assert!(h.contains("cache_store(storage_id"));
+    assert!(
+        h.contains("cache_store(storage_id"),
+        "core function hover shows the core signature: {h:?}"
+    );
     let h = logic::hover_markdown_with_core(&catalog(), &core(), DOC, "ru").unwrap();
-    assert!(h.contains("Request URI"));
+    assert!(
+        h.contains("Request URI"),
+        "hover on ru finds the core pvar $ru and shows its detail: {h:?}"
+    );
     let h =
         logic::hover_markdown_with_core(&catalog(), &core(), DOC, "advertised_address").unwrap();
-    assert!(h.contains("Via"));
+    assert!(
+        h.contains("Via"),
+        "core param hover shows the core doc text: {h:?}"
+    );
     // module symbols still win where they exist
     let h = logic::hover_markdown_with_core(&catalog(), &core(), DOC, "t_relay").unwrap();
-    assert!(h.contains("module tm"));
+    assert!(
+        h.contains("module tm"),
+        "a module function hover comes from the module catalog, not core: {h:?}"
+    );
 }
 
 #[test]
@@ -229,9 +301,15 @@ fn route_occurrences_cover_defs_and_refs() {
     let def = occ.iter().find(|(_, d)| *d).unwrap();
     assert_eq!((def.0.line, def.0.col), (4, 6));
     // no occurrences of an unknown name
-    assert!(logic::route_occurrences(doc, "zz").is_empty());
+    assert!(
+        logic::route_occurrences(doc, "zz").is_empty(),
+        "no route named zz is defined or called in {doc:?}"
+    );
     // adversarial: empty name never matches the main route
-    assert!(logic::route_occurrences(doc, "").is_empty());
+    assert!(
+        logic::route_occurrences(doc, "").is_empty(),
+        "an empty name must not match the unnamed main route in {doc:?}"
+    );
 }
 
 #[test]
@@ -247,21 +325,63 @@ fn definition_resolves_dotted_route_names() {
 fn valid_route_name_gate() {
     // rename writes names UNQUOTED, so the gate must match the
     // unquoted grammar: ID = [A-Za-z][A-Za-z0-9_]* or NUMBER
-    assert!(logic::valid_route_name("relay"));
-    assert!(logic::valid_route_name("Relay_2"));
-    assert!(logic::valid_route_name("42")); // numeric route names are legal
+    assert!(
+        logic::valid_route_name("relay"),
+        "an all-letter name is an unquoted ID"
+    );
+    assert!(
+        logic::valid_route_name("Relay_2"),
+        "an ID may hold upper case, digits and underscores after its first letter"
+    );
+    assert!(
+        logic::valid_route_name("42"),
+        "a NUMBER is a legal unquoted route name"
+    ); // numeric route names are legal
     // legal only QUOTED in the cfg → renaming to them breaks configs
-    assert!(!logic::valid_route_name("to.b_1:x-y"));
-    assert!(!logic::valid_route_name("a.b"));
-    assert!(!logic::valid_route_name("a-b"));
-    assert!(!logic::valid_route_name("a:b"));
-    assert!(!logic::valid_route_name("1foo"));
-    assert!(!logic::valid_route_name("_lead")); // ID starts with a letter
-    assert!(!logic::valid_route_name(""));
-    assert!(!logic::valid_route_name("has space"));
-    assert!(!logic::valid_route_name("quote\""));
-    assert!(!logic::valid_route_name("nul\0"));
-    assert!(!logic::valid_route_name("paren("));
+    assert!(
+        !logic::valid_route_name("to.b_1:x-y"),
+        "'.', ':' and '-' are legal only in a quoted name; an unquoted rename would break the cfg"
+    );
+    assert!(
+        !logic::valid_route_name("a.b"),
+        "'.' is legal only in a quoted name; an unquoted rename would break the cfg"
+    );
+    assert!(
+        !logic::valid_route_name("a-b"),
+        "'-' is legal only in a quoted name; an unquoted rename would break the cfg"
+    );
+    assert!(
+        !logic::valid_route_name("a:b"),
+        "':' is legal only in a quoted name; an unquoted rename would break the cfg"
+    );
+    assert!(
+        !logic::valid_route_name("1foo"),
+        "a name that starts with a digit is neither an ID nor a NUMBER"
+    );
+    assert!(
+        !logic::valid_route_name("_lead"),
+        "an ID must start with a letter, not an underscore"
+    ); // ID starts with a letter
+    assert!(
+        !logic::valid_route_name(""),
+        "an empty name matches neither ID nor NUMBER"
+    );
+    assert!(
+        !logic::valid_route_name("has space"),
+        "whitespace would split the unquoted name into two tokens"
+    );
+    assert!(
+        !logic::valid_route_name("quote\""),
+        "a double quote would open a string in the unquoted name"
+    );
+    assert!(
+        !logic::valid_route_name("nul\0"),
+        "a NUL byte is not part of the ID grammar"
+    );
+    assert!(
+        !logic::valid_route_name("paren("),
+        "a parenthesis would end the unquoted name inside route()"
+    );
 }
 
 fn sig_catalog() -> Vec<ModuleDoc> {
@@ -310,7 +430,10 @@ fn signature_at_finds_active_parameter() {
     assert_eq!(s.0, "t_relay([flags], [next_hop])");
     assert_eq!(s.2, 1);
     // unknown function → none
-    assert!(logic::signature_at(&sig_catalog(), &core, doc, "    nope(").is_none());
+    assert!(
+        logic::signature_at(&sig_catalog(), &core, doc, "    nope(").is_none(),
+        "nope is in neither the module catalog nor core, so it has no signature"
+    );
     // adversarial: never panic
     for p in ["", "(", ")))((", "\"", "t_relay(\"\\", "#t_relay(", "\0("] {
         let _ = logic::signature_at(&sig_catalog(), &core, doc, p);
@@ -357,16 +480,25 @@ fn completions_dedup_prefers_richer_items() {
 fn route_call_argument_completes_route_names() {
     let doc = "route[relay] {\n    exit;\n}\nroute {\n}\n";
     let out = logic::completions_with_core(&[], &CoreDocs::default(), doc, "    route(");
-    assert!(!out.is_empty());
+    assert!(
+        !out.is_empty(),
+        "route( in a document that defines route[relay] offers at least that name"
+    );
     assert!(
         out.iter().all(|c| c.kind == CompKind::Route),
         "inside route( only route names complete: {:?}",
         out.iter().map(|c| &c.label).collect::<Vec<_>>()
     );
-    assert!(out.iter().any(|c| c.label == "relay"));
+    assert!(
+        out.iter().any(|c| c.label == "relay"),
+        "the defined route[relay] is offered after route(: {out:?}"
+    );
     // quoted form and partial names too
     let out = logic::completions_with_core(&[], &CoreDocs::default(), doc, "    route(\"re");
-    assert!(out.iter().any(|c| c.label == "relay"));
+    assert!(
+        out.iter().any(|c| c.label == "relay"),
+        "a quoted, partial route name still completes to relay: {out:?}"
+    );
 }
 
 #[test]
@@ -411,8 +543,14 @@ fn include_closure_follows_cycles_and_depth_safely() {
         .iter()
         .map(|(p, l)| (p.to_str().unwrap(), l.name.as_str()))
         .collect();
-    assert!(names.contains(&("/x/a.cfg", "a_r")));
-    assert!(names.contains(&("/x/b.cfg", "b_r")));
+    assert!(
+        names.contains(&("/x/a.cfg", "a_r")),
+        "the root's own route def is attributed to the root file: {names:?}"
+    );
+    assert!(
+        names.contains(&("/x/b.cfg", "b_r")),
+        "a route def in the included file is attributed to that file: {names:?}"
+    );
     // depth bomb: a chain of self-includes must terminate
     let bomb = |_: &Path| -> Option<String> { Some("include_file \"z.cfg\"\n".into()) };
     let files = logic::include_closure(Path::new("/x/z.cfg"), "include_file \"z.cfg\"\n", &bomb);
@@ -428,24 +566,37 @@ fn analyzer_diagnostics_flag_undefined_and_duplicate_routes() {
     let text = "route {\n    route(nope);\n}\n";
     let ds = logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader);
     assert_eq!(ds.len(), 1, "{ds:?}");
-    assert!(ds[0].message.contains("nope"));
+    assert!(
+        ds[0].message.contains("nope"),
+        "the undefined-route warning names the missing route: {ds:?}"
+    );
     assert_eq!(ds[0].line, 1);
-    assert!(ds[0].col_start < ds[0].col_end);
+    assert!(
+        ds[0].col_start < ds[0].col_end,
+        "the warning covers a non-empty column span: {ds:?}"
+    );
     // defined in an include → clean
     let loader2 = |p: &Path| -> Option<String> {
         (p.to_str() == Some("/x/inc.cfg")).then(|| "route[nope] { exit; }\n".to_string())
     };
     let text2 = "include_file \"inc.cfg\"\nroute {\n    route(nope);\n}\n";
-    assert!(logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text2, &loader2).is_empty());
+    assert!(
+        logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text2, &loader2).is_empty(),
+        "route[nope] is defined in the included inc.cfg, so route(nope) is not undefined: {text2:?}"
+    );
     // duplicate definitions: the LATER one in this file is flagged
     let text3 = "route[dup] { exit; }\nroute[dup] { exit; }\n";
     let ds = logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text3, &loader);
     assert_eq!(ds.len(), 1, "{ds:?}");
     assert_eq!(ds[0].line, 1);
-    assert!(ds[0].message.contains("dup"));
+    assert!(
+        ds[0].message.contains("dup"),
+        "the duplicate-definition warning names the route: {ds:?}"
+    );
     // clean file → empty; adversarial → no panic
     assert!(
-        logic::analyzer_diagnostics(Path::new("/x/t.cfg"), "route { exit; }\n", &loader).is_empty()
+        logic::analyzer_diagnostics(Path::new("/x/t.cfg"), "route { exit; }\n", &loader).is_empty(),
+        "a main route with no route() calls has nothing to flag"
     );
     for s in [
         "",
@@ -593,13 +744,25 @@ fn a_fragments_check_diagnostics_are_routed_to_the_fragment() {
     assert_eq!(d.message, "syntax error", "no include-directive prefix");
     assert_eq!(d.file, reported.display().to_string());
     // absolute spelling of the same file
-    assert!(logic::fragment_check_diag(checked, reported, &mk("/w/incdir/sub.cfg")).is_some());
+    assert!(
+        logic::fragment_check_diag(checked, reported, &mk("/w/incdir/sub.cfg")).is_some(),
+        "the absolute spelling of {reported:?} is the same fragment as the relative one"
+    );
     // the root's own errors belong to the root's buffer, not here
-    assert!(logic::fragment_check_diag(checked, reported, &mk("/w/opensips.cfg")).is_none());
+    assert!(
+        logic::fragment_check_diag(checked, reported, &mk("/w/opensips.cfg")).is_none(),
+        "an error in the root {checked:?} belongs to the root's buffer, not to {reported:?}"
+    );
     // a sibling fragment's errors are not this fragment's
-    assert!(logic::fragment_check_diag(checked, reported, &mk("incdir/other.cfg")).is_none());
+    assert!(
+        logic::fragment_check_diag(checked, reported, &mk("incdir/other.cfg")).is_none(),
+        "an error in a sibling fragment does not belong to {reported:?}"
+    );
     // an unpositioned line must not silently become the fragment's
-    assert!(logic::fragment_check_diag(checked, reported, &mk("")).is_none());
+    assert!(
+        logic::fragment_check_diag(checked, reported, &mk("")).is_none(),
+        "a diag with no file name must not be attached to {reported:?}"
+    );
     // adversarial: never panic
     for f in ["\0", "..", "a\\b", "incdir/../incdir/sub.cfg"] {
         let _ = logic::fragment_check_diag(checked, reported, &mk(f));
@@ -628,7 +791,10 @@ fn analyzer_understands_route_zero_and_kind_namespaces() {
     assert_eq!(ds.len(), 1, "{ds:?}");
     // a route[x] does
     let text = "route[x] {\n    exit;\n}\nroute {\n    route(x);\n}\n";
-    assert!(logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader).is_empty());
+    assert!(
+        logic::analyzer_diagnostics(Path::new("/x/t.cfg"), text, &loader).is_empty(),
+        "route[x] is in the main namespace, so it satisfies route(x): {text:?}"
+    );
 }
 
 #[test]
@@ -658,7 +824,11 @@ fn signature_params_split_is_depth_aware() {
         vec!["[flags]", "[next_hop]"]
     );
     // no params
-    assert!(logic::split_params("fix_nated_contact()").is_empty());
+    assert!(
+        logic::split_params("fix_nated_contact()").is_empty(),
+        "a signature with empty parentheses has no params: {:?}",
+        logic::split_params("fix_nated_contact()")
+    );
     // commas inside quotes stay put
     assert_eq!(logic::split_params(r#"f("a,b", c)"#), vec![r#""a,b""#, "c"]);
     // adversarial: no panic
@@ -681,14 +851,21 @@ fn foreign_diags_attach_to_the_include_directive() {
         "syntax error",
     );
     assert_eq!(f.line, 0, "the include_file directive is on line 0");
-    assert!(f.col_end > f.col_start);
+    assert!(
+        f.col_end > f.col_start,
+        "the diag covers a non-empty span of the include_file directive: {f:?}"
+    );
     assert!(f.message.contains("sub_bad.cfg"), "{}", f.message);
     assert!(
         f.message.contains("line 2"),
         "1-based line in msg: {}",
         f.message
     );
-    assert!(f.message.contains("syntax error"));
+    assert!(
+        f.message.contains("syntax error"),
+        "the include's own error text is kept in the message: {}",
+        f.message
+    );
     // an error in a TRANSITIVE include (no matching directive here)
     // still lands visibly at the top of the root
     let f = logic::attribute_foreign_diag(
@@ -699,7 +876,11 @@ fn foreign_diags_attach_to_the_include_directive() {
         "bad thing",
     );
     assert_eq!((f.line, f.col_start), (0, 0));
-    assert!(f.message.contains("deeper.cfg") && f.message.contains("bad thing"));
+    assert!(
+        f.message.contains("deeper.cfg") && f.message.contains("bad thing"),
+        "a transitive include's error keeps its file name and text: {}",
+        f.message
+    );
     // adversarial: no panic
     for (df, t) in [("", ""), ("\0", "include_file \"\0\""), ("/x/a", "#")] {
         let _ = logic::attribute_foreign_diag(Path::new("/x/m.cfg"), t, df, 0, "m");
@@ -714,7 +895,10 @@ fn quick_fixes_offer_loadmodule_and_route_stub() {
     let doc = "loadmodule \"proto_udp.so\"\nroute {\n    t_relay();\n}\n";
     let fixes = logic::quick_fixes(&cat, doc, "unknown command <t_relay>, missing loadmodule?");
     assert_eq!(fixes.len(), 1, "{fixes:?}");
-    assert!(fixes[0].title.contains("tm"));
+    assert!(
+        fixes[0].title.contains("tm"),
+        "t_relay is exported by tm, so the fix title names tm: {fixes:?}"
+    );
     assert_eq!(
         (fixes[0].line, fixes[0].col),
         (1, 0),
@@ -724,7 +908,8 @@ fn quick_fixes_offer_loadmodule_and_route_stub() {
     // module already loaded → no fix
     let doc2 = "loadmodule \"tm.so\"\nroute {\n    t_relay();\n}\n";
     assert!(
-        logic::quick_fixes(&cat, doc2, "unknown command <t_relay>, missing loadmodule?").is_empty()
+        logic::quick_fixes(&cat, doc2, "unknown command <t_relay>, missing loadmodule?").is_empty(),
+        "tm.so is already loaded in {doc2:?}, so no loadmodule fix is offered"
     );
     // no loadmodule lines at all → insert at the top
     let fixes = logic::quick_fixes(
@@ -735,7 +920,8 @@ fn quick_fixes_offer_loadmodule_and_route_stub() {
     assert_eq!((fixes[0].line, fixes[0].col), (0, 0));
     // unknown function nobody exports → no fix
     assert!(
-        logic::quick_fixes(&cat, doc, "unknown command <nope_fn>, missing loadmodule?").is_empty()
+        logic::quick_fixes(&cat, doc, "unknown command <nope_fn>, missing loadmodule?").is_empty(),
+        "no catalog module exports nope_fn, so there is no module to load"
     );
 
     // undefined route → create a stub at end of file
@@ -746,10 +932,19 @@ fn quick_fixes_offer_loadmodule_and_route_stub() {
         "route 'missing' is not defined here or in included files",
     );
     assert_eq!(fixes.len(), 1);
-    assert!(fixes[0].title.contains("missing"));
+    assert!(
+        fixes[0].title.contains("missing"),
+        "the route stub fix title names the undefined route: {fixes:?}"
+    );
     assert_eq!(fixes[0].line, 3, "appended at end of file");
-    assert!(fixes[0].insert.contains("route[missing]"));
-    assert!(fixes[0].insert.contains("exit;"));
+    assert!(
+        fixes[0].insert.contains("route[missing]"),
+        "the stub defines the route that route(missing) calls: {fixes:?}"
+    );
+    assert!(
+        fixes[0].insert.contains("exit;"),
+        "the stub body ends the route with exit: {fixes:?}"
+    );
     // adversarial messages → no panic, no fix
     for m in [
         "",
@@ -769,18 +964,31 @@ fn catalog_diagnostics_flag_undocumented_modparams() {
     let origin = CatalogOrigin::BuiltIn("4.0.2".to_string());
     let ds = logic::catalog_diagnostics(&cat, &origin, text);
     assert_eq!(ds.len(), 1, "{ds:?}");
-    assert!(ds[0].message.contains("fr_timeot") && ds[0].message.contains("tm"));
+    assert!(
+        ds[0].message.contains("fr_timeot") && ds[0].message.contains("tm"),
+        "the warning names the misspelled param and its module: {ds:?}"
+    );
     assert_eq!(ds[0].line, 0);
-    assert!(ds[0].col_start < ds[0].col_end);
+    assert!(
+        ds[0].col_start < ds[0].col_end,
+        "the warning covers a non-empty column span at the param: {ds:?}"
+    );
     // documented param → clean
     assert!(
         logic::catalog_diagnostics(&cat, &origin, "modparam(\"tm\", \"fr_timeout\", 5)\n")
-            .is_empty()
+            .is_empty(),
+        "fr_timeout is a documented tm param, so it is not flagged"
     );
     // UNKNOWN module → silent (the catalog may simply not cover it)
-    assert!(logic::catalog_diagnostics(&cat, &origin, "modparam(\"nope\", \"x\", 1)\n").is_empty());
+    assert!(
+        logic::catalog_diagnostics(&cat, &origin, "modparam(\"nope\", \"x\", 1)\n").is_empty(),
+        "a module the catalog does not cover is not flagged, as the catalog may be incomplete"
+    );
     // empty catalog → silent everywhere
-    assert!(logic::catalog_diagnostics(&[], &origin, text).is_empty());
+    assert!(
+        logic::catalog_diagnostics(&[], &origin, text).is_empty(),
+        "with an empty catalog no modparam can be judged undocumented: {text:?}"
+    );
 }
 
 #[test]
@@ -800,7 +1008,11 @@ fn semantic_spans_cover_routes_and_pvars() {
     assert!(pvars.iter().any(|p| p.line == 1), "$ru inside the string");
     assert!(pvars.iter().any(|p| p.line == 2 && p.len == 7), "$var(x)");
     // comments contribute nothing
-    assert!(logic::semantic_spans("# $ru route(x)\n").is_empty());
+    assert!(
+        logic::semantic_spans("# $ru route(x)\n").is_empty(),
+        "a pvar and a route ref inside a line comment produce no spans: {:?}",
+        logic::semantic_spans("# $ru route(x)\n")
+    );
     // adversarial: no panic
     for s in ["", "$", "$(", "route[", "\0$ru"] {
         let _ = logic::semantic_spans(s);
@@ -819,9 +1031,17 @@ fn semantic_spans_exclude_comments_via_classifier() {
     let spans = logic::semantic_spans("xlog('#: $ru');\n");
     assert!(spans.iter().any(|s| s.kind == SemKind::Pvar), "{spans:?}");
     // block comments hide pvars — on one line...
-    assert!(logic::semantic_spans("/* $ru */\n").is_empty());
+    assert!(
+        logic::semantic_spans("/* $ru */\n").is_empty(),
+        "a pvar inside a one-line block comment produces no span: {:?}",
+        logic::semantic_spans("/* $ru */\n")
+    );
     // ...and across lines (no '#' anywhere near the pvar)
-    assert!(logic::semantic_spans("/*\n  $ru\n*/\n").is_empty());
+    assert!(
+        logic::semantic_spans("/*\n  $ru\n*/\n").is_empty(),
+        "a pvar inside a multi-line block comment produces no span: {:?}",
+        logic::semantic_spans("/*\n  $ru\n*/\n")
+    );
     // code resumes after the block comment ends
     let spans = logic::semantic_spans("/* x */ $rd;\n");
     assert_eq!(spans.len(), 1, "{spans:?}");
@@ -848,7 +1068,10 @@ fn semantic_tokens_delta_encoding() {
     let data = logic::encode_semantic_tokens(text);
     // LSP quintuples: deltaLine, deltaStart, length, tokenType, mods
     assert_eq!(data.len() % 5, 0);
-    assert!(!data.is_empty());
+    assert!(
+        !data.is_empty(),
+        "the route def and route ref names each yield a token: {data:?}"
+    );
     // first token: line 0, col 6, len 2, type 0 (route name)
     assert_eq!(&data[..5], &[0, 6, 2, 0, 0]);
     // second token on line 1 → deltaLine 1, absolute col 10
@@ -885,7 +1108,10 @@ fn route_families_are_separate_namespaces_for_navigation() {
     assert_eq!(ns, RouteNs::Kind("failure_route".into()));
     let kocc = logic::ns_occurrences(doc2, "x", &RouteNs::Kind("failure_route".into()));
     assert_eq!(kocc.len(), 1, "just the failure def: {kocc:?}");
-    assert!(kocc[0].1);
+    assert!(
+        kocc[0].1,
+        "the one failure_route occurrence is its definition: {kocc:?}"
+    );
     assert_eq!(kocc[0].0.line, 0);
     // main ns from a call site
     let (n, ns) = logic::route_symbol_ns_at(doc2, 7, 10).expect("symbol at call");
@@ -910,10 +1136,22 @@ fn semantic_tokens_range_encoding_edges() {
     let d = logic::encode_semantic_tokens_range(text, 1, 0, 2, 0);
     assert_eq!(d, vec![1, 10, 2, 0, 0]);
     // inverted / empty ranges yield nothing, no panic
-    assert!(logic::encode_semantic_tokens_range(text, 2, 0, 1, 0).is_empty());
-    assert!(logic::encode_semantic_tokens_range(text, 0, 0, 0, 0).is_empty());
+    assert!(
+        logic::encode_semantic_tokens_range(text, 2, 0, 1, 0).is_empty(),
+        "a range whose end is before its start covers no tokens: {:?}",
+        logic::encode_semantic_tokens_range(text, 2, 0, 1, 0)
+    );
+    assert!(
+        logic::encode_semantic_tokens_range(text, 0, 0, 0, 0).is_empty(),
+        "a zero-width range covers no tokens: {:?}",
+        logic::encode_semantic_tokens_range(text, 0, 0, 0, 0)
+    );
     // boundary: span must lie FULLY inside (cut mid-name → excluded)
-    assert!(logic::encode_semantic_tokens_range(text, 1, 0, 1, 11).is_empty());
+    assert!(
+        logic::encode_semantic_tokens_range(text, 1, 0, 1, 11).is_empty(),
+        "a range ending inside the name ab at 1:10 excludes that token: {:?}",
+        logic::encode_semantic_tokens_range(text, 1, 0, 1, 11)
+    );
     for s in ["", "\0", "route["] {
         let _ = logic::encode_semantic_tokens_range(s, 0, 0, 9, 9);
     }
@@ -934,7 +1172,10 @@ fn per_version_analysis_is_memoized() {
     assert_eq!(a1.refs.len(), 1);
     // a new version recomputes and evicts the old entry
     let a3 = cache.get_or_compute("file:///t.cfg", 2, "route { exit; }\n");
-    assert!(!Arc::ptr_eq(&a1, &a3));
+    assert!(
+        !Arc::ptr_eq(&a1, &a3),
+        "a new version must be computed afresh, not reuse version 1: {a3:?}"
+    );
     assert_eq!(a3.blocks.len(), 1);
     assert_eq!(cache.len(), 1, "one entry per document");
     // distinct documents don't collide
@@ -946,7 +1187,10 @@ fn per_version_analysis_is_memoized() {
     assert_eq!(cache.len(), 1);
     // adversarial: hostile text is just data
     let c = cache.get_or_compute("file:///v.cfg", 1, "\0route[\\ {");
-    assert!(c.refs.is_empty());
+    assert!(
+        c.refs.is_empty(),
+        "hostile text holds no route() call, so it yields no refs: {c:?}"
+    );
 }
 
 #[test]

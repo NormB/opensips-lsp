@@ -117,8 +117,14 @@ fn all_features_over_stdio_against_a_synthetic_tree() {
     );
     let l = labels(&common::wait_for(&rx, |v| v["id"] == 2, "code completion"));
     assert!(l.contains(&"my_func".to_string()), "{l:?}");
-    assert!(l.contains(&"core_fn".to_string()));
-    assert!(l.contains(&"core_param".to_string()));
+    assert!(
+        l.contains(&"core_fn".to_string()),
+        "code completion must offer core functions: {l:?}"
+    );
+    assert!(
+        l.contains(&"core_param".to_string()),
+        "code completion must offer core params: {l:?}"
+    );
     assert!(
         !l.contains(&"other_func".to_string()),
         "othermod is NOT loaded: {l:?}"
@@ -449,7 +455,8 @@ fn undocumented_modparam_warns_between_saves() {
         clear["params"]["diagnostics"]
             .as_array()
             .unwrap()
-            .is_empty()
+            .is_empty(),
+        "a documented param must clear the catalog warning: {clear}"
     );
     child.kill().ok();
 }

@@ -128,8 +128,16 @@ fn versions_are_listed_oldest_first_and_newest_is_last() {
 #[test]
 fn an_unsupported_release_resolves_to_nothing() {
     let versioned = build(&harvests());
-    assert!(versioned.at("1.2.3").is_none());
-    assert!(versioned.at("").is_none());
+    assert!(
+        versioned.at("1.2.3").is_none(),
+        "1.2.3 is not a harvested release, so it must resolve to nothing: {:?}",
+        versioned.versions()
+    );
+    assert!(
+        versioned.at("").is_none(),
+        "an empty version must resolve to nothing: {:?}",
+        versioned.versions()
+    );
 }
 
 /// The lookup behind cross-version diagnosis, checked against the

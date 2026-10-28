@@ -53,20 +53,50 @@ fn find_pii(text: &str) -> Vec<String> {
 
 #[test]
 fn detector_fires_on_planted_pii() {
-    assert!(!find_pii("nats://10.0.0.31:4222").is_empty());
-    assert!(!find_pii("ssh gator@63.133.236.8").is_empty());
-    assert!(!find_pii("git@gitlab.goes.com:x/y.git").is_empty());
-    assert!(!find_pii("/home/gator/scratch/tree").is_empty());
-    assert!(!find_pii("runs on opensips-1 and miner1").is_empty());
+    assert!(
+        !find_pii("nats://10.0.0.31:4222").is_empty(),
+        "an RFC 1918 private address is lab data, so the detector must flag it"
+    );
+    assert!(
+        !find_pii("ssh gator@63.133.236.8").is_empty(),
+        "a lab WAN address is real host data, so the detector must flag it"
+    );
+    assert!(
+        !find_pii("git@gitlab.goes.com:x/y.git").is_empty(),
+        "a private GitLab host is internal data, so the detector must flag it"
+    );
+    assert!(
+        !find_pii("/home/gator/scratch/tree").is_empty(),
+        "a real home directory path names the user, so the detector must flag it"
+    );
+    assert!(
+        !find_pii("runs on opensips-1 and miner1").is_empty(),
+        "lab host names are internal data, so the detector must flag them"
+    );
 }
 
 #[test]
 fn detector_allows_documentation_placeholders() {
-    assert!(find_pii("nats://192.0.2.10:4222").is_empty());
-    assert!(find_pii("/home/user/src/opensips").is_empty());
-    assert!(find_pii("/path/to/opensips").is_empty());
-    assert!(find_pii("sip:probe@example.com").is_empty());
-    assert!(find_pii("Copyright (c) 2026 Norm Brandinger").is_empty());
+    assert!(
+        find_pii("nats://192.0.2.10:4222").is_empty(),
+        "192.0.2.0/24 is the RFC 5737 documentation range, so the detector must allow it"
+    );
+    assert!(
+        find_pii("/home/user/src/opensips").is_empty(),
+        "/home/user is a generic placeholder home directory, so the detector must allow it"
+    );
+    assert!(
+        find_pii("/path/to/opensips").is_empty(),
+        "/path/to is a generic placeholder path, so the detector must allow it"
+    );
+    assert!(
+        find_pii("sip:probe@example.com").is_empty(),
+        "example.com is a reserved documentation domain, so the detector must allow it"
+    );
+    assert!(
+        find_pii("Copyright (c) 2026 Norm Brandinger").is_empty(),
+        "the copyright line names the author, which is allowed; no pattern bans it, so the detector must not flag it"
+    );
 }
 
 /// The guard protects what SHIPS: scan exactly the git-tracked files

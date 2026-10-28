@@ -47,7 +47,10 @@ fn finds_loaded_modules_skipping_comments() {
 #[test]
 fn loadmodule_inside_string_is_not_collected() {
     let mods = analyze::loaded_modules(CFG);
-    assert!(!mods.iter().any(|m| m.name == "fake"));
+    assert!(
+        !mods.iter().any(|m| m.name == "fake"),
+        "the loadmodule \"fake.so\" text sits inside an xlog string, so it is not a module load: {mods:?}"
+    );
 }
 
 #[test]
@@ -61,9 +64,18 @@ fn loadmodule_positions_are_line_accurate() {
 fn finds_route_definitions() {
     let defs = analyze::route_defs(CFG);
     let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-    assert!(names.contains(&"")); // main route
-    assert!(names.contains(&"check_source"));
-    assert!(names.contains(&"nat_fail"));
+    assert!(
+        names.contains(&""),
+        "the fixture has an unnamed main route, reported with an empty name: {names:?}"
+    ); // main route
+    assert!(
+        names.contains(&"check_source"),
+        "the fixture defines route[check_source]: {names:?}"
+    );
+    assert!(
+        names.contains(&"nat_fail"),
+        "the fixture defines failure_route[nat_fail]: {names:?}"
+    );
     let cs = defs.iter().find(|d| d.name == "check_source").unwrap();
     assert_eq!(cs.line, 20);
 }
@@ -193,7 +205,10 @@ fn includes_adversarial_do_not_panic() {
         let _ = analyze::includes(s);
     }
     // an identifier tail must not match (reinclude_file)
-    assert!(analyze::includes("reinclude_file \"x.cfg\"").is_empty());
+    assert!(
+        analyze::includes("reinclude_file \"x.cfg\"").is_empty(),
+        "reinclude_file is a different identifier that only ends in include_file, so it is not an include"
+    );
 }
 
 #[test]
@@ -212,7 +227,8 @@ fn timer_route_with_interval_is_recognized() {
     assert!(
         analyze::route_defs(text)
             .iter()
-            .all(|d| !d.name.contains("30"))
+            .all(|d| !d.name.contains("30")),
+        "the timer_route interval 30 is not part of the route name: {defs:?}"
     );
 }
 
@@ -226,8 +242,14 @@ fn single_quoted_strings_are_strings() {
     assert_eq!(blocks[0].end_line, 3);
     // single-quoted route names in defs and refs
     let text = "route['sq'] { exit; }\nroute {\n    route('sq');\n}\n";
-    assert!(analyze::route_defs(text).iter().any(|d| d.name == "sq"));
-    assert!(analyze::route_refs(text).iter().any(|r| r.name == "sq"));
+    assert!(
+        analyze::route_defs(text).iter().any(|d| d.name == "sq"),
+        "route['sq'] defines a route named sq; the quotes are not part of the name: {text:?}"
+    );
+    assert!(
+        analyze::route_refs(text).iter().any(|r| r.name == "sq"),
+        "route('sq') references the route named sq; the quotes are not part of the name: {text:?}"
+    );
     // and single-quoted includes
     let inc = analyze::includes("include_file 'a.cfg'\n");
     assert_eq!(inc.len(), 1);
@@ -348,12 +370,24 @@ fn the_cursor_is_in_a_comment_only_before_the_comment_ends() {
     );
     // a `#` or `/*` inside a string opens no comment
     let s = "route {\n    xlog(\"# /* x\"); xl\n}\n";
-    assert!(!analyze::in_comment(s, at(s, "# /* x")));
-    assert!(!analyze::in_comment(s, at(s, "; xl")));
+    assert!(
+        !analyze::in_comment(s, at(s, "# /* x")),
+        "a # inside a double-quoted string opens no comment: {s:?}"
+    );
+    assert!(
+        !analyze::in_comment(s, at(s, "; xl")),
+        "the /* inside the string opened no comment, so code after the string is not in one: {s:?}"
+    );
     // the end of a `#` line is still in it; the next line is not
     let e = "# c\nxl";
-    assert!(analyze::in_comment(e, 3));
-    assert!(!analyze::in_comment(e, e.len()));
+    assert!(
+        analyze::in_comment(e, 3),
+        "offset 3 is the end of the # line, which is still inside that comment: {e:?}"
+    );
+    assert!(
+        !analyze::in_comment(e, e.len()),
+        "a # comment ends at the newline, so the next line is not in it: {e:?}"
+    );
 }
 
 #[test]

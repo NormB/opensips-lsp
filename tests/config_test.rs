@@ -38,22 +38,25 @@ fn option_beats_env() {
 #[test]
 fn diag_file_matching_tolerates_symlinked_tmp() {
     // exact match
-    assert!(logic::diag_matches_file(
-        "/x/test.cfg",
-        Path::new("/x/test.cfg")
-    ));
+    assert!(
+        logic::diag_matches_file("/x/test.cfg", Path::new("/x/test.cfg")),
+        "a diagnostic naming the same path as the document belongs to that document"
+    );
     // empty diag file = global fallback, always attaches
-    assert!(logic::diag_matches_file("", Path::new("/x/test.cfg")));
+    assert!(
+        logic::diag_matches_file("", Path::new("/x/test.cfg")),
+        "a diagnostic with no file is the global fallback and attaches to any document"
+    );
     // different basename never matches
-    assert!(!logic::diag_matches_file(
-        "/x/other.cfg",
-        Path::new("/x/test.cfg")
-    ));
+    assert!(
+        !logic::diag_matches_file("/x/other.cfg", Path::new("/x/test.cfg")),
+        "a diagnostic for another basename belongs to a different file"
+    );
     // same basename, different dir spelling (symlink case) DOES match
-    assert!(logic::diag_matches_file(
-        "/private/tmp/a/test.cfg",
-        Path::new("/tmp/a/test.cfg")
-    ));
+    assert!(
+        logic::diag_matches_file("/private/tmp/a/test.cfg", Path::new("/tmp/a/test.cfg")),
+        "the same basename under a different spelling of a symlinked directory must still match"
+    );
 }
 
 #[test]
@@ -100,7 +103,10 @@ fn existing_same_basename_files_do_not_cross_attach() {
         !logic::diag_matches_file(&a.display().to_string(), &b),
         "distinct existing files with equal basenames must not match"
     );
-    assert!(logic::diag_matches_file(&a.display().to_string(), &a));
+    assert!(
+        logic::diag_matches_file(&a.display().to_string(), &a),
+        "an existing file matches a diagnostic naming its own path: {a:?}"
+    );
 }
 
 #[test]
@@ -112,12 +118,14 @@ fn symlinked_spellings_of_the_same_file_match_canonically() {
     std::os::unix::fs::symlink(base.join("real"), base.join("link")).unwrap();
     let via_link = base.join("link/t.cfg");
     let real = base.join("real/t.cfg");
-    assert!(logic::diag_matches_file(
-        &real.display().to_string(),
-        &via_link
-    ));
-    assert!(logic::diag_matches_file(
-        &via_link.display().to_string(),
-        &real
-    ));
+    assert!(
+        logic::diag_matches_file(&real.display().to_string(), &via_link),
+        "the path through the symlinked directory is the same file after canonicalization: \
+         diag {real:?}, document {via_link:?}"
+    );
+    assert!(
+        logic::diag_matches_file(&via_link.display().to_string(), &real),
+        "the path through the symlinked directory is the same file after canonicalization: \
+         diag {via_link:?}, document {real:?}"
+    );
 }

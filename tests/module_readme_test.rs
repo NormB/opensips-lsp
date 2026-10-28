@@ -58,32 +58,59 @@ fn parses_readme_params_and_functions() {
         m.params[0].doc,
         "Timeout which is triggered if no final reply arrives (in seconds)."
     );
-    assert!(m.params[1].doc.contains(r"C:\x\y"));
+    assert!(
+        m.params[1].doc.contains(r"C:\x\y"),
+        "the Windows path in the fixture doc must keep its backslashes: {:?}",
+        m.params[1].doc
+    );
 
     assert_eq!(m.functions.len(), 2);
     assert_eq!(m.functions[0].name, "t_relay");
     assert_eq!(m.functions[0].detail, "t_relay([flags],[outbound_proxy])");
-    assert!(m.functions[0].doc.starts_with("Relay a message statefully"));
-    assert!(!m.functions[0].doc.contains("Second paragraph excluded"));
+    assert!(
+        m.functions[0].doc.starts_with("Relay a message statefully"),
+        "the function doc is the first paragraph under the t_relay heading: {:?}",
+        m.functions[0].doc
+    );
+    assert!(
+        !m.functions[0].doc.contains("Second paragraph excluded"),
+        "only the first paragraph is kept as the function doc: {:?}",
+        m.functions[0].doc
+    );
     assert_eq!(m.functions[1].name, "t_newtran");
 }
 
 #[test]
 fn mi_functions_are_not_script_functions() {
     let m = catalog::parse_readme_md("tm", FIXTURE).unwrap();
-    assert!(!m.functions.iter().any(|f| f.name == "t_uac_dlg"));
+    assert!(
+        !m.functions.iter().any(|f| f.name == "t_uac_dlg"),
+        "t_uac_dlg is under Exported MI Functions, which are not script functions: {:?}",
+        m.functions
+    );
 }
 
 #[test]
 fn empty_and_nul_are_errors() {
-    assert!(catalog::parse_readme_md("m", "").is_err());
-    assert!(catalog::parse_readme_md("m", "a\0b").is_err());
+    assert!(
+        catalog::parse_readme_md("m", "").is_err(),
+        "an empty README has no module doc, so parsing must return an error"
+    );
+    assert!(
+        catalog::parse_readme_md("m", "a\0b").is_err(),
+        "a NUL character makes the README invalid input, so parsing must return an error"
+    );
 }
 
 #[test]
 fn readme_without_export_sections_is_ok_and_empty() {
     let m = catalog::parse_readme_md("m", "# Hi\n\nJust prose.\n").unwrap();
-    assert!(m.params.is_empty() && m.functions.is_empty());
+    assert!(
+        m.params.is_empty() && m.functions.is_empty(),
+        "a README with only prose has no export sections and so no items: params {:?}, functions {:?}",
+        m.params,
+        m.functions
+    );
 }
 
 /// A 4.x README shaped the way OpenSIPS actually writes them.
@@ -210,7 +237,11 @@ fn a_heading_listing_several_parameters_documents_each_of_them() {
     assert_eq!(m.params[3].detail, "string");
     assert_eq!(m.params[4].detail, "string");
     assert_eq!(m.params[0].doc, m.params[2].doc);
-    assert!(!m.params[0].doc.is_empty());
+    assert!(
+        !m.params[0].doc.is_empty(),
+        "the prose under the first heading is the doc of its first listed name, private_key, and must not be empty: {:?}",
+        m.params
+    );
 }
 
 /// A comma inside a function signature is not a list of functions.

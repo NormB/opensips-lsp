@@ -95,7 +95,10 @@ fn every_environment_variable_shown_is_one_the_server_reads() {
             real.insert(name);
         }
     }
-    assert!(!real.is_empty());
+    assert!(
+        !real.is_empty(),
+        "the scan of src/ must find the OPENSIPS_LSP_ variables the server reads"
+    );
 
     let mut shown = BTreeSet::new();
     for (i, _) in doc.match_indices("OPENSIPS_LSP_") {

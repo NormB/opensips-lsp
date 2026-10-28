@@ -14,7 +14,11 @@ fn a_scratch_directory_is_removed_when_the_test_passes() {
         std::fs::create_dir_all(scratch.path().join("sub")).unwrap();
         std::fs::write(scratch.path().join("sub/f.cfg"), "route {}\n").unwrap();
         // POSITIVE CONTROL: there was something to remove
-        assert!(scratch.path().join("sub/f.cfg").exists());
+        assert!(
+            scratch.path().join("sub/f.cfg").exists(),
+            "the fixture file must exist before the guard drops: {}",
+            scratch.path().display()
+        );
         scratch.path().to_path_buf()
     };
     assert!(!path.exists(), "{} survived its guard", path.display());
@@ -40,7 +44,11 @@ fn a_scratch_file_is_removed_too() {
     let path = {
         let scratch = Scratch::new("oslsp-scratch-file");
         std::fs::write(scratch.path(), "x").unwrap();
-        assert!(scratch.path().is_file());
+        assert!(
+            scratch.path().is_file(),
+            "the scratch path must be a file before the guard drops: {}",
+            scratch.path().display()
+        );
         scratch.path().to_path_buf()
     };
     assert!(!path.exists(), "{} survived its guard", path.display());
@@ -64,7 +72,11 @@ fn a_path_held_by_a_live_guard_cannot_be_taken_again() {
     );
     drop(first);
     let again = Scratch::new("oslsp-scratch-twice");
-    assert!(!again.path().exists());
+    assert!(
+        !again.path().exists(),
+        "a new guard must start with the path absent once the first guard is dropped: {}",
+        again.path().display()
+    );
 }
 
 /// Every scratch path in the suite comes from `common::Scratch`.

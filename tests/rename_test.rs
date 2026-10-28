@@ -130,17 +130,25 @@ fn a_rename_onto_an_existing_route_in_the_same_namespace_conflicts() {
     assert_eq!(hit.0, PathBuf::from("/a.cfg"));
     assert_eq!((hit.1.line, hit.1.col), (0, 6));
     // another namespace's name is not a conflict
-    assert!(logic::rename_conflict(&files, "free", &RouteNs::Main).is_none());
     assert!(
-        logic::rename_conflict(&files, "taken", &RouteNs::Kind("failure_route".into())).is_none()
+        logic::rename_conflict(&files, "free", &RouteNs::Main).is_none(),
+        "free is only a failure_route, so it does not conflict in the main namespace: {files:?}"
     );
     assert!(
-        logic::rename_conflict(&files, "free", &RouteNs::Kind("failure_route".into())).is_some()
+        logic::rename_conflict(&files, "taken", &RouteNs::Kind("failure_route".into())).is_none(),
+        "taken is only a request route, so it does not conflict among failure_route names: {files:?}"
+    );
+    assert!(
+        logic::rename_conflict(&files, "free", &RouteNs::Kind("failure_route".into())).is_some(),
+        "failure_route[free] is defined in /b.cfg, so renaming onto it conflicts: {files:?}"
     );
     // a name that is only CALLED is not defined, so it is free
     let called = vec![(
         PathBuf::from("/c.cfg"),
         "route {\n    route(ghost);\n}\n".to_string(),
     )];
-    assert!(logic::rename_conflict(&called, "ghost", &RouteNs::Main).is_none());
+    assert!(
+        logic::rename_conflict(&called, "ghost", &RouteNs::Main).is_none(),
+        "ghost is only called, never defined, so the name is free: {called:?}"
+    );
 }

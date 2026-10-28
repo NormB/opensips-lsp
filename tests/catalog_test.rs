@@ -58,23 +58,36 @@ fn parses_params_and_functions() {
 #[test]
 fn backslashes_survive() {
     let m = catalog::parse_admin_xml("cachedb_nats", FIXTURE).unwrap();
-    assert!(m.params[1].doc.contains(r"C:\nats\store"));
+    assert!(
+        m.params[1].doc.contains(r"C:\nats\store"),
+        "the Windows path in the fixture doc must keep its backslashes: {:?}",
+        m.params[1].doc
+    );
 }
 
 #[test]
 fn empty_input_is_error_not_panic() {
-    assert!(catalog::parse_admin_xml("m", "").is_err());
+    assert!(
+        catalog::parse_admin_xml("m", "").is_err(),
+        "an empty admin XML has no chapter, so parsing must return an error instead of a module"
+    );
 }
 
 #[test]
 fn malformed_xml_is_error_not_panic() {
-    assert!(catalog::parse_admin_xml("m", "<chapter><section id=").is_err());
+    assert!(
+        catalog::parse_admin_xml("m", "<chapter><section id=").is_err(),
+        "a truncated tag is malformed XML, so parsing must return an error instead of panicking"
+    );
 }
 
 #[test]
 fn embedded_nul_is_error_not_panic() {
     let s = format!("<chapter>{}</chapter>", '\0');
-    assert!(catalog::parse_admin_xml("m", &s).is_err());
+    assert!(
+        catalog::parse_admin_xml("m", &s).is_err(),
+        "a NUL character is not allowed in XML, so parsing must return an error: {s:?}"
+    );
 }
 
 #[test]
@@ -85,7 +98,11 @@ fn unknown_entities_do_not_kill_the_parse() {
     </section></chapter>"#;
     let m = catalog::parse_admin_xml("m", xml).expect("unknown entity must not be fatal");
     assert_eq!(m.params[0].name, "x");
-    assert!(m.params[0].doc.contains("& a real one"));
+    assert!(
+        m.params[0].doc.contains("& a real one"),
+        "the known &amp; entity must still decode when an unknown entity precedes it: {:?}",
+        m.params[0].doc
+    );
 }
 
 #[test]
@@ -107,13 +124,29 @@ fn harvests_the_real_opensips_tree_when_present() {
     );
     // tm exists in every OpenSIPS tree
     let tm = mods.iter().find(|m| m.name == "tm").expect("tm doc");
-    assert!(tm.params.iter().any(|p| p.name == "fr_timeout"));
-    assert!(tm.functions.iter().any(|f| f.name == "t_relay"));
+    assert!(
+        tm.params.iter().any(|p| p.name == "fr_timeout"),
+        "every OpenSIPS tree documents the tm parameter fr_timeout, so the harvest must find it: {:?}",
+        tm.params
+    );
+    assert!(
+        tm.functions.iter().any(|f| f.name == "t_relay"),
+        "every OpenSIPS tree documents the tm function t_relay, so the harvest must find it: {:?}",
+        tm.functions
+    );
     // on feature trees carrying cachedb_nats, spot-check it too
     if let Some(cn) = mods.iter().find(|m| m.name == "cachedb_nats") {
-        assert!(cn.params.iter().any(|p| p.name == "kv_bucket"));
+        assert!(
+            cn.params.iter().any(|p| p.name == "kv_bucket"),
+            "cachedb_nats documents kv_bucket, so the harvest must find it: {:?}",
+            cn.params
+        );
         // the FTS split moved this away
-        assert!(!cn.params.iter().any(|p| p.name == "enable_search_index"));
+        assert!(
+            !cn.params.iter().any(|p| p.name == "enable_search_index"),
+            "the FTS split moved enable_search_index out of cachedb_nats, so it must not be harvested there: {:?}",
+            cn.params
+        );
     }
 }
 
@@ -164,7 +197,10 @@ fn the_shipped_admin_doc_follows_the_opensips_readme_standard() {
     assert!(
         m.params
             .iter()
-            .all(|p| !p.doc.is_empty() && !p.detail.is_empty())
+            .all(|p| !p.doc.is_empty() && !p.detail.is_empty()),
+        "every parameter in docs/ADMIN.md must carry both a doc text and a detail line \
+         for hover to show: {:?}",
+        m.params
     );
     // ...and every env var must appear somewhere in the guide
     for env in [
@@ -216,9 +252,19 @@ Text with <img src=x onerror=alert(1)> raw html, a
 #[test]
 fn missing_tree_harvests_empty() {
     let modules = opensips_lsp::catalog::harvest_tree(Path::new("/nonexistent/tree-xyz"));
-    assert!(modules.is_empty());
+    assert!(
+        modules.is_empty(),
+        "a tree path that does not exist has no module docs to harvest: {modules:?}"
+    );
     let core = opensips_lsp::catalog::harvest_core(Path::new("/nonexistent/tree-xyz"));
-    assert!(core.functions.is_empty() && core.params.is_empty() && core.pvars.is_empty());
+    assert!(
+        core.functions.is_empty() && core.params.is_empty() && core.pvars.is_empty(),
+        "a tree path that does not exist has no core docs to harvest: functions {:?}, \
+         params {:?}, pvars {:?}",
+        core.functions,
+        core.params,
+        core.pvars
+    );
 }
 
 #[test]
@@ -236,7 +282,10 @@ fn readme_parser_survives_adversarial_input() {
     let md = "## Contents\n- [1.1 fr_timer (integer)](#x)\n\n### Exported Parameters\n\n#### real_param (string)\n\nDoc.\n";
     let m = opensips_lsp::catalog::parse_readme_md("m", md).expect("parses");
     let names: Vec<&str> = m.params.iter().map(|p| p.name.as_str()).collect();
-    assert!(names.contains(&"real_param"));
+    assert!(
+        names.contains(&"real_param"),
+        "the heading under Exported Parameters is a real item and must be parsed: {names:?}"
+    );
     assert!(
         !names.contains(&"fr_timer"),
         "ToC lines are not items: {names:?}"
