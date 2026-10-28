@@ -1,0 +1,5 @@
+# cargo fuzz builds with a sanitizer, which needs a nightly compiler. Only
+# the fuzz package uses it; the workspace keeps its stable toolchain.
+[toolchain]
+channel = "nightly-2026-10-24"
+components = ["rustfmt", "clippy"]

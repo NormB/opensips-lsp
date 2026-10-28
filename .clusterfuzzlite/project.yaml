@@ -1,0 +1,2 @@
+# ClusterFuzzLite reads the language here to choose its builder image.
+language: rust

@@ -20,6 +20,43 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps   # missing_docs is deny
 The real-tree harvest test is opt-in:
 `OPENSIPS_LSP_TEST_TREE=/path/to/opensips cargo test`.
 
+## Fuzzing
+
+Each target in `fuzz/fuzz_targets/` feeds random input, grown from its
+seeds, to one thing the server reads from outside:
+
+| Target | What it reads |
+| --- | --- |
+| `cfg` | any text as a cfg document: the scanner, the outline and folds, the formatter. Every position lies inside the document, no block ends before it starts, and formatting a formatted document changes nothing |
+| `readme` | any text as a module `README.md`, as the harvester reads them; every item it gives has a name |
+| `docbook` | any text as a module's DocBook admin guide; every item it gives has a name |
+| `check_output` | any text as `opensips -C` output, with any exit status. No range is empty or reversed, no message is empty or passes the cap, and a failed check always reports something |
+
+Fuzzing needs the nightly toolchain named in `fuzz/rust-toolchain.toml`
+and [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) 0.13.2:
+
+```sh
+cargo install cargo-fuzz --version 0.13.2 --locked
+scripts/fuzz.sh list                  # the targets
+scripts/fuzz.sh run cfg 60            # run one target for 60 seconds
+scripts/fuzz.sh plant cfg             # plant a panic, expect the target to find it
+```
+
+`scripts/fuzz.sh run` reads the seeds in `fuzz/seeds/<target>/` and, for
+`cfg`, the cfg files in `tests/grammar/` and the grammar's tests. What
+libFuzzer adds goes to `fuzz/corpus/<target>/`, a crash input to
+`fuzz/artifacts/<target>/`; git ignores both. A crash is a defect: fix it
+with a regression test written first.
+
+`scripts/fuzz.sh plant` checks the targets themselves: for each line of
+`fuzz/plants.txt` it puts `panic!("planted fault");` before one line of
+the code a target reads, runs the target, and expects the crash at that
+line. It then puts the file back and compares it with its copy, byte for
+byte. CI runs every target for 60 seconds and then its plant;
+ClusterFuzzLite (`.clusterfuzzlite/`) fuzzes pull requests, pushes to
+`main` that change `src/` or `fuzz/`, and every target for an hour each
+Monday.
+
 ## PRs
 
 - Feature branches, one problem per PR, linear history (squash or

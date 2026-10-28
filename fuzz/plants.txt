@@ -1,0 +1,7 @@
+# Planted-panic check: scripts/fuzz.sh plant. Each line: target, file, and
+# the text of the one line of that file the panic goes before, tab-separated.
+# The plant sits past the first checks, so the target must reach that far.
+cfg	src/analyze.rs	let (name_line, name_col) = c
+readme	src/catalog.rs	let (name, detail) = match heading.split_once('(') {
+docbook	src/catalog.rs	if let Some(pname) = id.strip_prefix("param_").filter(|n| !n.is_empty()) {
+check_output	src/diag.rs	let col_start = cs.saturating_sub(1);

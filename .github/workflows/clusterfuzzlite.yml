@@ -1,0 +1,55 @@
+name: ClusterFuzzLite
+
+# The fuzz targets in fuzz/, built and run by ClusterFuzzLite in its own
+# image (.clusterfuzzlite/). A pull request that touches code the targets
+# read is fuzzed for five minutes against the change, a push to main for
+# ten minutes, and every Monday all targets for an hour. CI's fuzz job also runs
+# each target, on the runner, for 60 seconds with its planted panic.
+#
+# No storage repository is set, so the corpus and any crash come back as
+# workflow artifacts.
+on:
+  pull_request:
+    paths: &code
+      - 'src/**'
+      - 'fuzz/**'
+      - '.clusterfuzzlite/**'
+      - '.github/workflows/clusterfuzzlite.yml'
+  push:
+    branches: [main]
+    paths: *code
+  schedule:
+    # Mondays 04:41 UTC.
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clusterfuzzlite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: ClusterFuzzLite
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Build the fuzz targets
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: rust
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          sanitizer: address
+      # A pull request is fuzzed against its change for five minutes; a push
+      # to main for ten minutes and the weekly run for an hour, in batch,
+      # all targets sharing the time.
+      - name: Run the fuzz targets
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          mode: ${{ github.event_name == 'pull_request' && 'code-change' || 'batch' }}
+          fuzz-seconds: ${{ github.event_name == 'pull_request' && 300 || github.event_name == 'push' && 600 || 3600 }}
+          sanitizer: address
+          parallel-fuzzing: ${{ github.event_name != 'pull_request' }}

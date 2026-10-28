@@ -1,0 +1,51 @@
+[package]
+name = "opensips-lsp-fuzz"
+description = "cargo fuzz targets for what opensips-lsp reads from outside."
+version = "0.0.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# Its own workspace: cargo fuzz builds this package on its own, with the
+# nightly toolchain in rust-toolchain.toml, and depends on the server by path.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+# cargo fuzz sets `--cfg fuzzing`; a plain check or clippy of this package
+# does not, so the name is declared.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
+
+[dependencies]
+opensips-lsp = { path = ".." }
+libfuzzer-sys = "0.4.13"
+
+[[bin]]
+name = "cfg"
+path = "fuzz_targets/cfg.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "readme"
+path = "fuzz_targets/readme.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "docbook"
+path = "fuzz_targets/docbook.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "check_output"
+path = "fuzz_targets/check_output.rs"
+test = false
+doc = false
+bench = false

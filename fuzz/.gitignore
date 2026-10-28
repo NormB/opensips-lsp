@@ -1,0 +1,6 @@
+# cargo fuzz build output
+/target
+# Inputs libFuzzer adds while it runs; the tracked seeds are in seeds/.
+/corpus
+# Crash inputs; a crash is turned into a regression test, never committed here.
+/artifacts

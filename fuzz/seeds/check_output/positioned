@@ -1,0 +1,2 @@
+ÅOct 26 12:00:00 [100] ERROR:core:yyerror: parse error in /etc/opensips/opensips.cfg:12:7-11: syntax error
+Oct 26 12:00:00 [100] WARNING:core:yyerror: parse error in /etc/opensips/opensips.cfg:3:1-2: unused

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<chapter>
+	<title>&adminguide;</title>
+	<section id="exported_parameters">
+	<title>Exported Parameters</title>
+	<section id="param_counter_start" xreflabel="counter_start">
+		<title><varname>counter_start</varname> (integer)</title>
+		<para>The first value of the counter, as &osips; reads it.</para>
+	</section>
+	</section>
+	<section id="exported_functions">
+	<title>Exported Functions</title>
+	<section id="func_count_up" xreflabel="count_up()">
+		<title><function moreinfo="none">count_up(step)</function></title>
+		<para>Adds step to the counter.</para>
+	</section>
+	</section>
+</chapter>
