@@ -3,6 +3,7 @@
 //! it reports lies inside the document, no block ends before it starts,
 //! and formatting a formatted document changes nothing.
 #![no_main]
+#![deny(clippy::unwrap_used)]
 
 use libfuzzer_sys::fuzz_target;
 use opensips_lsp::{analyze, format, outline};

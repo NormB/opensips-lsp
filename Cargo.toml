@@ -17,3 +17,26 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 tower-lsp-server = "0.23"
+
+# The style gate (tests/style_test.rs) reads every Rust file's syntax tree;
+# span-locations gives each finding its line.
+[dev-dependencies]
+proc-macro2 = { version = "1", features = ["span-locations"] }
+syn = { version = "2", features = ["full", "visit"] }
+
+# The lints the Google Rust Style Guide names, denied for every target. Clippy
+# runs with -D warnings in CI, so these hold there already; naming them here
+# keeps them denied whatever the command line says. unwrap() is denied in
+# each crate root outside the tests (src/lib.rs, src/main.rs, the examples
+# and the fuzz targets), which tests/style_test.rs checks.
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+
+[lints.clippy]
+borrowed_box = "deny"
+len_without_is_empty = "deny"
+new_without_default = "deny"
+ptr_arg = "deny"
+should_implement_trait = "deny"
+wrong_self_convention = "deny"

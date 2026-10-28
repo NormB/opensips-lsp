@@ -23,13 +23,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
         with:
           toolchain: stable
-          components: rustfmt, clippy
+          components: clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - name: rustfmt
-        # the fuzz package is a workspace of its own, so it is named
+      - name: rustfmt (the pinned nightly that scripts/fmt.sh names)
+        # rustfmt.toml uses unstable options, so formatting needs a nightly
+        # rustfmt; the script names it, so the pin lives in one place
         run: |
-          cargo fmt --check
-          cargo fmt --manifest-path fuzz/Cargo.toml --check
+          rustup toolchain install "$(scripts/fmt.sh toolchain)" --profile minimal --component rustfmt
+          scripts/fmt.sh check
       - name: clippy (warnings are errors)
         run: |
           cargo clippy --all-targets -- -D warnings

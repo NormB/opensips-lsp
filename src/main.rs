@@ -1,3 +1,8 @@
+//! `opensips-lsp`: the language server on standard input and output, or
+//! `opensips-lsp check <files>` to run the analyzer (and `opensips -C` when a
+//! binary is configured) from a shell.
+#![deny(clippy::unwrap_used)]
+
 use tower_lsp_server::{LspService, Server};
 
 #[tokio::main]

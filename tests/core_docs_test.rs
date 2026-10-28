@@ -1,3 +1,6 @@
+//! The core documentation harvesters: core functions, parameters and
+//! script variables read from the OpenSIPS manual pages.
+
 mod common;
 
 use opensips_lsp::catalog::{parse_core_functions_md, parse_core_params_md, parse_core_vars_md};

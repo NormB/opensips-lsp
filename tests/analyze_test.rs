@@ -1,3 +1,6 @@
+//! The cfg scanner in `analyze`: loaded modules, route definitions and
+//! references, includes and modparam calls, each found only in code position.
+
 use opensips_lsp::analyze::{
     includes, loaded_modules, modparam_calls, modparam_context, pvars, route_blocks, route_defs,
     route_refs, word_at,

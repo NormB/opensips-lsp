@@ -6,7 +6,7 @@
   "contribution_status": "Met",
   "contribution_justification": "Changes come as GitHub pull requests from a feature branch, one problem per pull request: https://github.com/NormB/opensips-lsp/blob/main/CONTRIBUTING.md",
   "contribution_requirements_status": "Met",
-  "contribution_requirements_justification": "https://github.com/NormB/opensips-lsp/blob/main/CONTRIBUTING.md requires a failing test first for every behavior change, cargo fmt, clippy with -D warnings, rustdoc with -D warnings, and evidence from the OpenSIPS grammar or binary for any claim about the language.",
+  "contribution_requirements_justification": "https://github.com/NormB/opensips-lsp/blob/main/CONTRIBUTING.md requires a failing test first for every behavior change, the Google Rust Style Guide (rustfmt through scripts/fmt.sh, the clippy lints in Cargo.toml and tests/style_test.rs), clippy with -D warnings, rustdoc with -D warnings, and evidence from the OpenSIPS grammar or binary for any claim about the language.",
   "floss_license_status": "Met",
   "floss_license_justification": "MIT OR Apache-2.0, at the user's option: https://github.com/NormB/opensips-lsp/blob/main/LICENSE-MIT and https://github.com/NormB/opensips-lsp/blob/main/LICENSE-APACHE .",
   "floss_license_osi_status": "Met",

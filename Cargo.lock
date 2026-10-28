@@ -226,10 +226,12 @@ name = "opensips-lsp"
 version = "0.28.0"
 dependencies = [
  "dashmap",
+ "proc-macro2",
  "regex",
  "roxmltree",
  "serde",
  "serde_json",
+ "syn 2.0.119",
  "tokio",
  "tower-lsp-server",
 ]

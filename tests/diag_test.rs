@@ -1,3 +1,6 @@
+//! `diag::parse_check_output`: diagnostics read from `opensips -C` output
+//! captured verbatim from real runs.
+
 use opensips_lsp::diag::{Severity, parse_check_output};
 
 // Verbatim opensips -C output captured from a real failure

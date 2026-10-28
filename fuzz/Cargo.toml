@@ -17,6 +17,18 @@ cargo-fuzz = true
 # does not, so the name is declared.
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
+# The Google Rust Style Guide's lints, as in the server's Cargo.toml.
+# unsafe_code is not forbidden here: fuzz_target! expands to a #[no_mangle]
+# extern function.
+missing_docs = "deny"
+
+[lints.clippy]
+borrowed_box = "deny"
+len_without_is_empty = "deny"
+new_without_default = "deny"
+ptr_arg = "deny"
+should_implement_trait = "deny"
+wrong_self_convention = "deny"
 
 [dependencies]
 opensips-lsp = { path = ".." }

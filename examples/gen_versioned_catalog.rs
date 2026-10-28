@@ -13,6 +13,7 @@
 //! them as `OPENSIPS_LSP_TEST_TREES` in this same `<version>=<path>`
 //! form, so the vendored file and the suite that checks it derive from
 //! one list.
+#![deny(clippy::unwrap_used)]
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -55,5 +56,8 @@ fn main() {
         },
         deltas,
     };
-    println!("{}", serde_json::to_string(&out).unwrap());
+    println!(
+        "{}",
+        serde_json::to_string(&out).expect("a catalog of strings serializes to JSON")
+    );
 }

@@ -3,6 +3,7 @@
 //! passes the cap editors are protected by, and a failed check always
 //! reports something.
 #![no_main]
+#![deny(clippy::unwrap_used)]
 
 use libfuzzer_sys::fuzz_target;
 use opensips_lsp::diag;

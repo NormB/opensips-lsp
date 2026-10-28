@@ -1,3 +1,6 @@
+//! `catalog`: module documentation harvested from DocBook admin guides
+//! and from an OpenSIPS source tree.
+
 mod common;
 
 use opensips_lsp::catalog::parse_admin_xml;

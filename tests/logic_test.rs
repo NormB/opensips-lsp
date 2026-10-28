@@ -1,3 +1,6 @@
+//! The editor features in `logic`: completion, hover, definition, the
+//! include graph, semantic tokens and the analyzer's diagnostics.
+
 mod common;
 
 use opensips_lsp::catalog::{Item, ModuleDoc};

@@ -2,6 +2,7 @@
 //! documentation from an OpenSIPS source tree. A README that is read gives
 //! only named parameters and functions.
 #![no_main]
+#![deny(clippy::unwrap_used)]
 
 use libfuzzer_sys::fuzz_target;
 use opensips_lsp::catalog;

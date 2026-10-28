@@ -6,6 +6,7 @@
 //! complete before the user has configured anything.  A test asserts
 //! the vendored file still equals a fresh harvest of the pinned tree,
 //! so it cannot drift from the version it claims.
+#![deny(clippy::unwrap_used)]
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -17,5 +18,8 @@ fn main() {
         .expect("usage: gen_module_catalog <tree> <version>");
     let modules = opensips_lsp::catalog::harvest_tree(std::path::Path::new(&tree));
     let out = opensips_lsp::catalog::BuiltinModules { version, modules };
-    println!("{}", serde_json::to_string(&out).unwrap());
+    println!(
+        "{}",
+        serde_json::to_string(&out).expect("a catalog of strings serializes to JSON")
+    );
 }

@@ -1,3 +1,7 @@
+//! The server's configuration: where the opensips binary comes from (an
+//! option, the environment, or a PATH lookup) and how a diagnostic's file
+//! is matched to an open document.
+
 mod common;
 
 use opensips_lsp::logic::{diag_matches_file, resolve_bin};

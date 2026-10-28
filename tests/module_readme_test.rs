@@ -1,3 +1,6 @@
+//! `catalog::parse_readme_md`: module parameters and functions read from a
+//! module's `README.md`, as the 4.x documentation writes them.
+
 use opensips_lsp::catalog::parse_readme_md;
 
 const FIXTURE: &str = r#"# TM Module
