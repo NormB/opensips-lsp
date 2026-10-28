@@ -172,3 +172,20 @@ fn nonzero_rc_with_unparseable_output_still_yields_a_diag() {
     // rc=0 with garbage stays clean
     assert!(parse_check_output("noise\n", 0).is_empty());
 }
+
+/// A failed check whose last error line has nothing after its prefix
+/// still reports a message: the editor shows an empty diagnostic as
+/// nothing at all, and the positioned path already says "parse error".
+#[test]
+fn a_failed_check_never_reports_an_empty_message() {
+    for tail in ["", " ", "\t"] {
+        let output = format!("Oct 26 12:00:00 [100] ERROR:core:main: {tail}\n");
+        let d = parse_check_output(&output, 1);
+        assert_eq!(d.len(), 1, "{output:?}");
+        assert!(
+            !d[0].message.trim().is_empty(),
+            "{output:?} gave {:?}",
+            d[0].message
+        );
+    }
+}

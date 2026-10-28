@@ -79,7 +79,14 @@ pub fn parse_check_output(output: &str, rc: i32) -> Vec<Diag> {
         let msg = output
             .lines()
             .rev()
-            .find_map(|l| generic.captures(l).map(|c| truncate_message(c[1].trim())))
+            // a line with nothing after its prefix names no reason; the
+            // editor would show an empty diagnostic, so read further back
+            .find_map(|l| {
+                generic
+                    .captures(l)
+                    .map(|c| truncate_message(c[1].trim()))
+                    .filter(|m| !m.is_empty())
+            })
             .unwrap_or_else(|| format!("opensips -C failed (rc={rc}) with unparseable output"));
         out.push(Diag {
             file: String::new(),
