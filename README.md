@@ -79,7 +79,10 @@ curl -fsSL https://raw.githubusercontent.com/NormB/opensips-lsp/main/install.sh 
 
 
 Prebuilt server binaries (Linux, macOS, and Windows (x86_64 and arm64)) and the VS Code
-`.vsix` ship with every [GitHub release](https://github.com/NormB/opensips-lsp/releases):
+`.vsix` ship with every [GitHub release](https://github.com/NormB/opensips-lsp/releases).
+Each release also carries `SHA256SUMS.txt`, a Sigstore signature over it
+and a build provenance file; [SECURITY.md](SECURITY.md#verifying-a-release)
+has the commands that check them:
 
 ```sh
 tar xzf opensips-lsp-<version>-x86_64-linux-gnu.tar.gz
