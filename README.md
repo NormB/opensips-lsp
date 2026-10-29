@@ -1,5 +1,7 @@
 # opensips-lsp
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16015/badge)](https://www.bestpractices.dev/projects/16015)
+
 A Language Server Protocol implementation for the OpenSIPS routing
 script language (`opensips.cfg`).
 
