@@ -44,6 +44,41 @@ impact assessment, and (optionally) your name/handle for credit.
   deliberately enabled* — that is the documented trust model; see the
   Security section of `docs/ADMIN.md`.
 
+## Verifying a release
+
+Releases after v0.28.0 attach three files that prove where every asset
+came from. The `publish` job in `.github/workflows/release.yml` makes
+them from its own short-lived OpenID Connect identity. No signing key
+is stored anywhere.
+
+| File | What it is |
+|---|---|
+| `SHA256SUMS.txt` | The SHA-256 of every archive and `.vsix` in the release |
+| `SHA256SUMS.txt.sigstore.json` | A keyless Sigstore signature over `SHA256SUMS.txt` |
+| `opensips-lsp-<tag>.intoto.jsonl` | The SLSA build provenance for every asset, as a Sigstore bundle |
+
+Check the signature with [cosign](https://docs.sigstore.dev/cosign/system_config/installation/),
+then check your download against the signed list:
+
+```sh
+cosign verify-blob SHA256SUMS.txt \
+    --bundle SHA256SUMS.txt.sigstore.json \
+    --certificate-identity-regexp '^https://github\.com/NormB/opensips-lsp/\.github/workflows/release\.yml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com
+sha256sum -c SHA256SUMS.txt --ignore-missing
+```
+
+Or check the provenance of one asset with the
+[GitHub CLI](https://cli.github.com/) 2.49 or newer:
+
+```sh
+gh attestation verify opensips-lsp-<tag>-x86_64-linux-gnu.tar.gz \
+    --bundle opensips-lsp-<tag>.intoto.jsonl --repo NormB/opensips-lsp
+```
+
+The `publish` job runs both checks before it creates the release, so a
+release whose files do not verify is never published.
+
 ## Data handling
 
 No configuration content leaves the machine. There is no telemetry,
