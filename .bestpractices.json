@@ -12,7 +12,7 @@
   "floss_license_osi_status": "Met",
   "floss_license_osi_justification": "MIT and Apache-2.0 are both OSI-approved.",
   "license_location_status": "Met",
-  "license_location_justification": "LICENSE-APACHE and LICENSE-MIT in the repository root, and the same texts named by SPDX identifier in https://github.com/NormB/opensips-lsp/tree/main/LICENSES (REUSE layout).",
+  "license_location_justification": "LICENSE-APACHE and LICENSE-MIT in the repository root, the same texts named by SPDX identifier in https://github.com/NormB/opensips-lsp/tree/main/LICENSES (REUSE layout), and the dual-license notice https://github.com/NormB/opensips-lsp/blob/main/DUAL-LICENSE .",
   "documentation_basics_status": "Met",
   "documentation_basics_justification": "Install and use: https://github.com/NormB/opensips-lsp/blob/main/docs/GETTING_STARTED.md . Secure use: the Security note and Data handling sections of https://github.com/NormB/opensips-lsp/blob/main/README.md and the Security section of https://github.com/NormB/opensips-lsp/blob/main/docs/ADMIN.md .",
   "documentation_interface_status": "Met",
