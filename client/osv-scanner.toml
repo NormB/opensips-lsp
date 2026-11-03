@@ -1,0 +1,22 @@
+# Vulnerabilities this project is not affected by. osv-scanner, and the
+# OpenSSF Scorecard Vulnerabilities check that runs it, read this file
+# because it sits next to package-lock.json. tests/npm_advisory_test.rs
+# checks that each entry still holds, and fails once it expires or is no
+# longer needed.
+
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2027-02-01
+reason = """
+Not affected. minimatch 10.2.6 comes only from vscode-languageclient 11.0.0,
+which passes patterns to minimatch in two places: lib/common/fileOperations.js
+(file-operation registration globs) and lib/common/utils/globPattern.js
+(document-filter patterns). The client document selector has no pattern, and
+the server registers one constant file-operation glob, **/* in src/server.rs.
+No user, workspace or file content becomes a minimatch pattern, so an attacker
+cannot supply the pattern the advisory needs. vscode-languageclient also never
+sets optimizationLevel, so minimatch uses its default of 1 and never calls
+firstPhasePreProcess. The fixed minimatch 11.0.1 cannot be used yet, because
+it removes Minimatch makeRe, which vscode-languageclient 11.0.0 calls. Upstream
+issue: microsoft/vscode-languageserver-node#1938.
+"""

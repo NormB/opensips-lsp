@@ -44,6 +44,28 @@ impact assessment, and (optionally) your name/handle for credit.
   deliberately enabled* — that is the documented trust model; see the
   Security section of `docs/ADMIN.md`.
 
+## Advisories that do not affect this project
+
+| Advisory | Package | Decision |
+|---|---|---|
+| [GHSA-g3hv-75wg-m249](https://osv.dev/GHSA-g3hv-75wg-m249) | minimatch 10.2.6, through vscode-languageclient 11.0.0 | Not affected; ignored until 2027-02-01 |
+
+minimatch 10.2.6 is in the VS Code extension only. The advisory needs an
+attacker to supply a glob pattern. vscode-languageclient passes minimatch
+only the extension's document selector, which has no pattern, and the
+server's file-operation globs, which are the constant `**/*`. It also
+never sets `optimizationLevel`, so minimatch never runs the affected
+`firstPhasePreProcess()`. The fixed minimatch 11.0.1 removes `makeRe()`,
+which vscode-languageclient 11.0.0 calls, so it cannot be used until
+vscode-languageclient releases a version that supports it
+([microsoft/vscode-languageserver-node#1938](https://github.com/microsoft/vscode-languageserver-node/issues/1938)).
+
+`client/osv-scanner.toml` records the decision for osv-scanner and the
+OpenSSF Scorecard Vulnerabilities check. `tests/npm_advisory_test.rs`
+fails when the entry expires, when another package depends on minimatch,
+when a pattern that reaches minimatch stops being a constant, or when
+minimatch is fixed and the entry is no longer needed.
+
 ## Verifying a release
 
 Releases after v0.28.0 attach three files that prove where every asset
