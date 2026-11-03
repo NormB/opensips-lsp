@@ -2,6 +2,28 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.28.1] — 2026-11-03
+
+**Every release is signed and carries its build provenance, and the
+extension is recorded as not affected by GHSA-g3hv-75wg-m249.**
+
+- **Each release attaches `SHA256SUMS.txt`, a keyless Sigstore
+  signature over it, and SLSA build provenance for every asset.** The
+  release job checks both before it publishes. `SECURITY.md` shows how
+  to verify a download with cosign or `gh attestation verify`.
+- **GHSA-g3hv-75wg-m249 (minimatch pattern amplification) does not
+  affect the extension.** minimatch 10.2.6 comes from
+  vscode-languageclient 11.0.0, and the only patterns it receives are
+  constants: the client's document selector has no pattern, and the
+  server's one file-operation glob is `**/*`. The fixed minimatch 11
+  removes a function vscode-languageclient 11.0.0 calls, so it cannot
+  be used until vscode-languageclient supports it
+  (microsoft/vscode-languageserver-node#1938).
+  `client/osv-scanner.toml` records the exception until 2027-02-01 for
+  osv-scanner and OpenSSF Scorecard, and a test fails if it stops
+  holding or is no longer needed. No code in the extension or the
+  server changed.
+
 ## [0.28.0] — 2026-10-27
 
 **Renaming an included file rewrites the includes that name it, a
