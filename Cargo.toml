@@ -22,7 +22,7 @@ tower-lsp-server = "0.23"
 # span-locations gives each finding its line.
 [dev-dependencies]
 proc-macro2 = { version = "1", features = ["span-locations"] }
-syn = { version = "2", features = ["full", "visit"] }
+syn = { version = "3", features = ["full", "visit"] }
 
 # The lints the Google Rust Style Guide names, denied for every target. Clippy
 # runs with -D warnings in CI, so these hold there already; naming them here
