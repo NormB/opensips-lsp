@@ -231,7 +231,7 @@ dependencies = [
  "roxmltree",
  "serde",
  "serde_json",
- "syn 2.0.119",
+ "syn 3.0.9",
  "tokio",
  "tower-lsp-server",
 ]
