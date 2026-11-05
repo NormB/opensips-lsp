@@ -157,6 +157,15 @@ impl Checker<'_> {
         }
     }
 
+    /// Checks a function's `unsafe` qualifier. syn 3 holds it as
+    /// `Signature::safety`, which is also `safe` in an extern block;
+    /// only `unsafe` needs a reason.
+    fn check_signature(&mut self, sig: &syn::Signature) {
+        if let syn::Safety::Unsafe(unsafety) = &sig.safety {
+            self.check_unsafe(unsafety.span.start().line);
+        }
+    }
+
     /// Records each glob in `tree` that none of the allowed forms covers.
     fn check_use(&mut self, tree: &UseTree, prefix: &mut Vec<String>, public: bool) {
         match tree {
@@ -311,27 +320,21 @@ impl<'ast> Visit<'ast> for Checker<'_> {
     }
 
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        if let Some(unsafety) = node.sig.unsafety {
-            self.check_unsafe(unsafety.span.start().line);
-        }
+        self.check_signature(&node.sig);
         self.functions += 1;
         syn::visit::visit_item_fn(self, node);
         self.functions -= 1;
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        if let Some(unsafety) = node.sig.unsafety {
-            self.check_unsafe(unsafety.span.start().line);
-        }
+        self.check_signature(&node.sig);
         self.functions += 1;
         syn::visit::visit_impl_item_fn(self, node);
         self.functions -= 1;
     }
 
     fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
-        if let Some(unsafety) = node.sig.unsafety {
-            self.check_unsafe(unsafety.span.start().line);
-        }
+        self.check_signature(&node.sig);
         self.functions += 1;
         syn::visit::visit_trait_item_fn(self, node);
         self.functions -= 1;
@@ -530,6 +533,37 @@ fn f() {
     assert_eq!(
         findings(source, ModuleKind::Leaf),
         [(4, Rule::UnsafeWithoutSafety)]
+    );
+}
+
+#[test]
+fn an_unsafe_method_without_a_safety_comment_is_found() {
+    // A method in an impl and a required or provided method in a trait
+    // are each a function of their own; a `# Safety` section or a
+    // `SAFETY:` comment above one clears only that one.
+    let source = "\
+impl S {
+    unsafe fn method(&self) {}
+    // SAFETY: no preconditions.
+    unsafe fn commented(&self) {}
+}
+trait T {
+    unsafe fn required(&self);
+    unsafe fn provided(&self) {}
+    /// # Safety
+    ///
+    /// No preconditions.
+    unsafe fn documented(&self);
+    fn safe(&self);
+}
+";
+    assert_eq!(
+        findings(source, ModuleKind::Leaf),
+        [
+            (2, Rule::UnsafeWithoutSafety),
+            (7, Rule::UnsafeWithoutSafety),
+            (8, Rule::UnsafeWithoutSafety)
+        ]
     );
 }
 
