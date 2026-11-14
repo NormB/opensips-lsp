@@ -12,8 +12,8 @@
 
 mod common;
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[test]
 fn the_grammar_parses_every_config_the_real_parser_accepts() {
@@ -48,12 +48,11 @@ fn the_grammar_parses_every_config_the_real_parser_accepts() {
     );
 
     let grammar = Path::new(env!("CARGO_MANIFEST_DIR")).join("tree-sitter-opensips");
-    let out = Command::new("npx")
-        .args(["--yes", "tree-sitter-cli@0.26", "parse", "--quiet"])
-        .args(accepted.iter().chain(&fixture_files))
-        .current_dir(&grammar)
-        .output()
-        .expect("npx tree-sitter-cli parse");
+    let files = accepted.iter().chain(&fixture_files).map(|f| f.as_os_str());
+    let args = [OsStr::new("parse"), OsStr::new("--quiet")]
+        .into_iter()
+        .chain(files);
+    let out = common::tree_sitter(&grammar, None, args);
     let report = String::from_utf8_lossy(&out.stdout);
     let failed: Vec<&str> = report
         .lines()
@@ -81,17 +80,11 @@ fn the_grammar_parses_every_config_the_real_parser_accepts() {
 #[test]
 fn the_fold_query_loads_and_folds_blocks_and_comments() {
     let grammar = Path::new(env!("CARGO_MANIFEST_DIR")).join("tree-sitter-opensips");
-    let out = Command::new("npx")
-        .args([
-            "--yes",
-            "tree-sitter-cli@0.26",
-            "query",
-            "queries/folds.scm",
-            "test/highlight/basics.cfg",
-        ])
-        .current_dir(&grammar)
-        .output()
-        .expect("npx tree-sitter-cli query");
+    let out = common::tree_sitter(
+        &grammar,
+        None,
+        ["query", "queries/folds.scm", "test/highlight/basics.cfg"],
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),

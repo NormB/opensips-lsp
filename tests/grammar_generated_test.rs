@@ -13,7 +13,6 @@
 mod common;
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn grammar_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tree-sitter-opensips")
@@ -46,13 +45,7 @@ fn the_committed_parser_is_present_and_looks_generated() {
 #[test]
 fn the_committed_parser_matches_grammar_js() {
     let dir = grammar_dir();
-    let probe = Command::new("npx")
-        .args(["--yes", "tree-sitter-cli@0.26", "--version"])
-        .current_dir(&dir)
-        .output();
-    let Ok(p) = probe else {
-        panic!("npx is required to check the generated parser is current")
-    };
+    let p = common::tree_sitter(&dir, None, ["--version"]);
     assert!(p.status.success(), "tree-sitter-cli could not be resolved");
 
     let scratch_scratch = common::Scratch::new("ts-opensips");
@@ -61,11 +54,7 @@ fn the_committed_parser_matches_grammar_js() {
     for f in ["grammar.js", "package.json", "tree-sitter.json"] {
         std::fs::copy(dir.join(f), scratch.join(f)).unwrap();
     }
-    let out = Command::new("npx")
-        .args(["--yes", "tree-sitter-cli@0.26", "generate"])
-        .current_dir(&scratch)
-        .output()
-        .expect("tree-sitter generate");
+    let out = common::tree_sitter(&scratch, None, ["generate"]);
     assert!(
         out.status.success(),
         "generate failed: {}",

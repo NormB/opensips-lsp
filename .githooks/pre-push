@@ -20,10 +20,14 @@ gate=0
 
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ "$local_sha" = "$zero" ] && continue # deleting a ref: nothing outgoing
+  # The commits to judge are the ones on no branch of the remote. A branch
+  # that merged the remote's main brings main's commits with it, and those
+  # are the remote's own: a squash merge on GitHub is committed and signed
+  # by GitHub. Judging them refused every such push.
   if [ "$remote_sha" = "$zero" ]; then
     range=("$local_sha" --not "--remotes=$remote") # new ref: commits the remote lacks
   else
-    range=("$remote_sha..$local_sha")
+    range=("$local_sha" --not "$remote_sha" "--remotes=$remote")
   fi
   # Captured first, so a failing rev-list stops the push instead of
   # yielding no commits to check.

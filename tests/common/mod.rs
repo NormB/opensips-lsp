@@ -283,3 +283,65 @@ fn remove_path(path: &Path) {
         let _ = std::fs::remove_file(path);
     }
 }
+
+/// The tree-sitter CLI the grammar tests run, as `npx` names it.
+pub const TREE_SITTER_CLI: &str = "tree-sitter-cli@0.26";
+
+/// The file, in the CLI's cache directory, that [`tree_sitter`] locks
+/// for as long as a CLI it started runs.
+pub const TREE_SITTER_GUARD: &str = "tree-sitter-cli.callers.lock";
+
+/// The directory the tree-sitter CLI keeps its compiled grammars and
+/// its lock files under, as the CLI itself chooses it.
+fn tree_sitter_cache_home() -> PathBuf {
+    match std::env::var_os("XDG_CACHE_HOME") {
+        Some(dir) if Path::new(&dir).is_absolute() => PathBuf::from(dir),
+        _ => PathBuf::from(required_env("HOME")).join(".cache"),
+    }
+}
+
+/// Runs `npx tree-sitter-cli <args>` in `dir` and gives its output.
+/// `cache_home` replaces the CLI's cache directory (`XDG_CACHE_HOME`)
+/// for this call.
+///
+/// Every test goes through here, because two CLI processes must not
+/// load one grammar at the same time on a cache that has not compiled
+/// it yet. The CLI compiles the grammar into its cache behind a lock
+/// file of its own, `<cache>/tree-sitter/lock/<grammar>.lock`, and that
+/// lock races: started together, one process removes the file while
+/// another opens it, and the second ends with "Failed to load language
+/// ... No such file or directory ... .lock". The tests of one binary
+/// are threads that each start a CLI, and main's CI failed on it on
+/// 2026-11-14.
+///
+/// So each call holds an exclusive lock on [`TREE_SITTER_GUARD`] in the
+/// cache directory while its CLI runs: one CLI at a time per cache,
+/// across the threads of a test binary and across processes (another
+/// test binary, another checkout on the same machine). The first call
+/// on an empty cache compiles the grammar alone, and the rest load it.
+pub fn tree_sitter<I, S>(dir: &Path, cache_home: Option<&Path>, args: I) -> std::process::Output
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let cache = cache_home.map_or_else(tree_sitter_cache_home, Path::to_path_buf);
+    std::fs::create_dir_all(&cache).expect("the tree-sitter cache directory must exist");
+    let guard = std::fs::File::options()
+        .create(true)
+        .append(true)
+        .open(cache.join(TREE_SITTER_GUARD))
+        .expect("the guard file in the tree-sitter cache directory");
+    // Released when `guard` is closed at the end of this call.
+    guard
+        .lock()
+        .expect("an exclusive lock on the tree-sitter guard file");
+    let mut cli = Command::new("npx");
+    cli.args(["--yes", TREE_SITTER_CLI])
+        .args(args)
+        .current_dir(dir);
+    if let Some(cache) = cache_home {
+        cli.env("XDG_CACHE_HOME", cache);
+    }
+    cli.output()
+        .expect("npx must be able to run the tree-sitter CLI")
+}

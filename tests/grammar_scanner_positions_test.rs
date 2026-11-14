@@ -29,8 +29,8 @@ mod common;
 
 use opensips_lsp::analyze;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// One node of the tree the `tree-sitter parse` CLI prints.
 #[derive(Debug)]
@@ -312,12 +312,8 @@ fn has_error(n: &Node) -> bool {
 /// per file in the same order.
 fn parse_with_grammar(files: &[PathBuf]) -> Vec<Node> {
     let grammar = Path::new(env!("CARGO_MANIFEST_DIR")).join("tree-sitter-opensips");
-    let out = Command::new("npx")
-        .args(["--yes", "tree-sitter-cli@0.26", "parse"])
-        .args(files)
-        .current_dir(&grammar)
-        .output()
-        .expect("npx tree-sitter-cli parse");
+    let args = std::iter::once(OsStr::new("parse")).chain(files.iter().map(|f| f.as_os_str()));
+    let out = common::tree_sitter(&grammar, None, args);
     let trees = parse_trees(&String::from_utf8_lossy(&out.stdout));
     assert_eq!(
         trees.len(),
