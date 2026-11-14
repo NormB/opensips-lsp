@@ -111,6 +111,12 @@ Monday.
   structure is enforced by a test — update it when options change.
 - The VS Code client (`client/`) compiles in CI with `tsc`; keep its
   settings in sync with the server's initialization options.
+- Workflows name fixed runner images (`ubuntu-24.04`, `macos-26`,
+  `windows-2025`), never a `-latest` label: GitHub moves those and
+  retires old images on its own dates. `tests/runner_images_test.rs`
+  holds the list, and CI builds the release's macOS servers on every
+  pull request, so a retired image fails a pull request and not a
+  pushed tag.
 
 ## Changelog entries
 

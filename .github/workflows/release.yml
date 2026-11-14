@@ -18,7 +18,7 @@ jobs:
     # `install.sh` resolves — at a release whose contents are a
     # version behind its own name.
     name: Tag matches the tree
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,22 +55,31 @@ jobs:
         include:
           - arch: x86_64
             os: linux-gnu
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: aarch64
             os: linux-gnu
             runner: ubuntu-24.04-arm
+          # The macOS rows are also built by ci.yml's `macos-servers`
+          # job on every pull request, so a retired image is seen
+          # there and not on a pushed tag; tests/runner_images_test.rs
+          # holds the two files to the same rows. `minos` is the
+          # oldest macOS the binary runs on: v0.28.1's assets report
+          # 11.0 (arm64) and 10.12 (x86_64), and the build sets it
+          # instead of leaving it to the toolchain's default.
           - arch: aarch64
             os: darwin
-            runner: macos-14
+            runner: macos-26
+            minos: "11.0"
           - arch: x86_64
             os: darwin
-            runner: macos-14
+            runner: macos-26
+            minos: "10.12"
             # GitHub retired the Intel macos-13 runners; cross-compile
             # the x86_64 slice on the arm64 runner instead
             target: x86_64-apple-darwin
           - arch: x86_64
             os: windows
-            runner: windows-latest
+            runner: windows-2025
           - arch: aarch64
             os: windows
             runner: windows-11-arm
@@ -87,12 +96,19 @@ jobs:
       - name: Build and package
         shell: bash
         run: |
+          if [ "${{ matrix.os }}" = "darwin" ]; then
+            export MACOSX_DEPLOYMENT_TARGET="${{ matrix.minos }}"
+          fi
           if [ -n "${{ matrix.target }}" ]; then
             cargo build --release --target "${{ matrix.target }}"
             BINDIR="target/${{ matrix.target }}/release"
           else
             cargo build --release
             BINDIR="target/release"
+          fi
+          if [ "${{ matrix.os }}" = "darwin" ]; then
+            # the record of what the asset requires; ci.yml asserts it
+            xcrun vtool -show-build "$BINDIR/opensips-lsp" || true
           fi
           if [ "${{ matrix.os }}" = "windows" ]; then
             # zip: what Windows users (and Explorer) expect
@@ -114,7 +130,7 @@ jobs:
   vsix:
     name: VS Code extension (platform builds)
     needs: [server]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -160,7 +176,7 @@ jobs:
   openvsx:
     name: Open VSX
     needs: [vsix]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -242,7 +258,7 @@ jobs:
   publish:
     name: GitHub release
     needs: [server, vsix]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # creates the release and uploads its assets
     permissions:
       contents: write
