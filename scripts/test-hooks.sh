@@ -350,6 +350,46 @@ echo i >notes.txt && git add notes.txt && quick -m "Add a note"
 push refuse "client dependencies not installed"
 mkdir -p client/node_modules
 
+# A branch that exists on the remote and has merged the remote's main. The
+# commits main brought are the remote's own: on GitHub a squash merge is
+# committed and signed by GitHub, not by an allowed signer. Only commits on no
+# branch of the remote are judged, or a branch could never be brought up to
+# main from here.
+for b in behind behind-unsigned behind-identity behind-stranger; do
+  git push -q origin "$base:refs/heads/$b" >"$work/out" 2>&1 || { echo "FAIL: could not push the branch $b"; cat "$work/out"; exit 1; }
+done
+echo j >server.txt && git add server.txt
+GIT_AUTHOR_NAME=Server GIT_AUTHOR_EMAIL=server@example.com GIT_COMMITTER_NAME=Server GIT_COMMITTER_EMAIL=server@example.com \
+  git -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -q -m "Land a change on the remote's main" >/dev/null 2>&1
+landed="$(git rev-parse HEAD)"
+git -c core.hooksPath=/dev/null push -q origin "$landed:refs/heads/main" >"$work/out" 2>&1 || { echo "FAIL: could not land the remote's own commit"; cat "$work/out"; exit 1; }
+reset "$base"
+# behind_push <accept|refuse> <branch> <what> [text a refusal must print]
+behind_push() {
+  if git push -q origin "HEAD:refs/heads/$2" >"$work/out" 2>&1; then got=accept; else got=refuse; fi
+  result "$1" "$3" "$got" "${4:-refused}"
+  reset "$base"
+}
+merge_main() { git -c core.hooksPath=/dev/null merge -q --no-ff -m "Merge the remote's main" "$landed" >/dev/null 2>&1; }
+
+merge_main
+behind_push accept behind "a remote branch that merged the remote's main"
+
+merge_main
+echo k >notes.txt && git add notes.txt
+git -c core.hooksPath=/dev/null -c commit.gpgsign=false commit -q -m "Add a note" >/dev/null 2>&1
+behind_push refuse behind-unsigned "unsigned commit on top of the remote's main" "no good signature"
+
+merge_main
+echo l >notes.txt && git add notes.txt
+GIT_COMMITTER_NAME=Other GIT_COMMITTER_EMAIL=other@example.com quick -m "Add a note"
+behind_push refuse behind-identity "wrong committer on top of the remote's main" "committer is not the configured identity"
+
+# A commit that is on no branch of the remote is judged on an existing
+# branch as on a new one.
+echo m >notes.txt && git add notes.txt && quick -S"$work/stranger.pub" -m "Add a note"
+behind_push refuse behind-stranger "a stranger's commit pushed to an existing branch" "no good signature"
+
 # Deleting a remote branch sends no commits and needs no checks.
 git push -q origin "$base:refs/heads/topic" >"$work/out" 2>&1 || { echo "FAIL: could not push the branch to delete"; cat "$work/out"; exit 1; }
 if git push -q origin :topic >"$work/out" 2>&1; then got=accept; else got=refuse; fi

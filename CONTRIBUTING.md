@@ -16,6 +16,11 @@ Turn on the git hooks once per clone:
 git config core.hooksPath .githooks
 ```
 
+Without that setting `git commit` runs no check and says nothing, so
+`tests/hooks_installed_test.rs` fails in a clone where the hooks are
+off and prints the command above. CI is exempt: its jobs run the same
+gates themselves.
+
 They run `scripts/gate.sh`, the checks CI runs, before a commit and
 before a push. The commit hook refuses a message or a staged line that
 credits an AI tool, and then runs rustfmt, clippy on both packages
