@@ -2,6 +2,16 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.28.2] — 2026-11-14
+
+### Changed
+
+- **The changelog is rewritten in an outline format.**
+  - Effect: every entry states what changed, what to do and where the
+    detail is.
+  - Effect: documentation only; the extension and the server behave
+    exactly as 0.28.1 did.
+
 ## [0.28.1] — 2026-11-03
 
 ### Added
