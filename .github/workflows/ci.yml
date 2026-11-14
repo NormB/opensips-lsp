@@ -15,7 +15,7 @@ env:
 jobs:
   rust:
     name: Rust (fmt, clippy, tests)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -51,7 +51,7 @@ jobs:
 
   client:
     name: VS Code client (tsc + behaviour)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: client
@@ -82,7 +82,7 @@ jobs:
 
   grammar:
     name: tree-sitter grammar
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: tree-sitter-opensips
@@ -98,7 +98,7 @@ jobs:
 
   grammar-sanitizers:
     name: tree-sitter grammar under ASan and UBSan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -127,7 +127,7 @@ jobs:
 
   audit:
     name: Advisories (cargo audit)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -145,7 +145,7 @@ jobs:
 
   msrv:
     name: MSRV (rust-version in Cargo.toml)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -163,7 +163,7 @@ jobs:
 
   actionlint:
     name: Workflows (actionlint)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -183,7 +183,7 @@ jobs:
 
   fuzz-targets:
     name: list the fuzz targets
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       targets: ${{ steps.list.outputs.targets }}
     steps:
@@ -201,7 +201,7 @@ jobs:
   fuzz:
     name: fuzz ${{ matrix.target }}
     needs: fuzz-targets
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -250,7 +250,7 @@ jobs:
 
   hooks:
     name: git hooks (scripts/test-hooks.sh)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -269,10 +269,63 @@ jobs:
           cargo install cargo-audit --locked
       - run: scripts/test-hooks.sh
 
+  # The release builds the macOS servers on a fixed image, and only a
+  # pushed tag used to read that image's label: v0.28.2's tag found
+  # macos-14 retired and could not be released. These are release.yml's
+  # macOS rows, built on every pull request, with the oldest macOS the
+  # binary runs on read back from it.
+  macos-servers:
+    name: macOS server (${{ matrix.arch }})
+    strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            runner: macos-26
+            minos: "11.0"
+          - arch: x86_64
+            runner: macos-26
+            minos: "10.12"
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target || '' }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: build as the release does
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.minos }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          if [ -n "$TARGET" ]; then
+            cargo build --release --target "$TARGET"
+            echo "BIN=target/$TARGET/release/opensips-lsp" >> "$GITHUB_ENV"
+          else
+            cargo build --release
+            echo "BIN=target/release/opensips-lsp" >> "$GITHUB_ENV"
+          fi
+      - name: the binary names the oldest macOS it runs on
+        env:
+          MINOS: ${{ matrix.minos }}
+        run: |
+          set -euo pipefail
+          build="$(xcrun vtool -show-build "$BIN")"
+          echo "$build"
+          # arm64 writes `minos`, x86_64 below 10.14 writes `version`
+          found="$(echo "$build" | awk '$1 == "minos" || $1 == "version" { print $2; exit }')"
+          [ "$found" = "$MINOS" ] || {
+            echo "::error::the binary requires macOS $found, expected $MINOS"
+            exit 1
+          }
+
   # Aggregate gate for branch protection: one required context.
   ci-success:
     name: CI success
-    needs: [rust, client, grammar, grammar-sanitizers, audit, msrv, actionlint, fuzz, hooks]
-    runs-on: ubuntu-latest
+    needs: [rust, client, grammar, grammar-sanitizers, audit, msrv, actionlint, fuzz, hooks, macos-servers]
+    runs-on: ubuntu-24.04
     steps:
       - run: echo "all CI jobs green"

@@ -24,7 +24,7 @@ jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
     timeout-minutes: 30
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       # upload the results to code scanning
       security-events: write

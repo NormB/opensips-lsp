@@ -33,7 +33,7 @@ concurrency:
 jobs:
   fuzz:
     name: ClusterFuzzLite
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
       - name: Build the fuzz targets

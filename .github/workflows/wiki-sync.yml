@@ -25,7 +25,7 @@ concurrency:
 jobs:
   sync:
     timeout-minutes: 15
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # The wiki lives at <repo>.wiki.git and is pushed with
     # GITHUB_TOKEN, so this job genuinely needs write.
     permissions:
