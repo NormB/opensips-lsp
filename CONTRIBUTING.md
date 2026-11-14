@@ -112,6 +112,46 @@ Monday.
 - The VS Code client (`client/`) compiles in CI with `tsc`; keep its
   settings in sync with the server's initialization options.
 
+## Changelog entries
+
+`client/CHANGELOG.md` ships inside the extension and is the marketplace
+"Changes" tab. Its reader is deciding whether to upgrade and what to do
+after, so every release section is an outline, and
+`tests/changelog_outline_test.rs` refuses anything else:
+
+```markdown
+## [X.Y.Z] — YYYY-MM-DD
+
+### Added
+
+- **Lead: what changed, in the user's terms.**
+  - Effect: what the user sees or can now do.
+  - Do: what the user must do, with the command or setting.
+  - Limit: one limit or caveat.
+  - Docs: [page title](link to the page or heading that holds the detail).
+```
+
+- Entries sit under `### Added`, `### Changed`, `### Fixed`,
+  `### Security`, `### Removed` or `### Deprecated`, in that order, and
+  only the headings that have entries.
+- An entry is one bold lead of at most 15 words, and nothing else on
+  the bullet. It states the effect, not the mechanism.
+- Under it are one to five sub-bullets. Each is one sentence of at
+  most 25 words, its label counted, and starts with `Effect:`, `Was:`
+  (for a fix: what went wrong before), `Do:`, `Limit:` or `Docs:`.
+  `Effect:` or `Was:` is always present. A table of at most six rows may
+  replace the sub-bullets when the entry is about sizes or limits.
+- No paragraph, no third level of nesting, and no line wider than the
+  wrap of 80 columns; a link's target is not counted.
+- A command, flag, setting, file path, error text or number the user
+  will meet stays, in code font. Internal names, how a change was
+  tested and PR-by-PR narration do not. Detail a user needs goes in the
+  docs page that the `Docs:` line links.
+- A change no user of the extension or the server can see (CI, hooks,
+  tests, internal refactors) has no entry.
+- Related changes of one release are one entry. US spelling, facts
+  only.
+
 ## The ground-truth rule
 
 The real parser is the specification. Any assertion about the

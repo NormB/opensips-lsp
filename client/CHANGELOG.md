@@ -4,1141 +4,1093 @@ All notable changes to the OpenSIPS Routing Script extension.
 
 ## [0.28.1] — 2026-11-03
 
-**Every release is signed and carries its build provenance, and the
-extension is recorded as not affected by GHSA-g3hv-75wg-m249.**
+### Added
 
-- **Each release attaches `SHA256SUMS.txt`, a keyless Sigstore
-  signature over it, and SLSA build provenance for every asset.** The
-  release job checks both before it publishes. `SECURITY.md` shows how
-  to verify a download with cosign or `gh attestation verify`.
-- **GHSA-g3hv-75wg-m249 (minimatch pattern amplification) does not
-  affect the extension.** minimatch 10.2.6 comes from
-  vscode-languageclient 11.0.0, and the only patterns it receives are
-  constants: the client's document selector has no pattern, and the
-  server's one file-operation glob is `**/*`. The fixed minimatch 11
-  removes a function vscode-languageclient 11.0.0 calls, so it cannot
-  be used until vscode-languageclient supports it
-  (microsoft/vscode-languageserver-node#1938).
-  `client/osv-scanner.toml` records the exception until 2027-02-01 for
-  osv-scanner and OpenSSF Scorecard, and a test fails if it stops
-  holding or is no longer needed. No code in the extension or the
-  server changed.
+- **Each release carries `SHA256SUMS.txt`, a Sigstore signature and SLSA
+  build provenance.**
+  - Effect: a download can be verified with cosign or
+    `gh attestation verify`.
+  - Docs: [Verifying a release](https://github.com/NormB/opensips-lsp/blob/main/SECURITY.md#verifying-a-release).
+
+### Security
+
+- **GHSA-g3hv-75wg-m249 (minimatch pattern amplification) does not affect
+  the extension.**
+  - Effect: no code in the extension or the server changed.
+  - Limit: minimatch 10.2.6 stays until vscode-languageclient supports the
+    fixed minimatch 11.
+  - Docs: [Advisories that do not affect this project](https://github.com/NormB/opensips-lsp/blob/main/SECURITY.md#advisories-that-do-not-affect-this-project).
 
 ## [0.28.0] — 2026-10-27
 
-**Renaming an included file rewrites the includes that name it, a
-configuration whose include closure stops at 500 files says so, and
-`has_body` completes.**
+### Added
 
-- **Renaming or moving a file in the editor rewrites every
-  `include_file`/`import_file` path that names it**, across the
-  workspace, before the rename happens. Relative paths stay relative to
-  the file that holds them and absolute paths stay absolute; a moved
-  file's own relative includes are rewritten so they still name the
-  same files.
-- **A file whose include closure stopped at the 500-file bound carries
-  a warning on its first line**, in the editor and in
-  `opensips-lsp check`, because a route defined only in a file that was
-  not read is reported as undefined. A closure that left nothing out
-  carries no warning.
-- **`has_body` completes, hovers and shows signature help** as an alias
-  of `has_body_part`: the sipmsgops C sources export both names with
-  the same handler, and the documentation names only `has_body_part`.
-- **A failed `opensips -C` check always reports a message.** When the
-  last error line had nothing after its prefix, the diagnostic's text
-  was empty and the editor showed nothing; the nearest earlier line
-  with a reason is used, or the fixed fallback text.
-- **A documentation heading or DocBook id that names nothing documents
-  nothing.** `#### (integer)` or an id of `param_` made a parameter
-  with an empty name, which was offered as a completion and checked
-  against every `modparam`.
-- **The release job waits until every Open VSX platform build is
-  served**, for up to 90 minutes, instead of the universal build alone
-  for 30 minutes.
-- **CI lints every workflow with actionlint**, and the workflow scripts
-  quote the expansions it flagged.
-
-## [0.27.0] — 2026-10-26
-
-**Routes defined in a configuration's 65th and later include files are
-found, every function a heading or docbook title documents is in the
-catalog, the outline lists each top-level parameter once, and include
-paths complete.**
-
-- **The include closure follows as many files and levels as a real
-  configuration uses.** It stopped at 64 files and 8 levels, so in a
-  configuration with one include per carrier, every `route()` call to a
-  route defined in a later file was reported as "not defined here or in
-  included files", and go to definition returned nothing. It now
-  follows includes 19 levels below the root, the depth OpenSIPS 4.0.2
-  reads (one level deeper fails with "max nested cfg files reached"),
-  and reads up to 500 files, the same bound as the workspace scan.
-  `opensips-lsp check` uses the same closure.
-- **A heading or docbook title that documents two functions adds both
-  to the catalog.** `uac_replace_to`, `uac_restore_to`,
-  `rtpproxy_stream2uas`, `rtpproxy_stop_stream2uas` and `t_write_unix`
-  now complete, hover and show signature help in 3.6.9 and 4.0.2.
-- **The 3.5.9 catalog gains 27 functions and loses 7 names no release
-  exports.** Function sections were read only when their id started
-  with `func_`, which dropped the `h350`, `ldap`, `lua`, `rate_cacher`
-  and `rtpproxy` stream functions, `change_reply_status` and
-  `stir_shaken_disengagement`. Names taken from a section id instead of
-  its title, such as `get_dialog_by_val` for `get_dialogs_by_val` and
-  `call_blind_transfer` for `call_transfer`, are replaced by the names
-  a configuration writes.
-- **`Exported Events` and `Exported Pseudo-Variables` are no longer
-  listed as functions** of the `janus` and `rr` modules.
-- **A top-level parameter after a blank line appears once in the
-  outline.** It was listed twice, the second time with a range that
-  ended on the line above its start, which the LSP specification does
-  not allow.
-- **Inside `include_file "` or `import_file "`, completion lists the
-  directories and the `.cfg`, `.inc` and `.m4` files** in the directory
-  the typed path names so far, relative to the including file. Typing
-  `/` opens the next directory. Keywords and function names were
-  offered there before.
-- **The repository runs CodeQL (Rust, TypeScript and the workflows) and
-  the OpenSSF Scorecard**, pins every GitHub Action to a commit, and
-  gives each workflow a read-only token unless a job needs more.
-- **vscode-languageclient moves from 10.1.2 to 11.0.0**, and tokio to
-  1.54.1 with the other semver-compatible crate updates.
-
-## [0.26.3] — 2026-10-22
-
-**A release with no behavior change: the language server is rebuilt
-against tokio 1.53.3.**
-
-- **tokio, the async runtime the language server runs on, moves from
-  1.53.2 to 1.53.3**, an upstream patch release. The language server's
-  own code and the extension's code are unchanged from 0.26.2.
-
-## [0.26.2] — 2026-10-19
-
-**Script variables with `#`, quotes or braces inside them no longer
-break the outline, and the built-in catalog moves to OpenSIPS 4.0.2
-and 3.6.9.**
-
-- **A `$(...)` or `$name(...)` variable is read the way OpenSIPS reads
-  it.** Inside its parentheses, a `#` does not start a comment, a quote
-  does not start a string and a brace does not open a block. Before, a
-  line such as `$ru = $(ru{re.subst,/a#//g});` made its route run to
-  the end of the file: the outline listed the routes after it inside
-  that route, beside an invented block named `$ru = $(ru`.
-- **The built-in catalog is harvested from OpenSIPS 4.0.2, and the
-  `opensipsVersion` choices are now `3.5.9`, `3.6.9` and `4.0.2`.** A
-  setting of `3.6.8` or `4.0.1` is reported as unrecognized and the
-  newest release (`4.0.2`) is used; set `3.6.9` to keep checking
-  against the 3.6 line. The new core parameter `REACTOR_DBG_FD_CHECK`
-  completes and hovers.
-- **The documentation states what the tests prove.** The real-binary
-  proof runs against OpenSIPS 4.0.2; 3.6.9 and 3.5.9 are checked
-  against their source trees. The documented counts are now 193
-  modules and 68 core functions, as the server reports.
-
-## [0.26.1] — 2026-10-15
-
-**A release with no behavior change: two weekly dependency updates, and
-nothing else.**
-
-- **`serde_json` 1.0.151 to 1.0.154**, the JSON library the server uses
-  to read editor settings and its built-in core catalog, from the weekly
-  Cargo dependency group in #95.
-- **`@types/node` 26.6.4 to 26.6.5**, a compile-time stub, from the weekly npm
-  dependency group in #94. No source file changed.
-
-## [0.26.0] — 2026-10-11
-
-**Requests are answered while checks run, and the outline, folding and
-selection follow a config's structure.**
-
-- **Opening files no longer holds up other requests.** A check that
-  runs `opensips -C` now runs on its own task. Before, five files
-  opened together left a request waiting about 6 s behind their checks.
-- **The outline nests the `if`, `else`, `switch` and `while` blocks
-  inside a route under it**, named by their condition, and lists every
-  `loadmodule`, `modparam` (its module beside it) and top-level
-  parameter. Selecting a route highlights its name.
-- **Folding covers the blocks inside a route, multi-line block
-  comments and runs of `#` comment lines**, not just route blocks. A
-  `} else {` line stays visible when the block above it is folded.
-- **Expand selection** (`textDocument/selectionRange`) grows from the
-  word under the cursor to each enclosing block, the route and the
-  file.
-- **The formatter indents what a `case` or `default` label guards one
-  level under the label**, as the samples OpenSIPS ships do. The line
-  after a label used to be left where it was.
-- **Workspace diagnostics agree with the include tracking.** A fragment
-  included as `sub/../frag.inc` is no longer reported as a program of
-  its own, and a config with a latin-1 byte is reported instead of
-  skipped. `opensips-lsp check` reads such a config too, where it used
-  to stop with "cannot read".
-- **`.inc` and `.m4` fragments edited on disk are noticed.** The file
-  watcher covered only `*.cfg`.
-- **Single quotes work everywhere double quotes do**: `loadmodule
-  'tm.so'` loads the module for completion and checks, completion
-  after `loadmodule '`, `modparam('` and `route('` offers what it
-  offers after `"`, signature help counts arguments across `'a,b'`,
-  and a backslash inside `'...'` no longer escapes the closing quote.
-- **Completion offers nothing inside a comment.**
-- **Call hierarchy works on a line with non-ASCII text before the
-  route name.** The cursor column was read as a byte offset.
-
-## [0.25.0] — 2026-10-11
-
-**Large configs stay fast, rename follows every use of a route, and the
-tree-sitter grammar parses every config OpenSIPS accepts.**
-
-- **Requests no longer slow down with the square of the file size.**
-  Every scanner recomputed a line number by counting newlines from the
-  top of the file, once per match: `route_blocks` took 73 s on a
-  6000-route config and now takes under half a second. The code lens
-  re-scanned every file once per route, inlay hints re-read the loaded
-  modules once per call, and converting a line number to its text
-  walked the document from the top for every diagnostic, symbol, hint
-  and edit; on a 3000-route document the code lens no longer times out,
-  and seven common requests answer in about 1.5 s together in the test
-  suite's debug build.
-- **Renaming a `failure_route`, `onreply_route` or `branch_route`
-  rewrites the `t_on_failure("x")`, `t_on_reply("x")` and
-  `t_on_branch("x")` strings that arm it.** It used to edit only the
-  definition, leaving the call naming a route that no longer existed.
-  References, highlights and go-to-definition see those strings too.
-- **The resume route of `async(f(...), x)` and `launch(f(...), x)` is
-  a reference to `route[x]`**, for references, rename, the code lens,
-  call hierarchy and the "route is not defined" warning.
-- **Rename refuses a name that is already defined** in the same
-  namespace, naming the file that defines it. The result would define
-  the route twice, which `opensips -C` rejects.
-- **Formatting a CRLF file no longer doubles its carriage returns.**
-  Every reformatted line used to end in `\r\r\n`.
-- **`opensips-lsp check --bin ... fn.cfg` works with a relative path.**
-  A bare file name failed with "cannot run", and `sub/fn.cfg` was
-  handed to the checker from inside `sub/`.
-- **Nested block comments are comments.** OpenSIPS nests `/* */`;
-  `/* a /* b */ route(x); */` no longer reports `x` as undefined, and
-  `check --strict` no longer fails on it.
-- **The tree-sitter grammar parses every config in the OpenSIPS 4.0.1
-  tree that `opensips -C` accepts**, which the test suite now checks.
-  New: nested block comments (through `src/scanner.c`, which editors
-  building the grammar must compile along with `src/parser.c`),
-  multi-line strings, adjacent strings, the bitwise operators, `not`,
-  every assignment operator, `return -1;`, IPv4 addresses and
-  networks, `include_file` inside a route, and socket parameters
-  (`use_workers`, `as`, `anycast`, ...). `!$a == 1` now parses as
-  `!($a == 1)`, as in OpenSIPS.
-- **The grammar ships `queries/highlights.scm` and `queries/folds.scm`.**
-  The Zed setup script in `docs/ZED.md` downloads the highlight query
-  into the extension it builds.
-
-## [0.24.7] — 2026-10-07
-
-**A release with no behavior change: two weekly dependency updates, and
-nothing else.**
-
-- **`tokio` 1.53.1 to 1.53.2**, the async runtime the server is built on, from
-  the weekly Cargo dependency group in #92.
-- **`@types/node` 26.6.3 to 26.6.4**, a compile-time stub, from the weekly npm
-  dependency group in #93. No source file changed.
-
-## [0.24.6] — 2026-10-01
-
-**A release with no behavior change: a security fix in a bundled dependency,
-and one weekly dependency update.**
-
-- **`brace-expansion` 5.0.9 to 5.0.12**, from #91. The extension bundles it
-  through `minimatch`, and 5.0.9 is affected by three advisories published
-  2026-09-29: GHSA-6j4f-fj2g-mc7p (high, fixed in 5.0.10), GHSA-qhr7-859c-m2p7
-  (high, fixed in 5.0.11) and GHSA-q2hr-2g5m-vwhr (moderate, fixed in 5.0.12).
-- **`vscode-languageclient` 10.1.1 to 10.1.2**, the language-client library
-  the extension bundles, and **`@types/node` 26.6.2 to 26.6.3**, a
-  compile-time stub, both from the weekly dependency group in #90. No source
-  file, Rust crate or `Cargo.lock` entry other than this package's own
-  version changed.
-- **`@types/vscode` stays at `^1.91.0`**, equal to `engines.vscode`: `vsce
-  package` refuses a manifest whose range exceeds the engine floor.
-
-## [0.24.5] — 2026-09-26
-
-**A release with no behavior change: one weekly dependency update, and
-nothing else.**
-
-- **`@types/node` 26.6.1 to 26.6.2**, a compile-time stub with no
-  runtime half, proposed by the weekly dependency group in #89. No
-  source file, Rust crate or lock entry other than this package's own
-  version changed.
-
-## [0.24.4] — 2026-09-15
-
-**A release with no behaviour change: the weekly dependency updates, and
-nothing else.**
-
-- **`@types/node` 26.4.1 to 26.6.1**, a compile-time stub with no
-  runtime half. The weekly dependency group proposed 26.5.1; 26.6.1 was
-  the newest 26.x by the time it was taken, so the range went there
-  directly rather than landing a version that would be superseded on the
-  next run. Note that npm's `latest` tag for this package points at
-  22.20.3 — DefinitelyTyped publishes a line per Node major, and 26.x is
-  the one every current TypeScript dist-tag resolves to.
-- **Five transitive Rust crates**, none of them a direct dependency of
-  this crate: `bitflags` 2.13.1 to 2.13.2, `crossbeam-utils` 0.8.22 to
-  0.8.23, `mio` 1.2.2 to 1.2.3, `smallvec` 1.15.2 to 1.16.1 and `syn`
-  3.0.3 to 3.0.5. Each arrives through something the manifest already
-  asks for rather than through a changed line in it: `bitflags` through
-  `tower-lsp-server`'s `ls-types`, `crossbeam-utils` through `dashmap`,
-  `mio` through `tokio`, `smallvec` through `parking_lot_core` under
-  both, and `syn` through `serde_derive`, which is a proc-macro and so
-  runs only at build time. `Cargo.toml` is untouched.
-- **`@types/vscode` stays at `^1.91.0`**, equal to `engines.vscode`, for
-  the reason 0.24.2 recorded: `vsce package` refuses a manifest whose
-  range exceeds the engine floor, so this one is pinned by a dependabot
-  `ignore` rather than left to the weekly group.
-
-## [0.24.3] — 2026-09-09
-
-**Two settings that did nothing now work.**
-
-- **`opensipsLsp.versionInHints` and `opensipsLsp.opensipsVersion` had
-  no effect at all.** The server reads both when it starts, out of the
-  options the extension hands it, and the extension never put them
-  there. Setting either one in your editor changed nothing, and because
-  both are on the restart list, changing one restarted the server, which
-  then looked for the same missing value again. Until now the only way
-  to reach either feature was the `OPENSIPS_LSP_VERSION_IN_HINTS` and
-  `OPENSIPS_LSP_VERSION` environment variables. Set them in Settings
-  instead.
-- **Two gates so this cannot come back.** One drives the built extension
-  and checks every configuration name it reaches for against the
-  manifest that publishes them, in both directions, which is what found
-  the bug. The other compares the option names the server reads against
-  the keys the extension sends, since those were the same fact written
-  twice in two languages with nothing holding them together.
-
-## [0.24.2] — 2026-09-09
-
-**A release with no behaviour change: one compile-time dependency, and
-a gate so the next dependency bump cannot break the release job.**
-
-- **`@types/node` 26.4.0 to 26.4.1**, a compile-time stub with no
-  runtime half.
-- **`@types/vscode` stays at `^1.91.0`.** The same dependency group
-  proposed raising the range to `^1.136.0`, and `vsce package` refuses
-  a manifest whose `@types/vscode` exceeds `engines.vscode`. The range
-  is not a version to keep current: it is the API surface this
-  extension compiles against, and it has to equal the oldest VS Code
-  release the extension claims to run on, or the compiler will accept
-  calls that are absent there. Nothing is lost by holding it, because
-  the caret still resolves the newest 1.x.
-- **CI now packages the extension**, running the release job's own
-  `vsce package` command. The manifest above passed `tsc`, passed the
-  behaviour suites and passed every Rust gate; the refusal would first
-  have appeared on a pushed tag, after the release had already built
-  and uploaded the server binaries.
-
-Nothing that runs in your editor changed in this release.
-
-## [0.24.1] — 2026-09-02
-
-**A dependency release: the language client the extension talks to,
-and the type stubs it compiles against.**
-
-- **`vscode-languageclient` 10.1.0 to 10.1.1**, which carries LSP
-  3.18.3. Two fixes matter to how this extension behaves: diagnostic
-  pull state now survives a document being closed and reopened
-  quickly — the shape of a fragment being clicked through and come
-  back to — and the client's stream handlers are configurable.
-  Nothing in this extension's own code changed to meet it.
-- **`@types/node` 26.2.0 to 26.4.0**, a compile-time stub with no
-  runtime half.
-- **The lockfile agrees with the manifest again.** Its own `version`
-  field had drifted to 0.19.2 while the manifest read 0.24.0.
-  Regenerating the tree resynced it; `npm ci` compares the two, so
-  the pairing had been quietly untrue for several releases.
-
-## [0.24.0] — 2026-08-26
-
-**Hovering a setting now tells you what to write, and the tail of a
-`socket` line stops being invisible.**
-
-- **A parameter's hover carries its default and its worked example.**
-  `db_default_url` used to say "the default DB URL used by modules
-  when no per-module URL is configured" and stop — while the URL
-  FORMAT, the one thing anyone hovers it for, sat in the example
-  block underneath. It was not one parameter: 68 of 75 stated
-  defaults and 96 of 99 examples were being discarded. All 97
-  parameters now carry their example and 70 carry a default.
-- **The twelve modifiers a `socket` line takes now hover and
-  complete.** `use_workers n`, `reuse_port`, `anycast`, `as
-  ip[:port]`, `tag ID`, `frag`, `tos n`, `accept_subdomain` and the
-  three proxy-protocol forms. `socket` hovered and every word after
-  it — most of what a real socket line is made of — answered nothing.
-  The set is read from the grammar's own `socket_def_param`
-  production, so it is what your release accepts; the manual supplies
-  the descriptions. `listen =` is the same statement in 3.x and works
-  the same way.
-- **Spellings the manual skips now hover as the setting they are.**
-  `workdir` is `wdir`, `tcpthreshold` is `tcp_threshold`, and three
-  more. Writing the spelling upstream chose not to document used to
-  answer nothing at all.
-- **Names no manual page describes are offered anyway, and say so.**
-  `memdump`, `memlog` and the calls `xdbg()` and `error()` are
-  accepted by the grammar and documented nowhere. Offering nothing
-  for them claims they do not exist.
+- **Renaming or moving a file rewrites every `include_file`/`import_file`
+  path that names it.**
+  - Effect: includes across the workspace are rewritten before the rename;
+    relative paths stay relative, absolute paths stay absolute.
+  - Docs: [Renaming an included file](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#renaming-an-included-file).
+- **An include closure that stops at 500 files is reported on the first
+  line.**
+  - Effect: the editor and `opensips-lsp check` warn, because a route in
+    an unread file is reported as undefined.
+  - Docs: [An included file opened on its own](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#an-included-file-opened-on-its-own).
+- **`has_body` completes, hovers and shows signature help.**
+  - Effect: it is an alias of `has_body_part`; sipmsgops exports both
+    names with the same handler.
 
 ### Fixed
 
-- **An alias of a call is offered as a call.** No spelling in this
-  release is affected — the sibling server's `seturi`/`rewriteuri`
-  is — but the code path filed every alias under parameters, which
-  offers it where a parameter belongs and hides it where the call
-  does.
-- A markdown list survives as a list. `socket` documents its twelve
-  modifiers one bullet each, and they were being joined into a single
-  unbroken paragraph.
-- A `#` at column zero inside an example is a configuration comment,
-  not a heading — there are 42 across the shipped manual, and a
-  section ending at one lost the rest of its example.
+- **A failed `opensips -C` check always reports a message.**
+  - Was: when the last error line had no text after its prefix, the
+    diagnostic was empty and the editor showed nothing.
+  - Effect: the nearest earlier line with a reason is used, or a fixed
+    fallback text.
+- **A documentation heading or DocBook id that names nothing adds no
+  parameter.**
+  - Was: `#### (integer)` or an id of `param_` made an empty-named
+    parameter, offered as a completion and checked against every
+    `modparam`.
+
+## [0.27.0] — 2026-10-26
+
+### Added
+
+- **Inside `include_file "` or `import_file "`, completion lists
+  directories and configuration files.**
+  - Effect: `.cfg`, `.inc` and `.m4` files and directories complete
+    relative to the including file; typing `/` opens the next directory.
+  - Was: keywords and function names were offered there.
+
+### Changed
+
+- **The include closure follows 19 levels and reads up to 500 files.**
+  - Was: it stopped at 64 files and 8 levels, so routes in later files
+    were reported as "not defined here or in included files".
+  - Effect: `route()` calls and go to definition reach routes in later
+    include files; `opensips-lsp check` uses the same closure.
+  - Limit: one level deeper fails in OpenSIPS 4.0.2 with "max nested cfg
+    files reached".
+  - Docs: [An included file opened on its own](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#an-included-file-opened-on-its-own).
+- **vscode-languageclient moves from 10.1.2 to 11.0.0 and tokio to
+  1.54.1.**
+  - Effect: the extension and the server are built with these and the
+    other semver-compatible crate updates.
+
+### Fixed
+
+- **Five functions documented under shared headings now complete, hover
+  and show signature help.**
+  - Effect: `uac_replace_to`, `uac_restore_to`, `rtpproxy_stream2uas`,
+    `rtpproxy_stop_stream2uas` and `t_write_unix` are in the 3.6.9 and
+    4.0.2 catalogs.
+- **The 3.5.9 catalog gains 27 functions and loses 7 names no release
+  exports.**
+  - Was: the `h350`, `ldap`, `lua`, `rate_cacher` and `rtpproxy` stream
+    functions, `change_reply_status` and `stir_shaken_disengagement` were
+    missing.
+  - Effect: `get_dialogs_by_val` and `call_transfer` replace
+    `get_dialog_by_val` and `call_blind_transfer`, names taken from
+    section ids.
+- **`Exported Events` and `Exported Pseudo-Variables` are no longer listed
+  as functions.**
+  - Was: the `janus` and `rr` modules listed them as functions.
+- **A top-level parameter after a blank line appears once in the
+  outline.**
+  - Was: it was listed twice, the second time with a range the LSP
+    specification does not allow.
+
+## [0.26.3] — 2026-10-22
+
+### Changed
+
+- **No behavior change: the language server is rebuilt against tokio
+  1.53.3.**
+  - Effect: tokio, the server's async runtime, moves from 1.53.2 to
+    1.53.3; server and extension code are unchanged from 0.26.2.
+
+## [0.26.2] — 2026-10-19
+
+### Changed
+
+- **The built-in catalog moves to OpenSIPS 4.0.2 and 3.6.9.**
+  - Effect: the `opensipsVersion` choices are `3.5.9`, `3.6.9` and
+    `4.0.2`; the core parameter `REACTOR_DBG_FD_CHECK` completes and
+    hovers.
+  - Do: set `3.6.9` to keep checking against the 3.6 line.
+  - Limit: a setting of `3.6.8` or `4.0.1` is reported as unrecognized and
+    `4.0.2` is used.
+  - Docs: [Checking against a specific OpenSIPS release](https://github.com/NormB/opensips-lsp/blob/main/docs/GETTING_STARTED.md#checking-against-a-specific-opensips-release).
+- **The documented catalog counts match what the server reports.**
+  - Effect: the pages state 193 modules and 68 core functions.
+  - Limit: the real-binary proof runs against OpenSIPS 4.0.2; 3.6.9 and
+    3.5.9 are checked against their source trees.
+
+### Fixed
+
+- **A `#`, quote or brace inside a `$(...)` variable no longer breaks the
+  outline.**
+  - Was: `$ru = $(ru{re.subst,/a#//g});` made its route run to the end of
+    the file in the outline.
+  - Effect: inside `$(...)` or `$name(...)`, `#` starts no comment, a
+    quote no string and a brace no block.
+
+## [0.26.1] — 2026-10-15
+
+### Changed
+
+- **No behavior change: two weekly dependency updates.**
+  - Effect: `serde_json` moves from 1.0.151 to 1.0.154 and `@types/node`
+    from 26.6.4 to 26.6.5; no source file changed.
+
+## [0.26.0] — 2026-10-11
+
+### Added
+
+- **The outline nests `if`, `else`, `switch` and `while` blocks under
+  their route.**
+  - Effect: blocks are named by their condition; every `loadmodule`,
+    `modparam` and top-level parameter is listed.
+- **Folding covers blocks inside a route, multi-line block comments and
+  runs of `#` comment lines.**
+  - Effect: a `} else {` line stays visible when the block above it is
+    folded.
+  - Docs: [Folding](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#folding).
+- **Expand selection grows from a word to each enclosing block, the route
+  and the file.**
+  - Effect: the server answers `textDocument/selectionRange`.
+  - Docs: [Selection range](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#selection-range).
+
+### Changed
+
+- **The formatter indents what a `case` or `default` label guards one
+  level under it.**
+  - Was: the line after a label was left where it was.
+  - Docs: [Formatting](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#formatting).
+
+### Fixed
+
+- **Opening files no longer holds up other requests.**
+  - Was: five files opened together left a request waiting about 6 s
+    behind their checks.
+  - Effect: a check that runs `opensips -C` runs on its own task.
+- **Workspace diagnostics agree with the include tracking.**
+  - Was: a fragment included as `sub/../frag.inc` was reported as a
+    program of its own, and a config with a latin-1 byte was skipped.
+  - Effect: `opensips-lsp check` reads a config with a latin-1 byte, where
+    it stopped with "cannot read".
+- **`.inc` and `.m4` fragments edited on disk are noticed.**
+  - Was: the file watcher covered only `*.cfg`.
+- **Single quotes work everywhere double quotes do.**
+  - Effect: `loadmodule 'tm.so'` loads the module; completion after
+    `loadmodule '`, `modparam('` and `route('` offers what it offers
+    after `"`.
+  - Effect: signature help counts arguments across `'a,b'`, and a
+    backslash inside `'...'` no longer escapes the closing quote.
+- **Completion offers nothing inside a comment.**
+  - Effect: typing in a comment opens no completion list.
+- **Call hierarchy works on a line with non-ASCII text before the route
+  name.**
+  - Was: the cursor column was read as a byte offset.
+
+## [0.25.0] — 2026-10-11
+
+### Added
+
+- **The resume route of `async(f(...), x)` and `launch(f(...), x)` is a
+  reference to `route[x]`.**
+  - Effect: references, rename, the code lens, call hierarchy and the
+    "route is not defined" warning see it.
+- **The tree-sitter grammar parses every config in the OpenSIPS 4.0.1 tree
+  that `opensips -C` accepts.**
+  - Effect: nested block comments, multi-line and adjacent strings,
+    bitwise operators, `not`, every assignment operator and socket
+    parameters parse.
+  - Effect: `return -1;`, IPv4 addresses and networks and `include_file`
+    inside a route parse; `!$a == 1` parses as `!($a == 1)`.
+  - Do: editors that build the grammar compile `src/scanner.c` along with
+    `src/parser.c`.
+- **The grammar ships `queries/highlights.scm` and `queries/folds.scm`.**
+  - Effect: the Zed setup script downloads the highlight query into the
+    extension it builds.
+  - Docs: [Zed setup](https://github.com/NormB/opensips-lsp/blob/main/docs/ZED.md).
+
+### Changed
+
+- **Rename refuses a name that is already defined in the same namespace.**
+  - Effect: the refusal names the file that defines it; the result would
+    define the route twice, which `opensips -C` rejects.
+
+### Fixed
+
+- **Requests no longer slow down with the square of the file size.**
+  - Was: one scanner took 73 s on a 6000-route config; it now takes under
+    half a second.
+  - Effect: on a 3000-route document the code lens no longer times out.
+- **Renaming a `failure_route`, `onreply_route` or `branch_route` rewrites
+  the strings that arm it.**
+  - Was: only the definition was edited, leaving `t_on_failure("x")`,
+    `t_on_reply("x")` or `t_on_branch("x")` naming a route that no longer
+    existed.
+  - Effect: references, highlights and go to definition see those strings
+    too.
+- **Formatting a CRLF file no longer doubles its carriage returns.**
+  - Was: every reformatted line ended in `\r\r\n`.
+- **`opensips-lsp check --bin ... fn.cfg` works with a relative path.**
+  - Was: a bare file name failed with "cannot run", and `sub/fn.cfg` was
+    handed to the checker from inside `sub/`.
+- **Nested block comments are comments.**
+  - Was: `/* a /* b */ route(x); */` reported `x` as undefined, and
+    `check --strict` failed on it.
+  - Effect: OpenSIPS nests `/* */`, and the server now reads it the same
+    way.
+
+## [0.24.7] — 2026-10-07
+
+### Changed
+
+- **No behavior change: two weekly dependency updates.**
+  - Effect: `tokio` moves from 1.53.1 to 1.53.2 and `@types/node` from
+    26.6.3 to 26.6.4; no source file changed.
+
+## [0.24.6] — 2026-10-01
+
+### Changed
+
+- **No behavior change: one weekly dependency update.**
+  - Effect: `vscode-languageclient` moves from 10.1.1 to 10.1.2 and
+    `@types/node` from 26.6.2 to 26.6.3; no source file changed.
+
+### Security
+
+- **`brace-expansion` moves from 5.0.9 to 5.0.12, which fixes three
+  advisories.**
+  - Was: the extension bundles it through `minimatch`, and 5.0.9 is
+    affected by three advisories published 2026-09-29.
+  - Effect: GHSA-6j4f-fj2g-mc7p (high, fixed in 5.0.10) and
+    GHSA-qhr7-859c-m2p7 (high, fixed in 5.0.11) no longer apply.
+  - Effect: GHSA-q2hr-2g5m-vwhr (moderate, fixed in 5.0.12) no longer
+    applies.
+
+## [0.24.5] — 2026-09-26
+
+### Changed
+
+- **No behavior change: one weekly dependency update.**
+  - Effect: `@types/node`, a compile-time stub, moves from 26.6.1 to
+    26.6.2; no source file or Rust crate changed.
+
+## [0.24.4] — 2026-09-15
+
+### Changed
+
+- **No behavior change: the weekly dependency updates.**
+  - Effect: `@types/node`, a compile-time stub, moves from 26.4.1 to
+    26.6.1.
+  - Effect: five transitive Rust crates are updated: `bitflags` to 2.13.2,
+    `crossbeam-utils` to 0.8.23, `mio` to 1.2.3, `smallvec` to 1.16.1 and
+    `syn` to 3.0.5.
+
+## [0.24.3] — 2026-09-09
+
+### Fixed
+
+- **`opensipsLsp.versionInHints` and `opensipsLsp.opensipsVersion` now
+  take effect.**
+  - Was: the extension never passed either setting to the server, so
+    setting one changed nothing.
+  - Do: set them in Settings instead of the
+    `OPENSIPS_LSP_VERSION_IN_HINTS` and `OPENSIPS_LSP_VERSION` environment
+    variables.
+  - Docs: [Admin guide: opensipsVersion](https://github.com/NormB/opensips-lsp/blob/main/docs/ADMIN.md#opensipsversion-string).
+
+## [0.24.2] — 2026-09-09
+
+### Changed
+
+- **No behavior change: one compile-time dependency update.**
+  - Effect: `@types/node` moves from 26.4.0 to 26.4.1; nothing that runs
+    in the editor changed.
+
+## [0.24.1] — 2026-09-02
+
+### Changed
+
+- **`vscode-languageclient` moves from 10.1.0 to 10.1.1, which carries LSP
+  3.18.3.**
+  - Effect: diagnostic pull state survives a document being closed and
+    reopened quickly, and the client's stream handlers are configurable.
+  - Effect: `@types/node`, a compile-time stub, moves from 26.2.0 to
+    26.4.0.
+
+## [0.24.0] — 2026-08-26
+
+### Added
+
+- **A core parameter's hover carries its default and its worked example.**
+  - Was: the hover of `db_default_url` gave its description and left out
+    the URL format in its example.
+  - Effect: all 97 parameters carry their example and 70 carry a default.
+- **The twelve modifiers a `socket` line takes hover and complete.**
+  - Effect: `use_workers n`, `reuse_port`, `anycast`, `as ip[:port]`,
+    `tag ID`, `frag`, `tos n`, `accept_subdomain` and the three
+    proxy-protocol forms are covered.
+  - Effect: `listen =` is the same statement in 3.x and works the same
+    way.
+- **Spellings the manual skips hover as the setting they are.**
+  - Effect: `workdir` hovers as `wdir`, `tcpthreshold` as `tcp_threshold`,
+    and three more.
+- **Names no manual page describes are offered, and say so.**
+  - Effect: `memdump`, `memlog` and the calls `xdbg()` and `error()`
+    complete; the grammar accepts them and no page documents them.
+
+### Fixed
+
+- **An alias of a call is offered as a call.**
+  - Was: every alias was filed under parameters, which offered it where a
+    parameter belongs.
+  - Limit: no spelling in this release is affected.
+- **A markdown list in a hover stays a list.**
+  - Was: the twelve `socket` modifiers, one bullet each, were joined into
+    a single paragraph.
+- **A `#` at column zero inside an example is a configuration comment, not
+  a heading.**
+  - Was: a section ending at one lost the rest of its example; the shipped
+    manual has 42 of them.
 
 ## [0.23.0] — 2026-08-26
 
-**The things a configuration is actually written with now hover and
-complete: `$var`, `$avp`, and the log level `xlog` wants.**
+### Added
 
-- **`$var` and `$avp` are in the catalogue.** The two variables every
-  configuration uses were the two the server did not have. Upstream
-  documents its 119 reference variables as `### <description> -
-  $name` and documents these two as prose sections opening with a
-  `**Naming**:` line — so the harvester, reading only the first form,
-  read past both. A section with a naming line is a variable kind
-  now, unless it has entries of its own beneath it: `## Reference
-  Variables` names `$name`, which is the placeholder those hundred
-  entries share and not something you can write.
-- **Typing `xlog(` offers the log levels, quoted.** `L_ALERT`,
-  `L_CRIT`, `L_ERR`, `L_WARN`, `L_NOTICE`, `L_INFO`, `L_DBG` — read
-  from the `switch` in your own tree's `route.c`, so it is the set
-  your release accepts rather than a list frozen in this extension.
-  The quotes come with it because the grammar wants a string there
-  and `xlog(L_INFO, ...)` is a syntax error; type `xlog("` first and
-  they arrive unquoted instead. A `$` still offers pseudo-variables,
-  which that argument also accepts.
-- **Ctrl+Alt+H turns the hovers and completion off** (Cmd+Alt+H on
-  macOS), and the same keys turn them back on. For reading someone
-  else's configuration, or showing one to a room, when the popups are
-  in the way. It applies at once — no restart — the status bar reads
-  `OpenSIPS hints off` so a quiet editor is not mistaken for a broken
-  one, and diagnostics are left alone. `opensipsLsp.assistance` is
-  the setting behind it.
+- **`$var` and `$avp` hover and complete.**
+  - Was: the manual documents these two as prose sections, which the
+    harvester read past.
+- **Typing `xlog(` offers the log levels, quoted.**
+  - Effect: `L_ALERT`, `L_CRIT`, `L_ERR`, `L_WARN`, `L_NOTICE`, `L_INFO`
+    and `L_DBG` are read from the source tree's `route.c`.
+  - Effect: after `xlog("` they arrive unquoted; a `$` still offers
+    pseudo-variables.
+  - Limit: the argument is a string; `xlog(L_INFO, ...)` is a syntax
+    error.
+- **Ctrl+Alt+H turns hovers and completion off and on (Cmd+Alt+H on
+  macOS).**
+  - Effect: it applies without a restart; the status bar reads
+    `OpenSIPS hints off`, and diagnostics are left alone.
+  - Do: the setting behind it is `opensipsLsp.assistance`.
+  - Docs: [Turning the popups off](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#turning-the-popups-off).
 
 ### Fixed
 
 - **A repeated heading in a manual page no longer becomes a second,
-  unreachable entry.** Every lookup takes the first, so the other sat
-  in completion and could never be hovered.
-- **A heading with nothing under it is no longer offered.** It hovered
-  a header over an empty body, which reads as the server being broken
-  rather than as the page being thin.
-- **A capitalised heading still matches its keyword.** `## If` became
-  a name no hover could ever match, and the keyword vanished with no
-  error anywhere.
+  unreachable entry.**
+  - Was: every lookup takes the first, so the other sat in completion and
+    could never be hovered.
+- **A heading with nothing under it is no longer offered.**
+  - Was: it hovered a header over an empty body.
+- **A capitalized heading still matches its keyword.**
+  - Was: `## If` became a name no hover could match, and the keyword
+    vanished with no error.
 
 ## [0.22.0] — 2026-08-25
 
-**Hover stops repeating the release, and you decide whether it says it
-at all.**
+### Changed
 
-- **The release is no longer under every hover.** OpenSIPS 0.x showed it on
-  the status bar the whole time a config is open, and every warning
-  that turns on the release names it — so repeating it under each
-  hover and completion item was the same fact a third time. It is off
-  by default now.
-- **`versionInHints` turns it back on.** The note is not useless:
-  reading a hover in isolation, or pasting one into a ticket, is
-  exactly when you want the provenance travelling with the text. What
-  was wrong was having it in front of everyone who does not.
-- **The note now says which catalogue it describes, and names the
-  release you are actually using.** It used to be baked into the
-  catalogue as it loaded, so it named whatever the vendored file
-  carried regardless of your choice. Module documentation follows
-  `opensipsVersion`; core documentation is a single vendored artefact at
-  4.0.1 and does not move with that setting, so it says so rather
-  than claiming a release those docs did not come from.
-- **Choosing a release is documented.** `GETTING_STARTED.md` covers
-  the dropdown, `settings.json`, the environment variable `check`
-  reads, and pointing at your own tree for a build that is not
-  shipped.
+- **The release is no longer under every hover and completion item.**
+  - Was: each hover repeated the release that the status bar and the
+    release warnings already name.
+  - Do: set `versionInHints` to turn the note back on.
+  - Docs: [Admin guide: versionInHints](https://github.com/NormB/opensips-lsp/blob/main/docs/ADMIN.md#versioninhints-boolean).
+- **Choosing a release is documented.**
+  - Effect: `GETTING_STARTED.md` covers the dropdown, `settings.json`, the
+    environment variable `check` reads, and pointing at your own tree.
+  - Docs: [Checking against a specific OpenSIPS release](https://github.com/NormB/opensips-lsp/blob/main/docs/GETTING_STARTED.md#checking-against-a-specific-opensips-release).
+
+### Fixed
+
+- **The release note names the catalog it describes and the release in
+  use.**
+  - Was: it named the release the vendored file carried, whatever
+    `opensipsVersion` selected.
+  - Limit: core documentation is one vendored artifact at 4.0.1 and does
+    not follow `opensipsVersion`; the note says so.
 
 ## [0.21.0] — 2026-08-25
 
-**The `modparam` check now knows what a module actually exports, and
-the server follows the includes OpenSIPS actually opens.** Both had
-been read out of the documentation, and the documentation is not the
-authority for either.
+### Added
 
-- **Parameters come from the module's own code.** A module declares
-  what `modparam` accepts in a C table, and that table is what
-  OpenSIPS checks against when it starts. The catalogue is now built
-  from it: 189 parameters the documentation never mentions are
-  available in completion and hover for the first time — among them
-  `rtpengine`'s `extra_failover_error`, `tcp_mgm`'s
-  `connect_timeout_col` and all fifty of `b2b_sca`'s `appN_*` column
-  names — and 25 entries the documentation invented are gone,
-  including five `b2b_sca` heading templates and `tls_mgm`'s
-  `cipher_list_col`, none of which OpenSIPS has ever accepted.
-- **The release in use is on the status bar.** While a OpenSIPS config
-  is in front of you, the status bar names the catalogue your
-  `modparam` lines are being checked against — `OpenSIPS 4.0.1`, or
-  the configured source tree when you have pointed at one. Previously
-  the only way to find out was to write something wrong and read the
-  warning. The server tells the editor directly, so it is right even
-  when the release was chosen for you by a workspace setting.
-- **The release is a dropdown, not a text box.** `opensipsVersion`
-  lists exactly the releases the shipped catalogue can answer for, so
-  it cannot be mistyped into a value the server has to reject.
+- **Choose the release you run: the catalog covers OpenSIPS 3.5.9, 3.6.8
+  and 4.0.1.**
+  - Do: pick the release with `opensipsLsp.opensipsVersion`, a dropdown of
+    the releases the shipped catalog covers.
+  - Effect: a warning names that release, and the releases where the
+    parameter exists, as in "it exists in 3.5.9, 3.6.8".
+  - Docs: [Admin guide: opensipsVersion](https://github.com/NormB/opensips-lsp/blob/main/docs/ADMIN.md#opensipsversion-string).
+- **The status bar names the release in use.**
+  - Effect: it shows the catalog `modparam` lines are checked against,
+    such as `OpenSIPS 4.0.1`, or the configured source tree.
 
-- **Choose the release you run.** The built-in catalogue now covers
-  OpenSIPS 3.5.9, 3.6.8 and 4.0.1, and `opensipsLsp.opensipsVersion`
-  picks which one your configuration is judged against. A warning
-  names that release, and when the parameter exists in another one it
-  says which: *"'bin_async_local_connect_timeout' is not exported by
-  module 'proto_bin' in OpenSIPS 4.0.1 — it exists in 3.5.9, 3.6.8"*.
-  That is the difference between a warning you have to investigate and
-  one that explains itself.
+### Changed
+
+- **`modparam` parameters come from each module's own C table.**
+  - Effect: 189 parameters the documentation never mentions complete and
+    hover, such as `rtpengine`'s `extra_failover_error`.
+  - Effect: 25 entries OpenSIPS has never accepted are gone, including
+    `tls_mgm`'s `cipher_list_col`.
+- **`opensips-lsp check` runs the same `modparam` check the editor does.**
+  - Was: a CI job or git hook ran only the analyzer, so an unknown
+    parameter passed there.
+  - Effect: `check` reports warnings it did not report before.
+
+### Fixed
+
 - **An include inside a block comment is followed, because OpenSIPS
-  follows it.** Includes are flattened line by line before the config
-  is parsed, so commenting a section out with `/* */` does not stop
-  its `include_file` lines from loading. The server used to miss those
-  files entirely: the routes they define were invisible and every call
-  into them was reported undefined. It also stopped following a
-  directive written after a statement on the same line, which OpenSIPS
-  ignores.
-- **`!!include_file` is no longer shown as valid.** OpenSIPS rejects
-  it outright — it is a syntax error, not a prefixed include — and the
-  grammar had been colouring it as though it worked. `#!include_file`
-  is different again: a comment that does nothing, still reported as
-  having no effect.
-- **`opensips-lsp check` runs the same `modparam` check the editor
-  does.** A CI job or git hook previously ran only the analyzer, so a
-  configuration naming a parameter no module exports passed there
-  while the editor warned about it. Expect `check` to report warnings
-  it did not report before; they were always true.
-- **Two warnings arrived with a gap in the middle of the sentence**,
-  from a line continuation that kept its indentation. Both read as
-  sentences now.
+  follows it.**
+  - Was: the routes those files define were invisible, and every call
+    into them was reported undefined.
+  - Effect: a directive written after a statement on the same line, which
+    OpenSIPS ignores, is no longer followed.
+- **`!!include_file` is no longer shown as valid.**
+  - Was: the grammar colored it as an include; OpenSIPS rejects it as a
+    syntax error.
+  - Limit: `#!include_file` is a comment and is still reported as having
+    no effect.
+- **Two warnings no longer have a gap in the middle of the sentence.**
+  - Was: a line continuation kept its indentation inside the message.
 
 ## [0.20.1] — 2026-08-25
 
-**A split configuration whose fragments are named `.inc` now works,
-and its `modparam` lines stop being contradicted.** 0.20.0 taught the
-server to analyse an included file in the context of its root, but
-both halves of the feature still guessed at filenames, and the module
-catalogue behind the `modparam` check was missing a third of what the
-documentation says.
+### Fixed
 
-- **A fragment gets the language whatever it is called.** The
-  extension asked the server about a plain-text file only when it was
-  named `*.cfg` — the same filename guess the request exists to avoid.
-  A tree of `include/*.inc` fragments got no colours, no completion
-  and no diagnostics. The suffix test is gone: any plain-text file is
-  asked about, and one nothing includes is still left alone.
-- **The workspace sweep looks for `.inc` and `.m4` too.** It collected
-  `*.cfg` only, so in a tree whose root or fragments are named
-  anything else no fragment ever resolved a root and every one of them
-  was analysed alone. It is still a search for configurations, not a
-  read of every file in the folder.
-- **52 wrong `modparam` warnings, on one real configuration.** The
-  documentation harvester read any line starting with `#` as a
-  heading, so the `# single rtproxy` comment inside rtpengine's first
-  example closed the Exported Parameters section and the thirteen
-  parameters below it were never harvested. Presence, dispatcher,
-  registrar, tracer, prometheus and eleven other modules lost
-  parameters the same way. A `##### ` sub-heading inside one
-  parameter's prose ended the section too, and `db_url(str)` — the
-  type written with no space — was harvested with the type inside the
-  name, where no `modparam` could ever match it.
+- **A fragment gets the language whatever it is called.**
+  - Was: the extension asked the server only about files named `*.cfg`,
+    so `include/*.inc` fragments got no colors, completion or diagnostics.
+  - Effect: any plain-text file is asked about; one nothing includes is
+    left alone.
+- **The workspace sweep looks for `.inc` and `.m4` files too.**
+  - Was: it collected `*.cfg` only, so fragments in other trees resolved
+    no root and were analyzed alone.
+  - Limit: it is a search for configurations, not a read of every file in
+    the folder.
+- **52 wrong `modparam` warnings on one real configuration are gone.**
+  - Was: a `#` comment inside an example closed the Exported Parameters
+    section, so the parameters below it were never harvested.
+  - Effect: rtpengine, presence, dispatcher, registrar, tracer, prometheus
+    and eleven other modules regain their parameters.
+  - Effect: `db_url(str)`, the type written with no space, is harvested
+    under its name.
 - **A heading that lists several parameters documents each of them.**
-  `osp` writes `private_key, local_certificate, ca_certificates` under
-  one heading and `tls_mgm` writes `server_domain, client_domain`;
-  sixteen parameters were unreachable between them.
-- **Seven more modules complete after `loadmodule "`.** `xml`,
-  `event_datagram`, `db_perlvdb`, `presence_mwi`, `presence_xcapdiff`,
-  `tls_openssl` and `auth_web3` export nothing, and a module that
-  exports nothing was being dropped from the catalogue entirely.
-- **A module whose documentation could not be read no longer accuses
-  your configuration.** `auth_web3` writes its README in a shape the
-  harvester does not read; an empty parameter list is not evidence
-  that a parameter does not exist.
-
-The catalogue is now checked against the READMEs' own `modparam`
-examples — 1,749 of them across the pinned 4.0.1 tree — so a harvest
-that silently loses parameters fails CI rather than reaching you as a
-warning about a parameter that exists.
+  - Was: sixteen parameters of `osp` and `tls_mgm` were unreachable, such
+    as `server_domain, client_domain` under one heading.
+- **Seven more modules complete after `loadmodule "`.**
+  - Was: `xml`, `event_datagram`, `db_perlvdb`, `presence_mwi`,
+    `presence_xcapdiff`, `tls_openssl` and `auth_web3` export nothing and
+    were dropped from the catalog.
+- **A module whose documentation could not be read no longer causes
+  `modparam` warnings.**
+  - Was: `auth_web3`'s README is in a shape the harvester does not read,
+    and its empty parameter list was taken as complete.
 
 ## [0.20.0] — 2026-08-25
 
-**Opening an included file on its own now works.** A configuration
-split across `include_file`/`import_file` is the normal shape of a
-real deployment, and until now every file in one except the root was
-second-class: no colours, and a screenful of warnings about routes
-its parent defines.
+### Added
 
-- **It gets the language.** The extension still refuses to claim every
-  `.cfg` on your disk — that hijacks unrelated tools' config files —
-  but a fragment named `carrier-routes.cfg` is no longer left as plain
-  text. It asks the server whether anything includes the file and sets
-  the language when something does, leaving files another extension
-  already claims alone. Turn it off with `opensipsLsp.associateIncludedFiles`.
-- **It is analysed as part of its root.** Routes, modules and defines
-  the parent brings are in scope, so they stop reading as undefined —
-  on the configuration this was developed against, splitting it across
-  sixty files produced seventy-five false warnings before and none
-  after. `opensips -C` runs on the root, with each error routed back to
-  the file it actually names.
-- **Navigation spans the whole configuration.** Go to definition,
-  references, rename, call hierarchy, workspace symbols, reference
-  counts and route completion all reach across the include boundary
-  from inside a fragment.
-- **`opensips-lsp check` agrees with the editor.** The command a git hook and
-  a CI job run now finds the root the same way, so a correct split
-  configuration no longer fails the build under `--strict`.
-- **New request `opensips/analysisRoot`** for editors other than VS Code:
-  what is this document a piece of? The root's URI, or `null` when it
-  is a program in its own right.
+- **An included file opened on its own gets the language.**
+  - Effect: the extension asks the server whether anything includes the
+    file; files another extension claims are left alone.
+  - Do: turn it off with `opensipsLsp.associateIncludedFiles`.
+  - Limit: the extension still does not claim every `.cfg` file.
+- **An included file is analyzed as part of its root.**
+  - Effect: routes, modules and defines of the parent are in scope, so
+    they are not reported as undefined.
+  - Effect: `opensips -C` runs on the root, and each error goes to the
+    file it names.
+  - Do: open the folder, not the single file; the root is found by reading
+    the configs under the workspace folders.
+  - Limit: a workspace past 500 configs, or a config too large or
+    unreadable, is reported in the output channel.
+  - Docs: [An included file opened on its own](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#an-included-file-opened-on-its-own).
+- **Navigation spans the whole configuration from inside a fragment.**
+  - Effect: go to definition, references, rename, call hierarchy,
+    workspace symbols, reference counts and route completion cross the
+    include boundary.
+- **`opensips-lsp check` finds the root the same way the editor does.**
+  - Effect: a correct split configuration no longer fails under
+    `--strict`.
+- **New request `opensips/analysisRoot` for editors other than VS Code.**
+  - Effect: it returns the root's URI for a document, or `null` when the
+    document is a program in its own right.
+- **A file included behind a `#!ifdef` is part of the configuration.**
+  - Effect: OpenSIPS reads it either way, verified against the 4.0.1
+    binary; Kamailio compiles such includes out.
 
-**One thing to do:** open the folder, not the single file. The root is
-found by reading the configs under your workspace folders, so with a
-single file open there is nothing to read. Folders added after startup
-are picked up.
+### Fixed
 
-- **A file behind a `#!ifdef` IS part of your configuration**,
-  because OpenSIPS reads it either way — verified against the 4.0.1
-  binary. Kamailio compiles such includes out and its extension skips
-  them; the two engines genuinely differ here.
-
-Limits are announced rather than silent: a workspace past 500 configs,
-and any config too large or unreadable to include in the graph, say so
-in the output channel.
-
-Also fixed, and unrelated to the above: a failed `opensips -C` run that
-reported no position used to render as `check failed in , line 1: …`,
-naming an empty file and a line the parser never gave.
+- **A failed `opensips -C` run that reported no position no longer names
+  an empty file.**
+  - Was: the message began `check failed in , line 1:`, a file and a line
+    the parser never gave.
 
 ## [0.19.2] — 2026-08-24
 
-Documentation only; the server and the extension behave exactly as
-0.19.1 did.
+### Changed
 
-- **What this extension does with your configuration is now written
-  down.** Someone evaluating it asked whether anything parsed from
-  their `opensips.cfg` is sent to a cloud service or a language model
-  — a fair question about a file that carries customer names,
-  credentials and dial plans, and one no page here answered. The
-  answer was already no: no HTTP client is linked into the server, the
-  transport is stdin/stdout, the only program it runs is your own
-  `opensips` binary, and hover and completion text is parsed from
-  OpenSIPS's documentation on disk rather than generated. This
-  listing, the README and `SECURITY.md` now say so — with the two
-  caveats that matter, that `trace.server` echoes cfg text into the
-  editor's output channel and that your editor's own telemetry is not
-  this server's to control.
-- **The no-network property is now a reportable security claim.**
-  `SECURITY.md` puts any path by which configuration content, file
-  paths or environment values reach the network in scope, which makes
-  the guarantee falsifiable instead of promotional.
+- **Documentation only: the pages state what the extension does with your
+  configuration.**
+  - Effect: the listing, the README and `SECURITY.md` state that the
+    server links no HTTP client and runs only your `opensips` binary.
+  - Effect: `SECURITY.md` puts any path by which configuration content,
+    file paths or environment values reach the network in scope.
+  - Limit: `trace.server` echoes cfg text into the editor's output
+    channel, and the editor's own telemetry is outside the server's
+    control.
+  - Docs: [Data handling](https://github.com/NormB/opensips-lsp/blob/main/SECURITY.md#data-handling).
 
 ## [0.19.1] — 2026-08-24
 
-Nothing changes for VS Code users; this fixes the tree-sitter grammar
-for everyone else.
+### Fixed
 
-- **The grammar could not be built by any editor it was offered to.**
-  `src/` was gitignored, so the generated `src/parser.c` was in no
-  commit — and that is the file every consumer builds from, none of
-  them running the CLI: nvim-treesitter fetches
-  `files = { "src/parser.c" }`, Helix and Zed compile that path
-  directly. The README has pointed Neovim, Helix and Zed users at this
-  grammar all along and not one of them could have used it. The
-  generated output is now committed, which is the conventional layout
-  for a tree-sitter grammar, and a gate regenerates and compares so it
-  cannot go stale.
-- **The Zed guide drops a workaround it never needed.** It was cloning
-  the repository and giving the grammar directory a git root of its
-  own, on the belief that Zed required one. Zed takes a `path` for a
-  grammar in a subdirectory — as do Helix (`subpath`) and
-  nvim-treesitter (`location`) — so the guide now points at the public
-  repository directly.
+- **The tree-sitter grammar can be built by the editors it is offered
+  to.**
+  - Was: the generated `src/parser.c` was in no commit, and
+    nvim-treesitter, Helix and Zed build from that file.
+  - Limit: nothing changes for VS Code users.
+- **The Zed guide points at the public repository directly.**
+  - Was: it cloned the repository to give the grammar directory a git
+    root of its own, which Zed does not need.
+  - Effect: Zed takes a `path` for a grammar in a subdirectory, as do
+    Helix (`subpath`) and nvim-treesitter (`location`).
+  - Docs: [Zed setup](https://github.com/NormB/opensips-lsp/blob/main/docs/ZED.md).
 
 ## [0.19.0] — 2026-08-24
 
-- **`#!` directives are now flagged as having no effect.** OpenSIPS has
-  no preprocessor — its lexer starts a line comment at `#` and defines
-  no preprocessor token at all — so `#!ifdef USE_TCP` guards nothing
-  and `#!define X 5060` binds nothing. A config carried over from
-  Kamailio still parses while every conditional in it has quietly
-  stopped meaning anything, which is worth saying out loud. The
-  warning fires only on a comment that starts at that position and
-  only for keywords Kamailio's own lexer defines, so shebangs,
-  ordinary comments, and a directive parked inside a block comment are
-  left alone. Toggle with `opensipsLsp.diagnostics.analyzer`.
-- **The docs said the opposite.** `docs/FEATURES.md` and a comment in
-  the formatter both described `#!` lines as preprocessor directives
-  processed ahead of the parser. That was mirrored from the Kamailio
-  server, where it is true. Corrected, with the reason.
-- Internally: the analysis cache is now instrumented and gated, so a
-  change that recomputed on every keystroke would fail a test rather
-  than show up as a hot editor; CI gained an advisory gate
-  (`cargo audit`) and an MSRV job that builds with the exact toolchain
-  `rust-version` claims; and the client is installed from a lockfile
-  rather than resolved afresh on every build.
+### Added
+
+- **`#!` directives are flagged as having no effect.**
+  - Effect: OpenSIPS has no preprocessor, so `#!ifdef USE_TCP` guards
+    nothing and `#!define X 5060` binds nothing.
+  - Limit: only keywords Kamailio's lexer defines are flagged; shebangs,
+    ordinary comments and directives inside block comments are left alone.
+  - Do: toggle with `opensipsLsp.diagnostics.analyzer`.
+
+### Fixed
+
+- **The documentation no longer describes `#!` lines as preprocessor
+  directives.**
+  - Was: `docs/FEATURES.md` said they were processed ahead of the parser,
+    which is true of the Kamailio server.
 
 ## [0.18.1] — 2026-08-24
 
-Documentation only; the server behaves exactly as 0.18.0 did.
+### Added
 
-- **Every editor is documented, not just VS Code.** The server speaks
-  LSP 3.17 over stdio, so any LSP client can drive it, and
-  `docs/EDITORS.md` now has worked examples for Neovim, coc.nvim,
-  Helix, Emacs, Vim, Sublime Text, Kate and JetBrains (via LSP4IJ) —
-  plus using `check` in CI or a git hook with no editor at all.
-- **Zed has a step-by-step guide**, `docs/ZED.md`. Zed cannot be
-  pointed at a language server from settings alone; it needs a small
-  WebAssembly extension, and the guide's shell block builds one,
-  including giving the tree-sitter grammar the repository of its own
-  that Zed requires.
-- **The examples were wrong in ways that mattered.** They told every
-  non-VS-Code client to match `opensips.cfg` and nothing else, long
-  after the association widened to `opensips*.cfg` and
-  `*.opensips.cfg`; they told Helix to claim *every* `.cfg` file, which
-  is the one thing this extension refuses to do; and they presented
-  `opensipsSrc` as the way to get documentation, which stopped being
-  true in 0.18.0. All corrected, and gated so they cannot drift again.
+- **Every editor is documented, not just VS Code.**
+  - Effect: `docs/EDITORS.md` has worked examples for Neovim, coc.nvim,
+    Helix, Emacs, Vim, Sublime Text, Kate and JetBrains (via LSP4IJ).
+  - Effect: it also covers `check` in CI or a git hook with no editor.
+  - Docs: [Editor and tool setup](https://github.com/NormB/opensips-lsp/blob/main/docs/EDITORS.md).
+- **Zed has a step-by-step guide.**
+  - Effect: `docs/ZED.md` builds the small WebAssembly extension Zed needs
+    to run a language server.
+  - Docs: [Zed setup](https://github.com/NormB/opensips-lsp/blob/main/docs/ZED.md).
+
+### Fixed
+
+- **The editor examples match the files the extension claims.**
+  - Was: they matched `opensips.cfg` only, told Helix to claim every
+    `.cfg` file, and presented `opensipsSrc` as the way to get
+    documentation.
+  - Limit: documentation only; the server behaves exactly as 0.18.0 did.
 
 ## [0.18.0] — 2026-08-24
 
-- **Every module's functions and parameters now ship with the
-  extension.** 0.17.0 gave you the core language before you configured
-  anything; that left the half a real config is actually made of.
-  `is_method` is a `sipmsgops` function, not core, so with no source
-  tree `loadmodule "` offered nothing at all and a module call
-  completed to the core entries and stopped. 186 modules, 352
-  functions and 1300 parameters harvested from OpenSIPS 4.0.1 now ship
-  alongside. Module functions still appear only inside a config that
-  `loadmodule`s them — the built-ins never invite a call your config
-  cannot make.
-- **What the built-ins cannot know is what you compiled.** The module
-  list is what 4.0.1 documents, not what exists on your system; the
-  `-C` checker still reports a module it cannot load. Set `opensipsSrc`
-  and your own tree replaces the built-in catalogues wholesale — never
-  merged, because blending two versions is wrong in a way neither is
-  alone.
-- **Hover now reads the syntax before it guesses.** A global
-  `log_level=2` and `modparam("opentelemetry", "log_level", 2)` are two
-  different things that share a name, and your config already says
-  which one is on screen: the first is the core parameter, the second
-  is that module's. Previously, with a catalogue loaded, the global
-  hovered as the module's parameter — and a module you had not even
-  loaded could shadow the language. Both are fixed, and signature help
-  resolved in the same wrong order.
+### Added
+
+- **Every module's functions and parameters ship with the extension.**
+  - Effect: 186 modules, 352 functions and 1300 parameters harvested from
+    OpenSIPS 4.0.1 complete with no source tree configured.
+  - Limit: module functions appear only in a config that `loadmodule`s
+    them; the list is what 4.0.1 documents, not what your system has.
+  - Do: set `opensipsSrc` and your own tree replaces the built-in
+    catalogs; the two are never merged.
+  - Docs: [Documentation before you configure anything](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#documentation-before-you-configure-anything).
+
+### Fixed
+
+- **Hover and signature help read the syntax before choosing an entry.**
+  - Was: a global `log_level=2` hovered as a module's `log_level`
+    parameter, and a module not loaded could shadow the core language.
+  - Effect: `log_level=2` is the core parameter, and
+    `modparam("opentelemetry", "log_level", 2)` is that module's.
 
 ## [0.17.1] — 2026-08-24
 
-Documentation and test work; the server behaves exactly as 0.17.0 did.
+### Fixed
 
-- **The getting-started guide had the file-association rule wrong in
-  both directions.** It said a config must be named `opensips.cfg` "or
-  end in `.cfg`". Neither half was true: `opensips-proxy.cfg` is
-  claimed, a plain `foo.cfg` is not, and refusing to claim every
-  `.cfg` on your disk is deliberate. Corrected, and the gate that
-  should have caught it now reads that page too — it only ever read
-  the marketplace listing.
-- **`README.md` still presented `opensipsSrc` as the only way to get
-  documentation**, and the guide told you to go and set it when
-  completion showed no docs. Wrong for every core entry since 0.17.0.
-  Both now say the core language is documented out of the box, and a
-  new gate holds every page a new user reads to that claim.
-- Internally: the built-in catalogue is now proven over real LSP
-  stdio rather than only at the library level, and test fixtures clean
-  themselves up when a test fails instead of only when it passes.
+- **The getting-started guide states the file-association rule
+  correctly.**
+  - Was: it said a config must be named `opensips.cfg` "or end in
+    `.cfg`"; `opensips-proxy.cfg` is claimed and a plain `foo.cfg` is not.
+- **`README.md` and the guide say the core language is documented out of
+  the box.**
+  - Was: they presented `opensipsSrc` as the only way to get
+    documentation, wrong for every core entry since 0.17.0.
+  - Limit: documentation only; the server behaves exactly as 0.17.0 did.
 
 ## [0.17.0] — 2026-08-24
 
-- **The core language completes out of the box.** Typing `log_` used
-  to offer nothing until you pointed `opensipsSrc` at a source tree —
-  19 control-flow keywords was the whole vocabulary. A catalogue
-  harvested from OpenSIPS 4.0.1 (66 functions, 97 parameters, 119
-  pseudo-variables) now ships with the extension and fills that in.
-  Hover on any built-in entry says which version it came from; set
-  `opensipsSrc` and your own tree wins, because only that is exact for
-  the build you run. Module documentation is still tree-only — what
-  modules exist depends on what you built.
-- **`exit` no longer completes as `exit()`.** It is documented among
-  the core functions, so with a tree configured it inserted a snippet
-  for a statement written `exit;`. Statement keywords stay statements.
-- **Hover no longer comes back empty for `exit` and friends**, where a
-  bare keyword used to beat the documented entry purely by arriving
-  first.
+### Added
+
+- **The core language completes out of the box.**
+  - Effect: a catalog harvested from OpenSIPS 4.0.1 ships: 66 functions,
+    97 parameters and 119 pseudo-variables.
+  - Was: typing `log_` offered nothing until `opensipsSrc` named a source
+    tree.
+  - Do: set `opensipsSrc` and your own tree wins; hover on a built-in
+    entry says which version it came from.
+  - Limit: module documentation still needs a source tree.
+
+### Fixed
+
+- **`exit` no longer completes as `exit()`.**
+  - Was: with a tree configured it inserted a call snippet for a
+    statement written `exit;`.
+- **Hover no longer comes back empty for `exit` and similar keywords.**
+  - Was: a bare keyword beat the documented entry by arriving first.
 
 ## [0.16.0] — 2026-08-24
 
-- **`opensips*.cfg` is now recognised**, so `opensips-tls.cfg` and
-  `opensips-local.cfg` get language support without configuring
-  anything. `opensips.cfg` and `*.opensips.cfg` continue to work, and
-  the generic `.cfg` extension is still deliberately not claimed.
-- **The installer now tells you it opts you out of updates.**
-  `install.sh` sideloads a VSIX, and an editor never offers updates
-  for a sideloaded extension — it carries no marketplace metadata, so
-  an install can sit many releases behind with nothing indicating it.
-  The script, the PowerShell installer and the Getting Started guide
-  now say so, and name the two ways out: re-run the script, or install
-  from the Extensions view so updates arrive on their own.
+### Added
+
+- **`opensips*.cfg` is recognized.**
+  - Effect: `opensips-tls.cfg` and `opensips-local.cfg` get language
+    support with no configuration.
+  - Limit: `opensips.cfg` and `*.opensips.cfg` continue to work; the
+    generic `.cfg` extension is still not claimed.
+
+### Changed
+
+- **The installers say that a sideloaded extension receives no updates.**
+  - Effect: `install.sh`, the PowerShell installer and the Getting Started
+    guide state it.
+  - Do: re-run the script, or install from the Extensions view so updates
+    arrive on their own.
 
 ## [0.15.2] — 2026-08-23
 
-- **This listing now describes what the extension actually does.** It
-  had fallen seven features behind — formatting, call hierarchy, inlay
-  hints, include links, pull diagnostics, watched files and
-  refactorings were all shipped and none of them were mentioned here.
-- `docs/ADMIN.md` gains the missing `inlayHintParameterNames` option.
-- The documentation gate now covers this page too, and the two checks
-  that were supposed to catch the omissions — but derived their lists
-  by hand, or scanned for text that rustfmt had wrapped — now derive
-  from the source and ignore whitespace.
+### Fixed
+
+- **The marketplace listing describes what the extension does.**
+  - Was: formatting, call hierarchy, inlay hints, include links, pull
+    diagnostics, watched files and refactorings were shipped and not
+    mentioned.
+  - Effect: `docs/ADMIN.md` gains the missing `inlayHintParameterNames`
+    option.
 
 ## [0.15.1] — 2026-08-23
 
-- **Formatter: continuation lines keep their own indentation.** Run
-  against a real 993-line production config the formatter wanted to
-  change 25 lines, and every one was wrong — hanging argument indents,
-  conditions broken across lines, and the body of a braceless `if`.
-  Dedenting a braceless `if` body was the worst of it: the parse does
-  not change, but the body reads as though it runs unconditionally.
-  A line is now re-indented only when the previous code line actually
-  ended a statement. The same config now wants one change, and that
-  one is a genuine repair.
-- The corpus sweep now checks the formatter too: every real config in
-  the source tree must format idempotently and preserve its content.
+### Fixed
+
+- **The formatter keeps the indentation of continuation lines.**
+  - Was: on a 993-line production config it wanted to change 25 lines,
+    all wrongly, including the body of a braceless `if`.
+  - Effect: a line is re-indented only when the previous code line ended
+    a statement.
 
 ## [0.15.0] — 2026-08-23
 
-- **Extract into a route**: select whole lines inside a route body and
-  the lightbulb lifts them into a `route[EXTRACTED]` of their own,
-  leaving a `route(EXTRACTED);` call behind at the same indentation.
-  It refuses a selection whose braces do not balance, one covering the
-  block's own braces, and — deliberately — **one containing `return`**:
-  `return` leaves the route it is written in, so moving it into a new
-  route would make the statements after the extracted call start
-  running when they did not before.
-- **Remove duplicate `loadmodule` lines**: a second load of the same
-  module is a hard parse error, not untidiness. Every occurrence after
-  the first is removed, and nothing is reordered — load order decides
-  module initialisation order.
+### Added
+
+- **Extract into a route: selected lines move into a `route[EXTRACTED]` of
+  their own.**
+  - Effect: a `route(EXTRACTED);` call is left behind at the same
+    indentation.
+  - Limit: it refuses unbalanced braces, a selection covering the block's
+    own braces, and one containing `return`.
+  - Docs: [Refactorings](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#refactorings).
+- **Remove duplicate `loadmodule` lines.**
+  - Effect: every occurrence after the first is removed and nothing is
+    reordered; a second load of a module is a parse error.
 
 ## [0.14.0] — 2026-08-23
 
-- **Pull diagnostics**: `textDocument/diagnostic` and
-  `workspace/diagnostic`. The workspace sweep reports problems across
-  the project without opening a file, and reports carry a result id so
-  an unchanged document comes back `unchanged` rather than resending.
-- **Only root configs appear in the workspace sweep.** A config that
-  another config includes is a fragment, not a program — checked alone
-  it would flag every route its parent defines as undefined. Roots are
-  the files nothing else includes, and their closures already cover
-  the fragments. The sweep stops at 500 configs and logs that it did.
-- Pushing stops when the client pulls, so nothing is reported twice.
+### Added
+
+- **Pull diagnostics: `textDocument/diagnostic` and
+  `workspace/diagnostic`.**
+  - Effect: the workspace sweep reports problems across the project
+    without opening a file; an unchanged document comes back `unchanged`.
+  - Effect: only root configs appear in the sweep; a config another
+    config includes is covered by its root.
+  - Effect: pushing stops when the client pulls, so nothing is reported
+    twice.
+  - Limit: the sweep stops at 500 configs and logs that it did.
+  - Docs: [Pull diagnostics](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#pull-diagnostics).
 
 ## [0.13.0] — 2026-08-23
 
-- **Watched files**: an include or the OpenSIPS documentation tree
-  changing on disk — a git checkout, a rebuild, another tool — now
-  re-checks and re-harvests without the buffer being touched. Until
-  now the server kept answering from a stale read until you happened
-  to edit the file.
-- A re-check driven by a watched file publishes even when the result
-  is clean, which differs from opening a file on purpose: if the
-  warning on screen is no longer true, saying nothing would leave it
-  there.
+### Added
+
+- **Watched files: an include or the documentation tree changing on disk
+  is noticed.**
+  - Effect: a git checkout, a rebuild or another tool re-checks and
+    re-harvests without the buffer being touched.
+  - Effect: a re-check driven by a watched file publishes even when the
+    result is clean, so a stale warning is cleared.
+  - Docs: [Watched files](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#watched-files).
 
 ## [0.12.0] — 2026-08-23
 
-- **Inlay hints**: arguments at a documented call site are labelled
-  with the parameter name the module's own documentation gives them,
-  so `t_relay("udp", 1)` reads as
-  `t_relay(flags: "udp", outbound_proxy: 1)` without the document
-  changing. Only calls the catalogue knows are hinted — which is what
-  keeps `if`, `while` and `route` out — and a call with more arguments
-  than the signature documents is hinted only as far as the signature
-  goes. Bracket markers and defaults are stripped to the name.
-  The editor asks for the visible range and only that is computed.
-  `opensipsLsp.inlayHints.parameterNames` turns them off, live.
+### Added
+
+- **Inlay hints label arguments with the parameter names the module
+  documentation gives.**
+  - Effect: `t_relay("udp", 1)` reads as
+    `t_relay(flags: "udp", outbound_proxy: 1)` without the document
+    changing.
+  - Limit: only calls the catalog knows are hinted, and only as far as
+    the signature goes.
+  - Do: `opensipsLsp.inlayHints.parameterNames` turns them off, live.
+  - Docs: [Inlay hints](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#inlay-hints).
 
 ## [0.11.0] — 2026-08-23
 
-- **Call hierarchy**: `textDocument/prepareCallHierarchy`,
-  `callHierarchy/incomingCalls` and `callHierarchy/outgoingCalls`.
-  Shift+Alt+H on a route name opens the route call graph — who calls
-  `route[X]`, and what `route[X]` calls — across the include closure,
-  so a caller in an included file shows up with that file's URI.
-  Several calls from one block collapse into a single entry carrying
-  each call site's range. A route called but defined nowhere is still
-  listed as an outgoing edge, marked `undefined`, rather than dropped.
-  The graph is the main route table: a `failure_route` shows up as a
-  caller when it calls `route(X)`, but asking for *its* callers
-  declines, because it is armed by a module-function string the server
-  does not track and "no callers" would be a confident wrong answer.
+### Added
+
+- **Call hierarchy: Shift+Alt+H on a route name opens the route call
+  graph.**
+  - Effect: it shows who calls `route[X]` and what `route[X]` calls,
+    across the include closure.
+  - Effect: a route called but defined nowhere is listed as an outgoing
+    edge, marked `undefined`.
+  - Limit: asking for the callers of a `failure_route` declines; it is
+    armed by a module-function string the server does not track.
+  - Docs: [Call hierarchy](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#call-hierarchy).
 
 ## [0.10.0] — 2026-08-23
 
-- **Formatting**: `textDocument/formatting` and
-  `textDocument/rangeFormatting`. Shift+Alt+F and format-on-save now
-  re-indent an `opensips.cfg` by brace depth and strip trailing
-  whitespace, following the editor's tab settings.
-  The formatter is deliberately line-preserving — it rewrites the
-  leading and trailing whitespace of a line and nothing else, never
-  joins, splits or reorders lines, never touches a string or comment
-  body, and never emits an edit for a line that is already correct, so
-  folding and cursor position survive. Braces inside strings and
-  comments do not move the indent depth; `#!` directives keep their
-  column. Proven against a real 4.0.1 binary: the positioned parse
-  errors `opensips -C` reports are unchanged by formatting.
-- **A skipped test is now a failed test.** Ten tests used to opt out
-  silently when no OpenSIPS tree or binary was present, so CI reported
-  green while the proofs behind this extension's version claims never
-  ran. They are hard failures now, `scripts/proof-env.sh` provisions
-  what they need, and CI runs that same script — a green build means
-  the proofs really ran, against a real 4.0.1 tree and binary.
+### Added
+
+- **Formatting: Shift+Alt+F and format-on-save re-indent an `opensips.cfg`
+  by brace depth.**
+  - Effect: `textDocument/formatting` and `textDocument/rangeFormatting`
+    strip trailing whitespace and follow the editor's tab settings.
+  - Effect: braces inside strings and comments do not move the indent
+    depth; `#!` directives keep their column.
+  - Limit: it rewrites only the leading and trailing whitespace of a
+    line; it never joins, splits or reorders lines.
+  - Docs: [Formatting](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#formatting).
 
 ## [0.9.1] — 2026-08-23
 
-- **Documentation drift gate**: the README and the features page are
-  now checked against the server itself — every capability advertised
-  in `initialize`, every initialization option and environment
-  variable the server reads, and every VS Code setting the client
-  contributes must appear in the docs, or the build fails.
-- Fixes the drift that gate found: the README never mentioned include
-  links (Ctrl+Click on `include_file`/`import_file`), `prepareRename`,
-  `semanticTokens/range`, or live reconfiguration — all shipped
-  earlier and all invisible to anyone reading the front page.
-- The settings table in the features page was split in two by a
-  paragraph wedged between its rows, so five settings rendered outside
-  the table on GitHub and on the extension listing. The paragraph
-  moved to the notes and the table is whole; the gate now fails if a
-  stray line ever splits it again.
-- Corrects a stale note claiming every setting change restarts the
-  server — runtime toggles have applied live since 0.8.0.
+### Fixed
+
+- **The README names features that shipped earlier.**
+  - Was: it did not mention include links, `prepareRename`,
+    `semanticTokens/range` or live reconfiguration.
+- **The settings table in the features page is whole.**
+  - Was: a paragraph between its rows put five settings outside the table
+    on GitHub and on the extension listing.
+- **A note no longer claims every setting change restarts the server.**
+  - Was: runtime toggles have applied live since 0.8.0.
 
 ## [0.9.0] — 2026-08-23
 
-- **Language-server stack moved to `tower-lsp-server`**: `tower-lsp`
-  has had no release since 0.20.0 (August 2023); the maintained
-  community fork replaces it. No behaviour changes — the protocol
-  suite (raw JSON-RPC over stdio) passes unchanged, and
-  `workspace/symbol` still answers with the same array on the wire.
-  Dropping the `url` crate takes its whole ICU/idna tree with it: the
-  server now builds from 67 dependencies instead of 96.
-- **Version-proven against OpenSIPS 4.0.1**: the proof suite now runs
-  against tag-built trees and binaries for both 4.0.1 and 3.6.8,
-  rather than against a moving master branch.
-- A verbatim 4.0.1 `-C` capture joins the 3.6.8 one in the
-  diagnostics tests. 4.x wraps its positioned errors in a traceback
-  header, a caret marker, and an echo of the offending config lines;
-  all of it is proven to stay noise, so one bad `modparam` still
-  raises exactly one diagnostic.
+### Changed
+
+- **The language-server stack moves to `tower-lsp-server`.**
+  - Was: `tower-lsp` has had no release since 0.20.0 (August 2023).
+  - Effect: no behavior changes; the server builds from 67 dependencies
+    instead of 96.
 
 ## [0.8.0] — 2026-08-20
 
-- **Route-family namespaces**: `route(x)` resolves only against the
-  main table (`route[x]`) — navigation, references, highlight, and
-  rename never cross into a same-named `failure_route[x]` or other
-  block kinds, matching OpenSIPS semantics.
-- **Checker cwd parity**: the server runs `opensips -C` from the
-  config's own directory, exactly like the CLI — relative includes
-  and module paths resolve identically everywhere.
-- **Latest-wins checks**: a newer save kills a superseded `-C` run
-  (queued or executing); slow parses no longer block fresh results.
-- **prepareRename**: F2 is blocked off-symbol and pre-selects the
-  route name otherwise.
-- **Include links**: `include_file`/`import_file` paths are
-  Ctrl+Click document links.
-- **Semantic tokens range** requests for viewport-sized responses.
-- **Live settings**: runtime toggles (analyzer, snippets, code lens,
-  maxDiagnostics, checkTimeoutMs) apply without a server restart.
-- **Content-aware doc cache**: editing module docs in place now
-  invalidates the harvest cache (was: directory mtimes only).
-- **Harvest progress + misconfiguration warning**: the doc harvest
-  shows editor progress; a configured tree yielding no documentation
-  raises a visible warning.
-- **Narrowed file association**: only `opensips.cfg` and
-  `*.opensips.cfg` are claimed — the generic `.cfg` extension is left
-  alone (use `files.associations` for custom names).
-- Internal: grammar↔scanner drift gate; per-version scanner
-  memoization for hot requests.
+### Added
+
+- **`prepareRename`: F2 is blocked off-symbol and pre-selects the route
+  name.**
+  - Effect: rename starts only on a route name, with the name selected.
+- **Include links: `include_file`/`import_file` paths are Ctrl+Click
+  document links.**
+  - Effect: Ctrl+Click on the path opens the included file.
+  - Docs: [Include links](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#include-links).
+- **Semantic tokens answer range requests.**
+  - Effect: responses are viewport-sized.
+- **Runtime toggles apply without a server restart.**
+  - Effect: analyzer, snippets, code lens, `maxDiagnostics` and
+    `checkTimeoutMs` changes apply live.
+- **The documentation harvest shows editor progress.**
+  - Effect: a configured tree that yields no documentation raises a
+    visible warning.
+
+### Changed
+
+- **`route(x)` resolves only against the main route table (`route[x]`).**
+  - Effect: navigation, references, highlight and rename never cross into
+    a same-named `failure_route[x]` or other block kinds, matching
+    OpenSIPS.
+- **The server runs `opensips -C` from the config's own directory, like
+  the CLI.**
+  - Effect: relative includes and module paths resolve identically
+    everywhere.
+- **A newer save ends a superseded `-C` run, queued or executing.**
+  - Effect: slow parses no longer block fresh results.
+- **Only `opensips.cfg` and `*.opensips.cfg` are claimed.**
+  - Effect: the generic `.cfg` extension is left alone.
+  - Do: use `files.associations` for custom names.
+
+### Fixed
+
+- **Editing module docs in place invalidates the harvest cache.**
+  - Was: only directory mtimes were compared.
 
 ## [0.7.1] — 2026-08-20
 
-- **Semantic-token fix**: comments are now excluded byte-by-byte
-  through the same classifier the analyzer uses. A `#` inside a
-  string no longer hides the pseudo-variables after it, and pvars
-  inside `/* ... */` block comments (same-line or multi-line) no
-  longer receive tokens.
-- Internal: drift gates for the release workflow; ground-truth
-  re-audit against current OpenSIPS master (no grammar drift, all
-  gates green).
+### Fixed
+
+- **Semantic tokens exclude comments the way the analyzer does.**
+  - Was: a `#` inside a string hid the pseudo-variables after it, and
+    pvars inside `/* ... */` block comments received tokens.
 
 ## [0.7.0] — 2026-08-20
 
-- **Workspace symbols** (Ctrl+T): route definitions searchable across
-  every open file and its includes.
-- **Code lenses**: reference counts above named `route` blocks,
-  counted across the include closure
-  (`opensipsLsp.codeLens.references`).
-- **Quick fixes**: load the module that exports an
-  `unknown command <f>` function; create a stub for an undefined
-  `route(x)` target.
-- **Catalog-pinned validation**: `modparam` parameters not documented
-  by YOUR configured source tree warn as you type — version-exact by
-  construction.
-- **Semantic highlighting**: route names and pseudo-variables
-  (including inside double-quoted strings, where OpenSIPS
-  interpolates them).
-- **CLI check mode**: `opensips-lsp check [--strict]
-  [--bin <opensips>] <file>...` — the same analyzer plus the real
-  parser, for CI pipelines and git hooks.
+### Added
+
+- **Workspace symbols (Ctrl+T).**
+  - Effect: route definitions are searchable across every open file and
+    its includes.
+- **Code lenses show reference counts above named `route` blocks.**
+  - Effect: counts span the include closure.
+  - Do: the setting is `opensipsLsp.codeLens.references`.
+- **Quick fixes for an unknown function and an undefined route.**
+  - Effect: one loads the module that exports an `unknown command <f>`
+    function; one creates a stub for an undefined `route(x)` target.
+- **Catalog-pinned validation of `modparam` parameters.**
+  - Effect: parameters not documented by your configured source tree warn
+    as you type.
+- **Semantic highlighting of route names and pseudo-variables.**
+  - Effect: pseudo-variables are highlighted inside double-quoted strings,
+    where OpenSIPS interpolates them.
+- **CLI check mode: `opensips-lsp check [--strict] [--bin <opensips>]
+  <file>...`.**
+  - Effect: the same analyzer plus the real parser run in CI pipelines
+    and git hooks.
+  - Docs: [CLI check mode](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md#cli-check-mode).
 
 ## [0.6.1] — 2026-08-20
 
-Deep-audit release: every claim was re-verified against the real
-OpenSIPS binary and grammar (cfg.y/cfg.lex), and everything found was
-fixed.
+### Changed
 
-- **Diagnostics ranges corrected**: OpenSIPS reports an EXCLUSIVE end
-  column; squiggles no longer extend one character past the token.
-- **Errors inside `include_file` targets now surface** on the root
-  document at the include directive (they were silently dropped — a
-  broken config could render clean).
-- **`timer_route[name, interval]` recognized** everywhere (outline,
-  folding, duplicate detection, highlighting).
-- **Single-quoted strings** (real OpenSIPS syntax) understood by the
-  analyzer, both grammars, and route names/includes.
-- **Rename is grammar-safe**: only names legal UNQUOTED (identifier
-  or number) are accepted — renaming to `a.b`/`x-y` produced configs
-  the parser rejects.
-- **Analyzer precision**: `route(0)` resolves to the main route;
-  `failure_route[x]` no longer satisfies `route(x)` (separate
-  namespaces); duplicates tracked per kind. These warnings are
-  additive — `opensips -C` accepts undefined route targets.
-- **Signature help** keeps nested parameters intact
-  (`json_link($json(a), $json(b))`).
-- Keyword completion: `strlen` (nonexistent), `send_reply`
-  (signaling module), `subst` (textops) removed; `break` added.
-- **Security**: `serverPath` is now restricted in untrusted
-  workspaces, like the checker path.
-- References/rename operate across the include closure; docs quote
-  the full parser message and state include-resolution semantics
-  honestly; admin guide documents every option and env var
-  (CI-gated).
+- **Rename accepts only names legal unquoted: an identifier or a number.**
+  - Was: renaming to `a.b` or `x-y` produced configs the parser rejects.
+- **Keyword completion drops `strlen`, `send_reply` and `subst` and adds
+  `break`.**
+  - Effect: `strlen` does not exist; `send_reply` belongs to the signaling
+    module and `subst` to textops.
+- **References and rename operate across the include closure.**
+  - Effect: the docs quote the full parser message and state include
+    resolution; the admin guide documents every option and environment
+    variable.
+
+### Fixed
+
+- **Diagnostic ranges no longer extend one character past the token.**
+  - Was: OpenSIPS reports an exclusive end column, and squiggles extended
+    one character past the token.
+- **Errors inside `include_file` targets appear on the root document at
+  the include directive.**
+  - Was: they were dropped, so a broken config could render clean.
+- **`timer_route[name, interval]` is recognized everywhere.**
+  - Effect: outline, folding, duplicate detection and highlighting see it.
+- **Single-quoted strings are understood.**
+  - Effect: the analyzer, both grammars, and route names and includes
+    accept them.
+- **The analyzer resolves `route(0)` to the main route and keeps route
+  kinds apart.**
+  - Effect: `failure_route[x]` no longer satisfies `route(x)`; duplicates
+    are tracked per kind.
+  - Limit: these warnings are additive; `opensips -C` accepts undefined
+    route targets.
+- **Signature help keeps nested parameters intact.**
+  - Effect: a call such as `json_link($json(a), $json(b))` is read whole.
+
+### Security
+
+- **`serverPath` is restricted in untrusted workspaces, like the checker
+  path.**
+  - Effect: the setting is restricted there, as the checker path already
+    was.
 
 ## [0.6.0] — 2026-08-19
 
-- **Signature help**: the innermost unclosed call's signature with
-  the active parameter highlighted, on `(` and `,` — module exports
-  first, then core functions.
-- **References, rename, highlights** for route names: Shift+F12
-  lists every call site and the definition, F2 renames everywhere
-  (quoted call sites rewritten inside the quotes, illegal names
-  rejected), occurrences highlight with the definition as a write.
-- **Include awareness**: `include_file`/`import_file` are followed
-  (open buffers preferred over disk, cycle-safe, capped) — completion
-  sees included modules and routes, and go-to-definition jumps into
-  the include. Dotted route names resolve whole.
-- **Instant analyzer warnings** between saves, debounced as you
-  type: undefined `route()` targets and duplicate route definitions.
-  New setting `opensipsLsp.diagnostics.analyzer`.
-- **Folding** for every route-family block, and the outline/breadcrumbs
-  now carry full block extents (nested document symbols).
-- Completion quality: duplicate labels collapse to the most
-  informative item, a typed `$token` is replaced instead of doubled,
-  and `route(` completes route names.
-- Fixed: `maxDiagnostics` was ignored in the check path (shadowed by
-  the output cap).
+### Added
+
+- **Signature help.**
+  - Effect: the innermost unclosed call's signature shows on `(` and `,`,
+    with the active parameter highlighted.
+  - Effect: module exports are looked up first, then core functions.
+- **References, rename and highlights for route names.**
+  - Effect: Shift+F12 lists every call site and the definition; F2
+    renames everywhere and rejects illegal names.
+  - Effect: occurrences highlight, with the definition as a write.
+- **Include awareness: `include_file`/`import_file` are followed.**
+  - Effect: completion sees included modules and routes, and go to
+    definition jumps into the include.
+  - Effect: open buffers are preferred over disk, cycles are safe, and
+    dotted route names resolve whole.
+- **Analyzer warnings appear between saves, debounced as you type.**
+  - Effect: undefined `route()` targets and duplicate route definitions
+    are reported.
+  - Do: the setting is `opensipsLsp.diagnostics.analyzer`.
+- **Folding for every route-family block.**
+  - Effect: the outline and breadcrumbs carry full block extents.
+
+### Changed
+
+- **Completion collapses duplicate labels and replaces a typed `$token`.**
+  - Effect: duplicate labels collapse to the most informative item, and
+    `route(` completes route names.
+
+### Fixed
+
+- **`maxDiagnostics` applies in the check path.**
+  - Was: it was ignored there, shadowed by the output cap.
 
 ## [0.5.4] — 2026-08-19
 
-- Display name is now "OpenSIPS Routing Script" (the previous names
-  collide with Microsoft's marketplace similarity rules).
+### Changed
+
+- **The display name is "OpenSIPS Routing Script".**
+  - Was: the previous names collide with Microsoft's marketplace
+    similarity rules.
 
 ## [0.5.3] — 2026-08-19
 
-- Display name is now "OpenSIPS Language Support".
+### Changed
+
+- **The display name is "OpenSIPS Language Support".**
+  - Effect: the extension is listed under that name.
 
 ## [0.5.2] — 2026-08-19
 
-- Full changelog now ships with the extension (this document).
-- Rewritten overview page.
+### Changed
+
+- **The full changelog ships with the extension.**
+  - Effect: the extension carries this document, and its overview page is
+    rewritten.
 
 ## [0.5.1] — 2026-08-19
 
-- The OpenSIPS logo mark is now the extension icon.
+### Changed
+
+- **The OpenSIPS logo mark is the extension icon.**
+  - Effect: the extension shows the logo mark as its icon.
 
 ## [0.5.0] — 2026-08-19
 
-- **Snippets**: function completions insert tabstop snippets
-  (`t_relay(│)`), and 15 static snippets scaffold route blocks,
-  `loadmodule`/`modparam`, control flow, `xlog`, and `send_reply`.
-- **New settings**: `opensipsLsp.enable`, `opensipsLsp.trace.server`,
-  `opensipsLsp.diagnostics.enable`,
-  `opensipsLsp.diagnostics.maxProblems`,
-  `opensipsLsp.completion.snippets`, `opensipsLsp.cacheDir`.
-- New docs page: Features & Settings — every feature, every setting,
-  every environment fallback.
+### Added
+
+- **Snippets: function completions insert tabstop snippets, such as
+  `t_relay(│)`.**
+  - Effect: 15 static snippets scaffold route blocks,
+    `loadmodule`/`modparam`, control flow, `xlog` and `send_reply`.
+- **New settings.**
+  - Effect: `opensipsLsp.enable`, `opensipsLsp.trace.server`,
+    `opensipsLsp.diagnostics.enable` and
+    `opensipsLsp.diagnostics.maxProblems` are added.
+  - Effect: `opensipsLsp.completion.snippets` and `opensipsLsp.cacheDir`
+    are added.
+  - Docs: [Features, Settings & Snippets](https://github.com/NormB/opensips-lsp/blob/main/docs/FEATURES.md).
 
 ## [0.4.1] — 2026-08-19
 
-- Description cleanup.
+### Changed
+
+- **The extension description is cleaned up.**
+  - Effect: the description text of the listing changed.
 
 ## [0.4.0] — 2026-08-19
 
-- **Windows support**: native server builds for Windows x64 and
-  arm64, `win32-x64`/`win32-arm64` extension packages with the server
-  bundled, and a PowerShell one-command installer (`install.ps1`).
-- Full platform matrix: Linux, macOS, and Windows, x64 and arm64
-  each — the editor picks its platform package automatically.
+### Added
+
+- **Windows support: native server builds for Windows x64 and arm64.**
+  - Effect: `win32-x64` and `win32-arm64` extension packages bundle the
+    server.
+  - Effect: Linux, macOS and Windows are covered, x64 and arm64 each; the
+    editor picks its platform package.
+  - Do: `install.ps1` is a PowerShell one-command installer.
 
 ## [0.3.4] — 2026-08-19
 
-- Open VSX publishing is automated on every release.
+### Changed
+
+- **Open VSX publishing is automated on every release.**
+  - Effect: each release is published to Open VSX.
 
 ## [0.3.3] — 2026-08-19
 
-- Extension identity finalized as `NormB.opensips-lsp`.
-- macOS server builds (arm64 native, x64 cross-compiled).
+### Added
+
+- **macOS server builds: arm64 native, x64 cross-compiled.**
+  - Effect: the server is built for macOS on both architectures.
+
+### Changed
+
+- **The extension identity is `NormB.opensips-lsp`.**
+  - Effect: the extension is installed and found under that identifier.
 
 ## [0.3.0] — 2026-08-19
 
-- **Bundled server**: platform extension packages carry the
-  `opensips-lsp` server inside — install the extension and it just
-  works; no separate download.
-- Workspace-trust gate: diagnostics stay off in untrusted folders
-  (checking a config loads its modules); settings changes restart the
-  server live.
-- Hardening: failed or timed-out checks clear stale squiggles,
-  diagnostics are versioned against the buffer they were computed
-  for, checker output and message lengths are bounded, diagnostics
-  attach by canonical path (symlink-safe), harvested documentation is
-  sanitized before rendering.
-- One-command installer and the novice Getting Started guide.
-- Corpus-proven grammar: every syntactically valid example config
-  shipped with OpenSIPS parses.
+### Added
+
+- **Platform extension packages carry the `opensips-lsp` server inside.**
+  - Effect: installing the extension is enough; there is no separate
+    download.
+- **Diagnostics stay off in untrusted folders.**
+  - Effect: checking a config loads its modules, so an untrusted folder
+    gets no diagnostics.
+  - Effect: settings changes restart the server live.
+- **A one-command installer and the Getting Started guide.**
+  - Effect: the extension installs with one command, and a guide covers
+    first use.
+  - Docs: [Getting Started](https://github.com/NormB/opensips-lsp/blob/main/docs/GETTING_STARTED.md).
+- **The grammar is proven on the OpenSIPS example corpus.**
+  - Effect: every syntactically valid example config shipped with OpenSIPS
+    parses.
+
+### Changed
+
+- **Diagnostics are hardened against stale and oversized checker output.**
+  - Effect: failed or timed-out checks clear stale squiggles, and
+    diagnostics are versioned against the buffer they were computed for.
+  - Effect: checker output and message lengths are bounded, and
+    diagnostics attach by canonical path, safe with symlinks.
+  - Effect: harvested documentation is sanitized before rendering.
 
 ## [0.2.0] — 2026-08-19
 
-- Correct positions on multibyte lines (UTF-16 mapping end to end).
-- Documentation-catalog caching per source tree.
-- Tree-sitter grammar for error-tolerant highlighting.
-- Full OpenSIPS 4.x core-language coverage: core functions, core
-  parameters, and pseudo-variable completion after `$`; proven
-  against real 4.x and 3.6.x trees and binaries.
+### Added
+
+- **Tree-sitter grammar for error-tolerant highlighting.**
+  - Effect: highlighting continues through syntax errors.
+- **Full OpenSIPS 4.x core-language coverage.**
+  - Effect: core functions, core parameters, and pseudo-variables after
+    `$` complete.
+  - Effect: coverage is proven against real 4.x and 3.6.x trees and
+    binaries.
+- **Documentation-catalog caching per source tree.**
+  - Effect: a source tree's documentation catalog is cached.
+
+### Fixed
+
+- **Positions are correct on multibyte lines.**
+  - Effect: UTF-16 mapping is applied end to end.
 
 ## [0.1.0] — 2026-08-19
 
-- Initial release: diagnostics via `opensips -C`, context-sensitive
-  completion (modules, parameters, functions of loaded modules),
-  hover documentation, go-to-definition for routes, and document
-  symbols.
+### Added
+
+- **Initial release.**
+  - Effect: diagnostics via `opensips -C`, and context-sensitive
+    completion of modules, parameters and functions of loaded modules.
+  - Effect: hover documentation, go to definition for routes, and document
+    symbols.
