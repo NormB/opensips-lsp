@@ -2,6 +2,18 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.28.3] — 2026-11-14
+
+### Changed
+
+- **The release builds on a supported macOS image.**
+  - Effect: the macOS servers are built on `macos-26` and still run on
+    macOS 11.0 (arm64) and 10.12 (x86_64) or later.
+  - Effect: no behavior change; this release also carries the outline
+    changelog of 0.28.2.
+  - Limit: 0.28.2 is a tag without a release; its build named the retired
+    `macos-14` image and published nothing.
+
 ## [0.28.2] — 2026-11-14
 
 ### Changed
