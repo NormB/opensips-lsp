@@ -2,6 +2,14 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.28.4] — 2026-11-19
+
+### Changed
+
+- **No behavior change: the weekly dependency updates.**
+  - Effect: `syn`, used only by the style test, moves from 3.0.9 to
+    3.0.10; the server and the extension behave exactly as 0.28.3 did.
+
 ## [0.28.3] — 2026-11-14
 
 ### Changed
