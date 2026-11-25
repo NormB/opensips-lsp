@@ -2,6 +2,14 @@
 
 All notable changes to the OpenSIPS Routing Script extension.
 
+## [0.28.5] — 2026-11-24
+
+### Changed
+
+- **The weekly dependency updates for the server and the extension.**
+  - Effect: the server is built with `regex` 1.13.2 and the extension
+    with `vscode-languageclient` 11.0.1.
+
 ## [0.28.4] — 2026-11-19
 
 ### Changed
